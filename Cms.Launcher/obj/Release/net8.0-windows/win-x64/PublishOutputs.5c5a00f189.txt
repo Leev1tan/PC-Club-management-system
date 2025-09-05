@@ -1,0 +1,8 @@
+F:\v.wae\club-management-system\publish\launcher\win-x64\Cms.Launcher.pdb
+F:\v.wae\club-management-system\publish\launcher\win-x64\D3DCompiler_47_cor3.dll
+F:\v.wae\club-management-system\publish\launcher\win-x64\PenImc_cor3.dll
+F:\v.wae\club-management-system\publish\launcher\win-x64\PresentationNative_cor3.dll
+F:\v.wae\club-management-system\publish\launcher\win-x64\vcruntime140_cor3.dll
+F:\v.wae\club-management-system\publish\launcher\win-x64\wpfgfx_cor3.dll
+F:\v.wae\club-management-system\publish\launcher\win-x64\Cms.Shared.pdb
+F:\v.wae\club-management-system\publish\launcher\win-x64\Cms.Launcher.exe

@@ -1,0 +1,11 @@
+F:\v.wae\club-management-system\Cms.Shared\bin\Debug\net8.0\Cms.Shared.deps.json
+F:\v.wae\club-management-system\Cms.Shared\bin\Debug\net8.0\Cms.Shared.dll
+F:\v.wae\club-management-system\Cms.Shared\bin\Debug\net8.0\Cms.Shared.pdb
+F:\v.wae\club-management-system\Cms.Shared\obj\Debug\net8.0\Cms.Shared.GeneratedMSBuildEditorConfig.editorconfig
+F:\v.wae\club-management-system\Cms.Shared\obj\Debug\net8.0\Cms.Shared.AssemblyInfoInputs.cache
+F:\v.wae\club-management-system\Cms.Shared\obj\Debug\net8.0\Cms.Shared.AssemblyInfo.cs
+F:\v.wae\club-management-system\Cms.Shared\obj\Debug\net8.0\Cms.Shared.csproj.CoreCompileInputs.cache
+F:\v.wae\club-management-system\Cms.Shared\obj\Debug\net8.0\Cms.Shared.dll
+F:\v.wae\club-management-system\Cms.Shared\obj\Debug\net8.0\refint\Cms.Shared.dll
+F:\v.wae\club-management-system\Cms.Shared\obj\Debug\net8.0\Cms.Shared.pdb
+F:\v.wae\club-management-system\Cms.Shared\obj\Debug\net8.0\ref\Cms.Shared.dll

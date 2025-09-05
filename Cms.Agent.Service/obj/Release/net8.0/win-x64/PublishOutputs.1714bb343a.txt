@@ -1,0 +1,4 @@
+F:\v.wae\club-management-system\publish\agent\win-x64\appsettings.Development.json
+F:\v.wae\club-management-system\publish\agent\win-x64\appsettings.json
+F:\v.wae\club-management-system\publish\agent\win-x64\Cms.Agent.Service.pdb
+F:\v.wae\club-management-system\publish\agent\win-x64\Cms.Agent.Service.exe

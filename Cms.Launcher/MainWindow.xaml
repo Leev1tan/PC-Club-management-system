@@ -1,0 +1,22 @@
+﻿<Window x:Class="Cms.Launcher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Cms.Launcher"
+        mc:Ignorable="d"
+        Title="Club Launcher" WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized" Topmost="True" AllowsTransparency="False" Background="Black">
+    <Grid>
+        <Grid Background="#0e1116">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="Club Launcher" Foreground="White" FontSize="36" FontWeight="Bold" HorizontalAlignment="Center"/>
+                <TextBlock Margin="0,16,0,0" Text="Time remaining: 00:00" Foreground="#b0b8c0" FontSize="20" HorizontalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
+                    <Button Content="Games" Padding="16,8"/>
+                    <Button Content="Top up" Padding="16,8" Margin="12,0,0,0"/>
+                    <Button Content="Call staff" Padding="16,8" Margin="12,0,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
