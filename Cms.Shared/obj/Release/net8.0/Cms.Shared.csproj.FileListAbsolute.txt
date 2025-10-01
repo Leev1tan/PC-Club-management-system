@@ -9,3 +9,4 @@ F:\v.wae\club-management-system\Cms.Shared\obj\Release\net8.0\Cms.Shared.dll
 F:\v.wae\club-management-system\Cms.Shared\obj\Release\net8.0\refint\Cms.Shared.dll
 F:\v.wae\club-management-system\Cms.Shared\obj\Release\net8.0\Cms.Shared.pdb
 F:\v.wae\club-management-system\Cms.Shared\obj\Release\net8.0\ref\Cms.Shared.dll
+F:\v.wae\club-management-system\Cms.Shared\obj\Release\net8.0\Cms.Shared.sourcelink.json

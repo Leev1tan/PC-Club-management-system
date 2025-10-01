@@ -10,6 +10,7 @@ public class Worker : BackgroundService
 
     private Guid _deviceId;
     private string? _deviceKey;
+    private DateTimeOffset? _sessionEndUtc;
 
     public Worker(ILogger<Worker> logger, IHttpClientFactory httpClientFactory, IConfiguration config)
     {
@@ -45,7 +46,8 @@ public class Worker : BackgroundService
                 _logger.LogError(ex, "Agent loop error");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            await UpdateSessionStateAsync();
+            await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
         }
     }
 
@@ -115,6 +117,9 @@ public class Worker : BackgroundService
                     case "message":
                         await ExecuteMessageAsync(cmd.Payload);
                         break;
+                    case "session_set":
+                        await HandleSessionSetAsync(cmd.Payload);
+                        break;
                     default:
                         status = "ignored";
                         result = "Unknown command";
@@ -133,6 +138,88 @@ public class Worker : BackgroundService
             var resp = await http.SendAsync(req, ct);
             resp.EnsureSuccessStatusCode();
         }
+    }
+
+    private Task HandleSessionSetAsync(object? payload)
+    {
+        try
+        {
+            // payload: { endUtc: "2025-09-05T...Z" }
+            var json = payload?.ToString();
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                var marker = "\"endUtc\":";
+                var idx = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+                if (idx >= 0)
+                {
+                    var start = json.IndexOf('"', idx + marker.Length);
+                    var end = json.IndexOf('"', start + 1);
+                    if (start > 0 && end > start)
+                    {
+                        var iso = json.Substring(start + 1, end - start - 1);
+                        if (DateTimeOffset.TryParse(iso, out var dt))
+                        {
+                            _sessionEndUtc = dt;
+                            _logger.LogInformation("Session end set to {End}", _sessionEndUtc);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse session_set payload");
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task UpdateSessionStateAsync()
+    {
+        try
+        {
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            var dir = Path.Combine(programData, "ClubAgent");
+            Directory.CreateDirectory(dir);
+            // Agent heartbeat marker so the launcher can fail-open if the service is down
+            var hbPath = Path.Combine(dir, "agent_heartbeat.txt");
+            File.WriteAllText(hbPath, DateTimeOffset.UtcNow.ToString("O"));
+            var path = Path.Combine(dir, "state.json");
+
+            bool isLocked = false;
+            long remaining = 0;
+
+            if (_sessionEndUtc.HasValue)
+            {
+                var now = DateTimeOffset.UtcNow;
+                var left = _sessionEndUtc.Value - now;
+                if (left <= TimeSpan.Zero)
+                {
+                    isLocked = true;
+                    remaining = 0;
+                }
+                else
+                {
+                    remaining = (long)left.TotalSeconds;
+                }
+            }
+
+            // Merge with existing lock file state if present
+            bool fileIsLocked = false;
+            if (File.Exists(path))
+            {
+                var content = File.ReadAllText(path);
+                fileIsLocked = content.Contains("\"isLocked\":true", StringComparison.OrdinalIgnoreCase);
+            }
+            var finalLocked = isLocked || fileIsLocked;
+
+            var json = "{\"isLocked\":" + (finalLocked ? "true" : "false") + ",\"remainingSeconds\":" + remaining + "}";
+            File.WriteAllText(path, json);
+        }
+        catch
+        {
+            // ignore
+        }
+        return Task.CompletedTask;
     }
 
     private Task ExecuteRestartAsync()

@@ -32,3 +32,4 @@ F:\v.wae\club-management-system\Cms.Server\obj\Release\net8.0\refint\Cms.Server.
 F:\v.wae\club-management-system\Cms.Server\obj\Release\net8.0\Cms.Server.pdb
 F:\v.wae\club-management-system\Cms.Server\obj\Release\net8.0\Cms.Server.genruntimeconfig.cache
 F:\v.wae\club-management-system\Cms.Server\obj\Release\net8.0\ref\Cms.Server.dll
+F:\v.wae\club-management-system\Cms.Server\obj\Release\net8.0\Cms.Server.sourcelink.json

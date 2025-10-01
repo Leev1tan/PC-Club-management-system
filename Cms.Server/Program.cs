@@ -15,6 +15,7 @@ builder.Services.AddCors(options =>
 });
 // In-memory device repository for MVP
 builder.Services.AddSingleton<Cms.Server.Repositories.IDeviceRepository, Cms.Server.Repositories.InMemoryDeviceRepository>();
+builder.Services.AddSingleton<Cms.Server.Repositories.ISessionRepository, Cms.Server.Repositories.InMemorySessionRepository>();
 
 var app = builder.Build();
 

@@ -52,3 +52,4 @@ F:\v.wae\club-management-system\Cms.Agent.Service\obj\Release\net8.0\Cms.Agent.S
 F:\v.wae\club-management-system\Cms.Agent.Service\obj\Release\net8.0\Cms.Agent.Service.genruntimeconfig.cache
 F:\v.wae\club-management-system\Cms.Agent.Service\obj\Release\net8.0\ref\Cms.Agent.Service.dll
 F:\v.wae\club-management-system\Cms.Agent.Service\bin\Release\net8.0\Microsoft.Extensions.Http.dll
+F:\v.wae\club-management-system\Cms.Agent.Service\obj\Release\net8.0\Cms.Agent.Service.sourcelink.json
