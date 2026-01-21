@@ -21,11 +21,16 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var baseUrl = _config["Server:BaseUrl"] ?? "http://localhost:5081";
+        var configuredUrl = _config["Server:BaseUrl"];
+        var baseUrl = await ResolveServerUrlAsync(configuredUrl, stoppingToken);
+        
+        _logger.LogInformation("Agent starting, server URL: {BaseUrl}", baseUrl);
+        
         var http = _httpClientFactory.CreateClient();
         http.BaseAddress = new Uri(baseUrl);
 
-        await EnsureRegisteredAsync(http, stoppingToken);
+        // Initial registration with retry - won't crash if server is down
+        await EnsureRegisteredWithRetryAsync(http, stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -37,7 +42,7 @@ public class Worker : BackgroundService
                     _logger.LogWarning("Heartbeat unauthorized; re-registering");
                     _deviceId = Guid.Empty;
                     _deviceKey = null;
-                    await EnsureRegisteredAsync(http, stoppingToken);
+                    await EnsureRegisteredWithRetryAsync(http, stoppingToken);
                 }
                 await PollAndExecuteAsync(http, stoppingToken);
             }
@@ -50,6 +55,70 @@ public class Worker : BackgroundService
             await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
         }
     }
+
+    private async Task<string> ResolveServerUrlAsync(string? configuredUrl, CancellationToken ct)
+    {
+        // If a specific URL is configured (not localhost), use it directly
+        if (!string.IsNullOrWhiteSpace(configuredUrl) && 
+            !configuredUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase) &&
+            !configuredUrl.Contains("127.0.0.1"))
+        {
+            return configuredUrl;
+        }
+
+        // Try auto-discovery
+        _logger.LogInformation("No server URL configured, attempting LAN discovery...");
+        var discoveredUrl = await ServerDiscovery.DiscoverServerWithRetryAsync(3, _logger);
+        
+        if (!string.IsNullOrWhiteSpace(discoveredUrl))
+        {
+            _logger.LogInformation("Using discovered server: {ServerUrl}", discoveredUrl);
+            return discoveredUrl;
+        }
+
+        // Fall back to default (handle null AND empty string)
+        var fallback = string.IsNullOrWhiteSpace(configuredUrl) ? "http://localhost:5081" : configuredUrl;
+        _logger.LogWarning("Discovery failed, falling back to: {FallbackUrl}", fallback);
+        return fallback;
+    }
+
+
+    private async Task EnsureRegisteredWithRetryAsync(HttpClient http, CancellationToken ct)
+    {
+        var delay = TimeSpan.FromSeconds(2);
+        var maxDelay = TimeSpan.FromMinutes(1);
+
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await EnsureRegisteredAsync(http, ct);
+                return; // Success - exit retry loop
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning("Registration failed (server unreachable?), retrying in {Delay}s: {Message}", 
+                    (int)delay.TotalSeconds, ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Registration failed unexpectedly, retrying in {Delay}s", (int)delay.TotalSeconds);
+            }
+
+            try
+            {
+                await Task.Delay(delay, ct);
+            }
+            catch (TaskCanceledException)
+            {
+                return; // Service is stopping
+            }
+
+            // Exponential backoff up to max
+            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, maxDelay.TotalSeconds));
+        }
+    }
+
 
     private async Task EnsureRegisteredAsync(HttpClient http, CancellationToken ct)
     {

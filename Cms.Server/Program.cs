@@ -1,3 +1,6 @@
+using Cms.Server.Data;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -13,11 +16,37 @@ builder.Services.AddCors(options =>
         policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin();
     });
 });
-// In-memory device repository for MVP
-builder.Services.AddSingleton<Cms.Server.Repositories.IDeviceRepository, Cms.Server.Repositories.InMemoryDeviceRepository>();
-builder.Services.AddSingleton<Cms.Server.Repositories.ISessionRepository, Cms.Server.Repositories.InMemorySessionRepository>();
+
+// Database - Use SQLite for easy testing, PostgreSQL for production
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("localhost"))
+{
+    // Use SQLite by default for easy testing
+    builder.Services.AddDbContext<CmsDbContext>(options => 
+        options.UseSqlite("Data Source=cms.db"));
+}
+else
+{
+    // Use PostgreSQL if configured
+    builder.Services.AddDbContext<CmsDbContext>(options => 
+        options.UseNpgsql(connectionString));
+}
+
+// Repositories
+builder.Services.AddScoped<Cms.Server.Repositories.IDeviceRepository, Cms.Server.Repositories.EfDeviceRepository>();
+builder.Services.AddScoped<Cms.Server.Repositories.ISessionRepository, Cms.Server.Repositories.EfSessionRepository>();
+
+// UDP Discovery for LAN auto-discovery
+builder.Services.AddHostedService<Cms.Server.DiscoveryService>();
 
 var app = builder.Build();
+
+// Auto-create database (EnsureCreated for SQLite, Migrate for PostgreSQL)
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<CmsDbContext>();
+    db.Database.EnsureCreated();
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

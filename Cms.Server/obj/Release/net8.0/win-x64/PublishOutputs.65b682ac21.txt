@@ -1,0 +1,5 @@
+F:\v.wae\club-management-system\publish\installers\server-package\server\appsettings.Development.json
+F:\v.wae\club-management-system\publish\installers\server-package\server\appsettings.json
+F:\v.wae\club-management-system\publish\installers\server-package\server\Cms.Server.pdb
+F:\v.wae\club-management-system\publish\installers\server-package\server\Cms.Shared.pdb
+F:\v.wae\club-management-system\publish\installers\server-package\server\Cms.Server.exe

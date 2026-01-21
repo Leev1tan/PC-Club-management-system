@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "w9OtabBvgb3SWkICMzVpmGAMCHFa29qWiFajRSQZYu0=",
+  "Source": "Cms.Server",
+  "BasePath": "_content/Cms.Server",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}
