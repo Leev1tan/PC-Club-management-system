@@ -13,11 +13,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "F:\\v.wae\\club-management-system\\Cms.Shared\\Cms.Shared.csproj",
+      "projectUniqueName": "f:\\v.wae\\club-management-system\\Cms.Shared\\Cms.Shared.csproj",
       "projectName": "Cms.Shared",
-      "projectPath": "F:\\v.wae\\club-management-system\\Cms.Shared\\Cms.Shared.csproj",
+      "projectPath": "f:\\v.wae\\club-management-system\\Cms.Shared\\Cms.Shared.csproj",
       "packagesPath": "C:\\Users\\User\\.nuget\\packages\\",
-      "outputPath": "F:\\v.wae\\club-management-system\\Cms.Shared\\obj\\",
+      "outputPath": "f:\\v.wae\\club-management-system\\Cms.Shared\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\User\\AppData\\Roaming\\NuGet\\NuGet.Config"

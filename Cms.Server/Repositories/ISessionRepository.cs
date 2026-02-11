@@ -1,5 +1,6 @@
 namespace Cms.Server.Repositories;
 
+// Session record kept for backward compatibility with ISessionRepository consumers
 public record SessionRecord(Guid Id, Guid DeviceId, DateTimeOffset StartUtc, DateTimeOffset? EndUtc);
 
 public interface ISessionRepository
@@ -8,4 +9,3 @@ public interface ISessionRepository
     SessionRecord? End(Guid sessionId);
     IEnumerable<SessionRecord> List();
 }
-

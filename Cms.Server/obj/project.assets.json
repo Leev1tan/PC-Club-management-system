@@ -3722,11 +3722,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "F:\\v.wae\\club-management-system\\Cms.Server\\Cms.Server.csproj",
+      "projectUniqueName": "f:\\v.wae\\club-management-system\\Cms.Server\\Cms.Server.csproj",
       "projectName": "Cms.Server",
-      "projectPath": "F:\\v.wae\\club-management-system\\Cms.Server\\Cms.Server.csproj",
+      "projectPath": "f:\\v.wae\\club-management-system\\Cms.Server\\Cms.Server.csproj",
       "packagesPath": "C:\\Users\\User\\.nuget\\packages\\",
-      "outputPath": "F:\\v.wae\\club-management-system\\Cms.Server\\obj\\",
+      "outputPath": "f:\\v.wae\\club-management-system\\Cms.Server\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\User\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -3741,8 +3741,8 @@
         "net8.0": {
           "targetAlias": "net8.0",
           "projectReferences": {
-            "F:\\v.wae\\club-management-system\\Cms.Shared\\Cms.Shared.csproj": {
-              "projectPath": "F:\\v.wae\\club-management-system\\Cms.Shared\\Cms.Shared.csproj"
+            "f:\\v.wae\\club-management-system\\Cms.Shared\\Cms.Shared.csproj": {
+              "projectPath": "f:\\v.wae\\club-management-system\\Cms.Shared\\Cms.Shared.csproj"
             }
           }
         }

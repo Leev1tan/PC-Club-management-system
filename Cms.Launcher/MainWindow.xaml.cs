@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private readonly System.Windows.Threading.DispatcherTimer _timer = new();
     private Border? _overlay;
     private TextBlock? _countdown;
+    private bool _staffUnlocked = false;  // Local staff override - no file write needed
 
     public MainWindow()
     {
@@ -37,53 +38,84 @@ public partial class MainWindow : Window
 
     private void PromptStaffUnlock()
     {
+        // Temporarily hide overlay so InputBox is visible
+        if (_overlay != null) _overlay.Visibility = Visibility.Collapsed;
+        KeyboardBlocker.Disable();
+        this.Topmost = false;
+        
         var input = Microsoft.VisualBasic.Interaction.InputBox("Enter staff PIN to unlock:", "Staff Unlock", "");
+        
         if (input == "1234")
         {
-            try
-            {
-                var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                var path = System.IO.Path.Combine(programData, "ClubAgent", "state.json");
-                var json = "{\"isLocked\":false,\"remainingSeconds\":0}";
-                File.WriteAllText(path, json);
-                MessageBox.Show("Unlocked by staff.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to unlock: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            // Set local override flag - no file write needed!
+            _staffUnlocked = true;
+            MessageBox.Show("Unlocked by staff.\n\nThis override will remain active until a new lock command is sent from the server.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+            // Don't restore overlay - we're unlocked
+            return;
         }
         else if (!string.IsNullOrWhiteSpace(input))
         {
             MessageBox.Show("Incorrect PIN.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+        
+        // Restore overlay on cancel or wrong PIN
+        RefreshLockState();
     }
+
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        var overlayGradient = new LinearGradientBrush
+        {
+            StartPoint = new Point(0, 0),
+            EndPoint = new Point(1, 1)
+        };
+        overlayGradient.GradientStops.Add(new GradientStop(Color.FromArgb(240, 10, 14, 23), 0));
+        overlayGradient.GradientStops.Add(new GradientStop(Color.FromArgb(245, 15, 22, 41), 0.5));
+        overlayGradient.GradientStops.Add(new GradientStop(Color.FromArgb(240, 10, 14, 23), 1));
+
         _overlay = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(220, 0, 0, 0)),
+            Background = overlayGradient,
             Child = new StackPanel
             {
                 VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Children =
                 {
-                    (_countdown = new TextBlock
+                    new TextBlock
                     {
-                        Text = string.Empty,
-                        Foreground = Brushes.White,
-                        FontSize = 28,
+                        Text = "🔒",
+                        FontSize = 56,
                         HorizontalAlignment = HorizontalAlignment.Center,
-                        Margin = new Thickness(0,0,0,8)
-                    }),
+                        Margin = new Thickness(0, 0, 0, 16)
+                    },
                     new TextBlock
                     {
                         Text = "This PC is locked",
                         Foreground = Brushes.White,
-                        FontSize = 36,
-                        HorizontalAlignment = HorizontalAlignment.Center
+                        FontSize = 32,
+                        FontWeight = FontWeights.Bold,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        FontFamily = new FontFamily("Segoe UI")
+                    },
+                    (_countdown = new TextBlock
+                    {
+                        Text = string.Empty,
+                        Foreground = new SolidColorBrush(Color.FromRgb(148, 163, 184)), // #94a3b8
+                        FontSize = 22,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 12, 0, 0),
+                        FontFamily = new FontFamily("Segoe UI")
+                    }),
+                    new TextBlock
+                    {
+                        Text = "Press Ctrl+Shift+U for staff unlock",
+                        Foreground = new SolidColorBrush(Color.FromRgb(71, 85, 105)), // #475569
+                        FontSize = 12,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 24, 0, 0),
+                        FontFamily = new FontFamily("Segoe UI")
                     }
                 }
             },
@@ -118,7 +150,12 @@ public partial class MainWindow : Window
             }
             var json = File.ReadAllText(path);
             var isLocked = json.Contains("\"isLocked\":true", StringComparison.OrdinalIgnoreCase);
-            if (_overlay != null) _overlay.Visibility = isLocked ? Visibility.Visible : Visibility.Collapsed;
+            
+            // If server sent unlock (isLocked=false), clear the staff override
+            if (!isLocked)
+            {
+                _staffUnlocked = false;
+            }
 
             long remaining = 0;
             var remIdx = json.IndexOf("\"remainingSeconds\":", StringComparison.OrdinalIgnoreCase);
@@ -144,8 +181,7 @@ public partial class MainWindow : Window
             }
 
             // Fail-open if agent heartbeat stale (>15s) to avoid permanent lock if service is down
-            var programData2 = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var hb = System.IO.Path.Combine(programData2, "ClubAgent", "agent_heartbeat.txt");
+            var hb = System.IO.Path.Combine(programData, "ClubAgent", "agent_heartbeat.txt");
             var stale = false;
             try
             {
@@ -164,7 +200,8 @@ public partial class MainWindow : Window
             }
             catch { }
 
-            var effectiveLocked = isLocked && !stale;
+            // Staff unlock overrides everything
+            var effectiveLocked = isLocked && !stale && !_staffUnlocked;
             if (_overlay != null) _overlay.Visibility = effectiveLocked ? Visibility.Visible : Visibility.Collapsed;
             this.Topmost = effectiveLocked;
             if (effectiveLocked) KeyboardBlocker.Enable(); else KeyboardBlocker.Disable();

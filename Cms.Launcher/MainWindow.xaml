@@ -7,15 +7,69 @@
         mc:Ignorable="d"
         Title="Club Launcher" WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized" Topmost="False" AllowsTransparency="False" Background="Black">
     <Grid>
-        <Grid Background="#0e1116">
+        <Grid>
+            <Grid.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#0a0e17" Offset="0"/>
+                    <GradientStop Color="#111827" Offset="0.5"/>
+                    <GradientStop Color="#0f1629" Offset="1"/>
+                </LinearGradientBrush>
+            </Grid.Background>
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <TextBlock Text="Club Launcher" Foreground="White" FontSize="36" FontWeight="Bold" HorizontalAlignment="Center"/>
-                <TextBlock x:Name="MainCountdown" Margin="0,16,0,0" Text="Time remaining: 00:00:00" Foreground="#b0b8c0" FontSize="20" HorizontalAlignment="Center"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
-                    <Button Content="Games" Padding="16,8"/>
-                    <Button Content="Top up" Padding="16,8" Margin="12,0,0,0"/>
-                    <Button Content="Call staff" Padding="16,8" Margin="12,0,0,0"/>
+                <!-- Logo / Brand -->
+                <Border Background="#6366f1" CornerRadius="16" Width="72" Height="72" HorizontalAlignment="Center" Margin="0,0,0,20">
+                    <TextBlock Text="C" Foreground="White" FontSize="36" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="Club Launcher" Foreground="White" FontSize="32" FontWeight="Bold" HorizontalAlignment="Center" FontFamily="Segoe UI"/>
+                <TextBlock x:Name="MainCountdown" Margin="0,12,0,0" Text="Time remaining: 00:00:00" Foreground="#94a3b8" FontSize="18" HorizontalAlignment="Center" FontFamily="Segoe UI"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,28,0,0">
+                    <Button Content="🎮  Games" Padding="20,10" FontSize="14" Foreground="White" FontFamily="Segoe UI" Cursor="Hand">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="border" Background="#1a2234" CornerRadius="8" Padding="{TemplateBinding Padding}" BorderBrush="#2a3450" BorderThickness="1">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="border" Property="Background" Value="#252f45"/>
+                                        <Setter TargetName="border" Property="BorderBrush" Value="#6366f1"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <Button Content="💰  Top up" Padding="20,10" FontSize="14" Foreground="White" FontFamily="Segoe UI" Margin="12,0,0,0" Cursor="Hand">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="border" Background="#1a2234" CornerRadius="8" Padding="{TemplateBinding Padding}" BorderBrush="#2a3450" BorderThickness="1">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="border" Property="Background" Value="#252f45"/>
+                                        <Setter TargetName="border" Property="BorderBrush" Value="#6366f1"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <Button Content="🔔  Call staff" Padding="20,10" FontSize="14" Foreground="White" FontFamily="Segoe UI" Margin="12,0,0,0" Cursor="Hand">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="border" Background="#1a2234" CornerRadius="8" Padding="{TemplateBinding Padding}" BorderBrush="#2a3450" BorderThickness="1">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="border" Property="Background" Value="#252f45"/>
+                                        <Setter TargetName="border" Property="BorderBrush" Value="#6366f1"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
                 </StackPanel>
+                <TextBlock Margin="0,32,0,0" Text="Press Ctrl+Shift+U for staff unlock" Foreground="#475569" FontSize="11" HorizontalAlignment="Center" FontFamily="Segoe UI"/>
             </StackPanel>
         </Grid>
     </Grid>

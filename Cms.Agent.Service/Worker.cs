@@ -1,4 +1,7 @@
+using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Json;
+using System.Net.Sockets;
 
 namespace Cms.Agent.Service;
 
@@ -11,6 +14,10 @@ public class Worker : BackgroundService
     private Guid _deviceId;
     private string? _deviceKey;
     private DateTimeOffset? _sessionEndUtc;
+    private bool _explicitlyUnlocked = false;
+
+    // Performance counters for real metrics
+    private PerformanceCounter? _cpuCounter;
 
     public Worker(ILogger<Worker> logger, IHttpClientFactory httpClientFactory, IConfiguration config)
     {
@@ -21,6 +28,9 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Initialize performance counters
+        InitializeCounters();
+
         var configuredUrl = _config["Server:BaseUrl"];
         var baseUrl = await ResolveServerUrlAsync(configuredUrl, stoppingToken);
         
@@ -29,7 +39,7 @@ public class Worker : BackgroundService
         var http = _httpClientFactory.CreateClient();
         http.BaseAddress = new Uri(baseUrl);
 
-        // Initial registration with retry - won't crash if server is down
+        // Initial registration with retry
         await EnsureRegisteredWithRetryAsync(http, stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -56,9 +66,70 @@ public class Worker : BackgroundService
         }
     }
 
+    private void InitializeCounters()
+    {
+        try
+        {
+            _cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
+            _cpuCounter.NextValue(); // First call always returns 0, prime it
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to initialize performance counters — metrics will be estimated");
+        }
+    }
+
+    private double GetCpuPercent()
+    {
+        try
+        {
+            return _cpuCounter?.NextValue() ?? 0;
+        }
+        catch { return 0; }
+    }
+
+    private double GetMemPercent()
+    {
+        try
+        {
+            var gcInfo = GC.GetGCMemoryInfo();
+            var totalMem = gcInfo.TotalAvailableMemoryBytes;
+            if (totalMem <= 0) return 0;
+            var usedMem = totalMem - gcInfo.TotalAvailableMemoryBytes + 
+                          (long)(Environment.WorkingSet);
+            // Simple approximation using process working set vs total RAM
+            return Math.Round((double)Environment.WorkingSet / totalMem * 100, 1);
+        }
+        catch { return 0; }
+    }
+
+    private static string GetLocalIpAddress()
+    {
+        try
+        {
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
+            socket.Connect("8.8.8.8", 65530);
+            var endPoint = socket.LocalEndPoint as IPEndPoint;
+            return endPoint?.Address.ToString() ?? "";
+        }
+        catch
+        {
+            try
+            {
+                var host = Dns.GetHostEntry(Dns.GetHostName());
+                foreach (var ip in host.AddressList)
+                {
+                    if (ip.AddressFamily == AddressFamily.InterNetwork)
+                        return ip.ToString();
+                }
+            }
+            catch { }
+            return "";
+        }
+    }
+
     private async Task<string> ResolveServerUrlAsync(string? configuredUrl, CancellationToken ct)
     {
-        // If a specific URL is configured (not localhost), use it directly
         if (!string.IsNullOrWhiteSpace(configuredUrl) && 
             !configuredUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase) &&
             !configuredUrl.Contains("127.0.0.1"))
@@ -66,7 +137,6 @@ public class Worker : BackgroundService
             return configuredUrl;
         }
 
-        // Try auto-discovery
         _logger.LogInformation("No server URL configured, attempting LAN discovery...");
         var discoveredUrl = await ServerDiscovery.DiscoverServerWithRetryAsync(3, _logger);
         
@@ -76,7 +146,6 @@ public class Worker : BackgroundService
             return discoveredUrl;
         }
 
-        // Fall back to default (handle null AND empty string)
         var fallback = string.IsNullOrWhiteSpace(configuredUrl) ? "http://localhost:5081" : configuredUrl;
         _logger.LogWarning("Discovery failed, falling back to: {FallbackUrl}", fallback);
         return fallback;
@@ -93,7 +162,7 @@ public class Worker : BackgroundService
             try
             {
                 await EnsureRegisteredAsync(http, ct);
-                return; // Success - exit retry loop
+                return;
             }
             catch (HttpRequestException ex)
             {
@@ -111,10 +180,9 @@ public class Worker : BackgroundService
             }
             catch (TaskCanceledException)
             {
-                return; // Service is stopping
+                return;
             }
 
-            // Exponential backoff up to max
             delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, maxDelay.TotalSeconds));
         }
     }
@@ -122,11 +190,16 @@ public class Worker : BackgroundService
 
     private async Task EnsureRegisteredAsync(HttpClient http, CancellationToken ct)
     {
+        if (_deviceId == Guid.Empty || string.IsNullOrWhiteSpace(_deviceKey))
+        {
+            LoadDeviceCredentials();
+        }
+        
         if (_deviceId != Guid.Empty && !string.IsNullOrWhiteSpace(_deviceKey)) return;
 
         var hostname = Environment.MachineName;
         var os = Environment.OSVersion.VersionString;
-        var agentVersion = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        var agentVersion = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0";
 
         var req = new { Hostname = hostname, OsVersion = os, AgentVersion = agentVersion, Token = (string?)null };
         var resp = await http.PostAsJsonAsync("api/devices/register", req, ct);
@@ -135,7 +208,52 @@ public class Worker : BackgroundService
         if (body == null) throw new InvalidOperationException("Empty registration response");
         _deviceId = body.DeviceId;
         _deviceKey = body.DeviceKey;
+        
+        SaveDeviceCredentials();
         _logger.LogInformation("Registered device {DeviceId}", _deviceId);
+    }
+
+    private void LoadDeviceCredentials()
+    {
+        try
+        {
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            var path = Path.Combine(programData, "ClubAgent", "device.json");
+            if (File.Exists(path))
+            {
+                var json = File.ReadAllText(path);
+                var idMatch = System.Text.RegularExpressions.Regex.Match(json, "\"deviceId\":\\s*\"([^\"]+)\"");
+                var keyMatch = System.Text.RegularExpressions.Regex.Match(json, "\"deviceKey\":\\s*\"([^\"]+)\"");
+                if (idMatch.Success && keyMatch.Success && Guid.TryParse(idMatch.Groups[1].Value, out var id))
+                {
+                    _deviceId = id;
+                    _deviceKey = keyMatch.Groups[1].Value;
+                    _logger.LogInformation("Loaded device credentials from disk: {DeviceId}", _deviceId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load device credentials");
+        }
+    }
+
+    private void SaveDeviceCredentials()
+    {
+        try
+        {
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            var dir = Path.Combine(programData, "ClubAgent");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "device.json");
+            var json = $"{{\"deviceId\":\"{_deviceId}\",\"deviceKey\":\"{_deviceKey}\"}}";
+            File.WriteAllText(path, json);
+            _logger.LogDebug("Saved device credentials to disk");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save device credentials");
+        }
     }
 
     private async Task<bool> SendHeartbeatAsync(HttpClient http, CancellationToken ct)
@@ -146,10 +264,10 @@ public class Worker : BackgroundService
         req.Headers.Add("X-Device-Key", _deviceKey);
         var payload = new DeviceHeartbeatRequest
         {
-            CpuPercent = 0,
-            MemPercent = 0,
+            CpuPercent = GetCpuPercent(),
+            MemPercent = GetMemPercent(),
             ActiveUser = Environment.UserName,
-            Ip = "",
+            Ip = GetLocalIpAddress(),
             Uptime = TimeSpan.FromMilliseconds(Environment.TickCount64)
         };
         req.Content = JsonContent.Create(payload);
@@ -183,6 +301,9 @@ public class Worker : BackgroundService
                     case "unlock":
                         await SetLockStateAsync(false);
                         break;
+                    case "logoff":
+                        await ExecuteLogoffAsync();
+                        break;
                     case "message":
                         await ExecuteMessageAsync(cmd.Payload);
                         break;
@@ -204,8 +325,15 @@ public class Worker : BackgroundService
             var ack = new AckCommandRequest { Status = status, Result = result };
             using var req = new HttpRequestMessage(HttpMethod.Post, $"api/devices/{_deviceId}/commands/{cmd.Id}/ack");
             req.Content = JsonContent.Create(ack);
-            var resp = await http.SendAsync(req, ct);
-            resp.EnsureSuccessStatusCode();
+            try
+            {
+                var resp = await http.SendAsync(req, ct);
+                resp.EnsureSuccessStatusCode();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to ACK command {CommandId}", cmd.Id);
+            }
         }
     }
 
@@ -213,7 +341,6 @@ public class Worker : BackgroundService
     {
         try
         {
-            // payload: { endUtc: "2025-09-05T...Z" }
             var json = payload?.ToString();
             if (!string.IsNullOrWhiteSpace(json))
             {
@@ -229,6 +356,7 @@ public class Worker : BackgroundService
                         if (DateTimeOffset.TryParse(iso, out var dt))
                         {
                             _sessionEndUtc = dt;
+                            _explicitlyUnlocked = false;
                             _logger.LogInformation("Session end set to {End}", _sessionEndUtc);
                         }
                     }
@@ -249,7 +377,8 @@ public class Worker : BackgroundService
             var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             var dir = Path.Combine(programData, "ClubAgent");
             Directory.CreateDirectory(dir);
-            // Agent heartbeat marker so the launcher can fail-open if the service is down
+
+            // Agent heartbeat marker
             var hbPath = Path.Combine(dir, "agent_heartbeat.txt");
             File.WriteAllText(hbPath, DateTimeOffset.UtcNow.ToString("O"));
             var path = Path.Combine(dir, "state.json");
@@ -257,7 +386,12 @@ public class Worker : BackgroundService
             bool isLocked = false;
             long remaining = 0;
 
-            if (_sessionEndUtc.HasValue)
+            if (_explicitlyUnlocked)
+            {
+                isLocked = false;
+                remaining = 0;
+            }
+            else if (_sessionEndUtc.HasValue)
             {
                 var now = DateTimeOffset.UtcNow;
                 var left = _sessionEndUtc.Value - now;
@@ -272,9 +406,9 @@ public class Worker : BackgroundService
                 }
             }
 
-            // Merge with existing lock file state if present
+            // Only check file state if not explicitly unlocked
             bool fileIsLocked = false;
-            if (File.Exists(path))
+            if (!_explicitlyUnlocked && File.Exists(path))
             {
                 var content = File.ReadAllText(path);
                 fileIsLocked = content.Contains("\"isLocked\":true", StringComparison.OrdinalIgnoreCase);
@@ -293,19 +427,30 @@ public class Worker : BackgroundService
 
     private Task ExecuteRestartAsync()
     {
-        // Schedule a restart in 5 seconds to allow ACK to reach server
-        var psi = new System.Diagnostics.ProcessStartInfo("shutdown", "/r /t 5")
+        var psi = new ProcessStartInfo("shutdown", "/r /t 5")
         {
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        System.Diagnostics.Process.Start(psi);
+        Process.Start(psi);
+        _logger.LogInformation("Restart scheduled in 5 seconds");
+        return Task.CompletedTask;
+    }
+
+    private Task ExecuteLogoffAsync()
+    {
+        var psi = new ProcessStartInfo("shutdown", "/l")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        Process.Start(psi);
+        _logger.LogInformation("Logoff initiated");
         return Task.CompletedTask;
     }
 
     private Task ExecuteMessageAsync(object? payload)
     {
-        // For MVP, log to event log; UI popup will come later via helper
         var text = payload?.ToString() ?? "";
         _logger.LogInformation("MESSAGE: {Text}", text);
         return Task.CompletedTask;
@@ -315,11 +460,28 @@ public class Worker : BackgroundService
     {
         try
         {
+            if (!isLocked)
+            {
+                _explicitlyUnlocked = true;
+            }
+            else
+            {
+                _explicitlyUnlocked = false;
+            }
+
             var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             var dir = Path.Combine(programData, "ClubAgent");
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, "state.json");
-            var json = "{\"isLocked\":" + (isLocked ? "true" : "false") + "}";
+
+            long remaining = 0;
+            if (_sessionEndUtc.HasValue && !isLocked)
+            {
+                var left = _sessionEndUtc.Value - DateTimeOffset.UtcNow;
+                if (left > TimeSpan.Zero) remaining = (long)left.TotalSeconds;
+            }
+
+            var json = "{\"isLocked\":" + (isLocked ? "true" : "false") + ",\"remainingSeconds\":" + remaining + "}";
             File.WriteAllText(path, json);
             _logger.LogInformation("Lock state set to {IsLocked}", isLocked);
         }

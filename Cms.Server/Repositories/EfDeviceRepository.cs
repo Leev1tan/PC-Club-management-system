@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Cms.Server.Controllers;
 using Cms.Server.Data;
 using Microsoft.EntityFrameworkCore;
@@ -9,23 +9,25 @@ namespace Cms.Server.Repositories;
 public class EfDeviceRepository : IDeviceRepository
 {
     private readonly CmsDbContext _db;
-    private readonly ConcurrentDictionary<string, Guid> _keyToId = new();
-    
-    // Static so commands persist across scoped repository instances
-    private static readonly ConcurrentDictionary<Guid, ConcurrentQueue<CommandView>> _commandQueues = new();
 
     public EfDeviceRepository(CmsDbContext db)
     {
         _db = db;
-        // Load existing keys into memory
-        foreach (var d in _db.Devices.AsNoTracking())
-        {
-            _keyToId[d.DeviceKey] = d.Id;
-        }
     }
 
     public DeviceRegistrationResponse Register(DeviceRegistrationRequest request)
     {
+        // Check if device with same hostname already exists — re-register
+        var existing = _db.Devices.FirstOrDefault(d => d.Hostname == request.Hostname);
+        if (existing != null)
+        {
+            existing.OsVersion = request.OsVersion;
+            existing.AgentVersion = request.AgentVersion;
+            existing.LastSeenUtc = DateTimeOffset.UtcNow;
+            _db.SaveChanges();
+            return new DeviceRegistrationResponse(existing.Id, existing.DeviceKey);
+        }
+
         var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
         var device = new DeviceEntity
         {
@@ -37,14 +39,12 @@ public class EfDeviceRepository : IDeviceRepository
         };
         _db.Devices.Add(device);
         _db.SaveChanges();
-        _keyToId[key] = device.Id;
         return new DeviceRegistrationResponse(device.Id, key);
     }
 
     public bool Heartbeat(string deviceKey, DeviceHeartbeatRequest request)
     {
-        if (!_keyToId.TryGetValue(deviceKey, out var deviceId)) return false;
-        var device = _db.Devices.Find(deviceId);
+        var device = _db.Devices.FirstOrDefault(d => d.DeviceKey == deviceKey);
         if (device == null) return false;
 
         device.LastSeenUtc = DateTimeOffset.UtcNow;
@@ -52,7 +52,7 @@ public class EfDeviceRepository : IDeviceRepository
         _db.Heartbeats.Add(new HeartbeatEntity
         {
             Id = Guid.NewGuid(),
-            DeviceId = deviceId,
+            DeviceId = device.Id,
             CreatedUtc = DateTimeOffset.UtcNow,
             CpuPercent = request.CpuPercent,
             MemPercent = request.MemPercent,
@@ -76,24 +76,61 @@ public class EfDeviceRepository : IDeviceRepository
     public CommandView? EnqueueCommand(Guid deviceId, EnqueueCommandRequest request)
     {
         if (!_db.Devices.Any(d => d.Id == deviceId)) return null;
-        var cmd = new CommandView(Guid.NewGuid(), request.Type, request.Payload);
-        _commandQueues.GetOrAdd(deviceId, _ => new ConcurrentQueue<CommandView>()).Enqueue(cmd);
-        return cmd;
+
+        var entity = new CommandEntity
+        {
+            Id = Guid.NewGuid(),
+            DeviceId = deviceId,
+            CreatedUtc = DateTimeOffset.UtcNow,
+            Type = request.Type,
+            PayloadJson = request.Payload != null ? JsonSerializer.Serialize(request.Payload) : null,
+            Status = "pending"
+        };
+        _db.Commands.Add(entity);
+        _db.SaveChanges();
+
+        object? payload = null;
+        if (entity.PayloadJson != null)
+        {
+            try { payload = JsonSerializer.Deserialize<object>(entity.PayloadJson); }
+            catch { payload = entity.PayloadJson; }
+        }
+        return new CommandView(entity.Id, entity.Type, payload);
     }
 
     public IEnumerable<CommandView> PollCommands(Guid deviceId, int max)
     {
-        if (!_commandQueues.TryGetValue(deviceId, out var queue)) yield break;
-        for (int i = 0; i < Math.Max(1, max); i++)
+        var pending = _db.Commands
+            .Where(c => c.DeviceId == deviceId && c.Status == "pending")
+            .OrderBy(c => c.CreatedUtc)
+            .Take(Math.Max(1, max))
+            .ToList();
+
+        foreach (var cmd in pending)
         {
-            if (!queue.TryDequeue(out var cmd)) yield break;
-            yield return cmd;
+            cmd.Status = "delivered";
         }
+        if (pending.Count > 0) _db.SaveChanges();
+
+        return pending.Select(cmd =>
+        {
+            object? payload = null;
+            if (cmd.PayloadJson != null)
+            {
+                try { payload = JsonSerializer.Deserialize<object>(cmd.PayloadJson); }
+                catch { payload = cmd.PayloadJson; }
+            }
+            return new CommandView(cmd.Id, cmd.Type, payload);
+        });
     }
 
     public bool AckCommand(Guid deviceId, Guid commandId, AckCommandRequest request)
     {
-        return _db.Devices.Any(d => d.Id == deviceId);
+        var cmd = _db.Commands.FirstOrDefault(c => c.Id == commandId && c.DeviceId == deviceId);
+        if (cmd == null) return false;
+        cmd.Status = request.Status;
+        cmd.Result = request.Result;
+        _db.SaveChanges();
+        return true;
     }
 }
-
