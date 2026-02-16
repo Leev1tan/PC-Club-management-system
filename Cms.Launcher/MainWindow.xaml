@@ -5,72 +5,375 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Cms.Launcher"
         mc:Ignorable="d"
-        Title="Club Launcher" WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized" Topmost="False" AllowsTransparency="False" Background="Black">
+        Title="PC Club Shell" WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
+        Topmost="False" AllowsTransparency="False" Background="#050508">
+    <Window.Resources>
+        <!-- ══ CYBERPUNK BUTTON ══ -->
+        <Style x:Key="CyberButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#e8e8f0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="24,12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <!-- Outer glow border -->
+                            <Border x:Name="glowBorder" Background="Transparent" BorderBrush="#222235" BorderThickness="1"
+                                    Padding="{TemplateBinding Padding}">
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#00f0ff" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                                </Border.Effect>
+                                <Grid>
+                                    <!-- Angular cut accent — top left -->
+                                    <Border Background="#00f0ff" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                            Width="12" Height="2" Margin="-1,-1,0,0"/>
+                                    <Border Background="#00f0ff" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                            Width="2" Height="12" Margin="-1,-1,0,0"/>
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="glowBorder" Property="Background" Value="#0d1520"/>
+                                <Setter TargetName="glowBorder" Property="BorderBrush" Value="#00f0ff"/>
+                                <Setter TargetName="glowBorder" Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect Color="#00f0ff" BlurRadius="12" ShadowDepth="0" Opacity="0.4"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="glowBorder" Property="Opacity" Value="0.3"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══ PRIMARY NEON BUTTON ══ -->
+        <Style x:Key="NeonButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#00f0ff"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="32,14"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" BorderBrush="#00f0ff" BorderThickness="2"
+                                Padding="{TemplateBinding Padding}">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#0a1525" Offset="0"/>
+                                    <GradientStop Color="#0d1a30" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <Border.Effect>
+                                <DropShadowEffect Color="#00f0ff" BlurRadius="16" ShadowDepth="0" Opacity="0.3"/>
+                            </Border.Effect>
+                            <Grid>
+                                <!-- Corner marks -->
+                                <Border Background="#00f0ff" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                        Width="16" Height="2" Margin="0,0,-2,-2"/>
+                                <Border Background="#00f0ff" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                        Width="2" Height="16" Margin="0,0,-2,-2"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Effect">
+                                    <Setter.Value>
+                                        <DropShadowEffect Color="#00f0ff" BlurRadius="24" ShadowDepth="0" Opacity="0.5"/>
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.3"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══ CYBER TEXTBOX ══ -->
+        <Style x:Key="CyberTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="#0a0a14"/>
+            <Setter Property="Foreground" Value="#e8e8f0"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="BorderBrush" Value="#222235"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CaretBrush" Value="#00f0ff"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Grid>
+                            <Border Background="{TemplateBinding Background}"
+                                    Padding="{TemplateBinding Padding}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                <ScrollViewer x:Name="PART_ContentHost" Margin="0"/>
+                            </Border>
+                            <!-- Left accent line -->
+                            <Border Background="#00f0ff" Width="3" HorizontalAlignment="Left" Opacity="0.4"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="#00f0ff"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══ CYBER PASSWORDBOX ══ -->
+        <Style x:Key="CyberPasswordBox" TargetType="PasswordBox">
+            <Setter Property="Background" Value="#0a0a14"/>
+            <Setter Property="Foreground" Value="#e8e8f0"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="BorderBrush" Value="#222235"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CaretBrush" Value="#00f0ff"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Grid>
+                            <Border Background="{TemplateBinding Background}"
+                                    Padding="{TemplateBinding Padding}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                <ScrollViewer x:Name="PART_ContentHost" Margin="0"/>
+                            </Border>
+                            <Border Background="#ff2d78" Width="3" HorizontalAlignment="Left" Opacity="0.4"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter Property="BorderBrush" Value="#ff2d78"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <Grid>
-        <Grid>
-            <Grid.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#0a0e17" Offset="0"/>
-                    <GradientStop Color="#111827" Offset="0.5"/>
-                    <GradientStop Color="#0f1629" Offset="1"/>
-                </LinearGradientBrush>
-            </Grid.Background>
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <!-- Logo / Brand -->
-                <Border Background="#6366f1" CornerRadius="16" Width="72" Height="72" HorizontalAlignment="Center" Margin="0,0,0,20">
-                    <TextBlock Text="C" Foreground="White" FontSize="36" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <Grid.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#050508" Offset="0"/>
+                <GradientStop Color="#0a0a14" Offset="0.5"/>
+                <GradientStop Color="#050510" Offset="1"/>
+            </LinearGradientBrush>
+        </Grid.Background>
+
+        <!-- ========== SCANLINE OVERLAY (subtle) ========== -->
+        <Canvas IsHitTestVisible="False" Opacity="0.04">
+            <Canvas.Background>
+                <DrawingBrush TileMode="Tile" Viewport="0,0,1,4" ViewportUnits="Absolute">
+                    <DrawingBrush.Drawing>
+                        <GeometryDrawing Brush="#00f0ff">
+                            <GeometryDrawing.Geometry>
+                                <RectangleGeometry Rect="0,0,1,1"/>
+                            </GeometryDrawing.Geometry>
+                        </GeometryDrawing>
+                    </DrawingBrush.Drawing>
+                </DrawingBrush>
+            </Canvas.Background>
+        </Canvas>
+
+        <!-- ========== LOGIN SCREEN ========== -->
+        <Grid x:Name="LoginPanel" Visibility="Visible">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="380">
+                <!-- Cyber logo -->
+                <Grid HorizontalAlignment="Center" Margin="0,0,0,28">
+                    <Border Background="#0a0a14" BorderBrush="#00f0ff" BorderThickness="2" Width="88" Height="88">
+                        <Border.Effect>
+                            <DropShadowEffect Color="#00f0ff" BlurRadius="24" ShadowDepth="0" Opacity="0.4"/>
+                        </Border.Effect>
+                        <TextBlock Text="⌘" Foreground="#00f0ff" FontSize="40" FontWeight="Bold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Consolas"/>
+                    </Border>
+                    <!-- Corner marks on logo -->
+                    <Border Background="#ff2d78" Width="14" Height="2" HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Margin="-4,-4,0,0"/>
+                    <Border Background="#ff2d78" Width="2" Height="14" HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Margin="-4,-4,0,0"/>
+                    <Border Background="#ff2d78" Width="14" Height="2" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Margin="0,0,-4,-4"/>
+                    <Border Background="#ff2d78" Width="2" Height="14" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                            Margin="0,0,-4,-4"/>
+                </Grid>
+
+                <TextBlock Text="PC  CLUB" Foreground="#00f0ff" FontSize="32" FontWeight="Bold"
+                           HorizontalAlignment="Center" FontFamily="Consolas">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#00f0ff" BlurRadius="16" ShadowDepth="0" Opacity="0.5"/>
+                    </TextBlock.Effect>
+                </TextBlock>
+                <TextBlock Text="// АВТОРИЗАЦІЯ ПОТРІБНА" Foreground="#555570" FontSize="12"
+                           HorizontalAlignment="Center" FontFamily="Consolas" Margin="0,8,0,36"/>
+
+                <!-- ── Divider ── -->
+                <Border Height="1" Margin="0,0,0,28">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="Transparent" Offset="0"/>
+                            <GradientStop Color="#00f0ff" Offset="0.5"/>
+                            <GradientStop Color="Transparent" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
                 </Border>
-                <TextBlock Text="Club Launcher" Foreground="White" FontSize="32" FontWeight="Bold" HorizontalAlignment="Center" FontFamily="Segoe UI"/>
-                <TextBlock x:Name="MainCountdown" Margin="0,12,0,0" Text="Time remaining: 00:00:00" Foreground="#94a3b8" FontSize="18" HorizontalAlignment="Center" FontFamily="Segoe UI"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,28,0,0">
-                    <Button Content="🎮  Games" Padding="20,10" FontSize="14" Foreground="White" FontFamily="Segoe UI" Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="border" Background="#1a2234" CornerRadius="8" Padding="{TemplateBinding Padding}" BorderBrush="#2a3450" BorderThickness="1">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="border" Property="Background" Value="#252f45"/>
-                                        <Setter TargetName="border" Property="BorderBrush" Value="#6366f1"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-                    <Button Content="💰  Top up" Padding="20,10" FontSize="14" Foreground="White" FontFamily="Segoe UI" Margin="12,0,0,0" Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="border" Background="#1a2234" CornerRadius="8" Padding="{TemplateBinding Padding}" BorderBrush="#2a3450" BorderThickness="1">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="border" Property="Background" Value="#252f45"/>
-                                        <Setter TargetName="border" Property="BorderBrush" Value="#6366f1"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-                    <Button Content="🔔  Call staff" Padding="20,10" FontSize="14" Foreground="White" FontFamily="Segoe UI" Margin="12,0,0,0" Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="border" Background="#1a2234" CornerRadius="8" Padding="{TemplateBinding Padding}" BorderBrush="#2a3450" BorderThickness="1">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="border" Property="Background" Value="#252f45"/>
-                                        <Setter TargetName="border" Property="BorderBrush" Value="#6366f1"/>
-                                    </Trigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-                </StackPanel>
-                <TextBlock Margin="0,32,0,0" Text="Press Ctrl+Shift+U for staff unlock" Foreground="#475569" FontSize="11" HorizontalAlignment="Center" FontFamily="Segoe UI"/>
+
+                <!-- Username -->
+                <TextBlock Text="&gt; ЛОГІН" Foreground="#8888a8" FontSize="11" FontFamily="Consolas"
+                           Margin="0,0,0,6"/>
+                <TextBox x:Name="UsernameBox" Style="{StaticResource CyberTextBox}" Margin="0,0,0,18"/>
+
+                <!-- Password -->
+                <TextBlock Text="&gt; ПАРОЛЬ" Foreground="#8888a8" FontSize="11" FontFamily="Consolas"
+                           Margin="0,0,0,6"/>
+                <PasswordBox x:Name="PasswordBox" Style="{StaticResource CyberPasswordBox}" Margin="0,0,0,10"/>
+
+                <!-- Error -->
+                <TextBlock x:Name="LoginError" Foreground="#ff2d78" FontSize="12" FontFamily="Consolas"
+                           HorizontalAlignment="Center" Margin="0,0,0,18" Visibility="Collapsed">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#ff2d78" BlurRadius="8" ShadowDepth="0" Opacity="0.5"/>
+                    </TextBlock.Effect>
+                </TextBlock>
+
+                <!-- Login Button -->
+                <Button x:Name="LoginButton" Content="[ УВІЙТИ ]" Style="{StaticResource NeonButton}"
+                        Margin="0,10,0,20" Click="OnLoginClick"/>
+
+                <!-- Guest mode -->
+                <TextBlock HorizontalAlignment="Center" Margin="0,0,0,36">
+                    <Hyperlink x:Name="GuestLink" Foreground="#555570" FontFamily="Consolas" FontSize="12"
+                               TextDecorations="" Click="OnGuestClick">
+                        &gt;_ продовжити як гість
+                    </Hyperlink>
+                </TextBlock>
+
+                <!-- Staff hint -->
+                <TextBlock Text="CTRL+SHIFT+U :: STAFF_OVERRIDE" Foreground="#222235"
+                           FontSize="10" HorizontalAlignment="Center" FontFamily="Consolas"/>
             </StackPanel>
         </Grid>
+
+        <!-- ========== SESSION MODE ========== -->
+        <Grid x:Name="SessionPanel" Visibility="Collapsed">
+            <!-- Top bar -->
+            <Border VerticalAlignment="Top" Height="52" Padding="24,0" BorderBrush="#222235" BorderThickness="0,0,0,1">
+                <Border.Background>
+                    <SolidColorBrush Color="#0a0a10" Opacity="0.95"/>
+                </Border.Background>
+                <Grid>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="⌘" Foreground="#00f0ff" FontSize="18" FontWeight="Bold"
+                                   FontFamily="Consolas" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <TextBlock Text="PC CLUB" Foreground="#e8e8f0" FontSize="14" FontWeight="Bold"
+                                   VerticalAlignment="Center" FontFamily="Consolas"/>
+                        <Border Background="#222235" Width="1" Height="24" Margin="16,0"/>
+                        <TextBlock Text="ACTIVE" Foreground="#39ff14" FontSize="10" FontWeight="Bold"
+                                   VerticalAlignment="Center" FontFamily="Consolas">
+                            <TextBlock.Effect>
+                                <DropShadowEffect Color="#39ff14" BlurRadius="6" ShadowDepth="0" Opacity="0.5"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <TextBlock x:Name="SessionUser" Foreground="#8888a8" FontSize="12"
+                                   VerticalAlignment="Center" FontFamily="Consolas" Margin="0,0,20,0"/>
+                        <TextBlock x:Name="SessionBalance" Foreground="#ffe019" FontSize="13" FontWeight="Bold"
+                                   VerticalAlignment="Center" FontFamily="Consolas">
+                            <TextBlock.Effect>
+                                <DropShadowEffect Color="#ffe019" BlurRadius="8" ShadowDepth="0" Opacity="0.3"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Center countdown -->
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock x:Name="SessionTimeLabel" Text="&gt; ЗАЛИШИЛОСЬ ЧАСУ" Foreground="#555570"
+                           FontSize="12" HorizontalAlignment="Center" FontFamily="Consolas"/>
+                <TextBlock x:Name="SessionCountdown" Text="00:00:00" Foreground="#00f0ff"
+                           FontSize="84" FontWeight="Bold" HorizontalAlignment="Center"
+                           FontFamily="Consolas" Margin="0,4,0,8">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#00f0ff" BlurRadius="32" ShadowDepth="0" Opacity="0.5"/>
+                    </TextBlock.Effect>
+                </TextBlock>
+
+                <!-- ── Divider ── -->
+                <Border Height="1" Width="200" Margin="0,4,0,16">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="Transparent" Offset="0"/>
+                            <GradientStop Color="#222235" Offset="0.5"/>
+                            <GradientStop Color="Transparent" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+
+                <TextBlock x:Name="SessionTariff" Text="" Foreground="#bf5af2" FontSize="13"
+                           HorizontalAlignment="Center" FontFamily="Consolas" Margin="0,0,0,4"/>
+                <TextBlock x:Name="SessionCost" Text="" Foreground="#8888a8" FontSize="12"
+                           HorizontalAlignment="Center" FontFamily="Consolas" Margin="0,0,0,36"/>
+
+                <!-- Action buttons -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <Button Content="🎮 ІГРИ" Style="{StaticResource CyberButton}" Margin="0,0,10,0"/>
+                    <Button Content="⏱ ПОДОВЖИТИ" Style="{StaticResource CyberButton}" Margin="0,0,10,0"
+                            Click="OnExtendClick"/>
+                    <Button Content="💰 БАЛАНС" Style="{StaticResource CyberButton}" Margin="0,0,10,0"/>
+                    <Button Content="🔔 ВИКЛИК" Style="{StaticResource CyberButton}"
+                            Click="OnCallStaffClick"/>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Bottom bar -->
+            <Border VerticalAlignment="Bottom" Height="32" Padding="24,0" BorderBrush="#222235" BorderThickness="0,1,0,0">
+                <Border.Background>
+                    <SolidColorBrush Color="#0a0a10" Opacity="0.8"/>
+                </Border.Background>
+                <Grid>
+                    <TextBlock x:Name="SessionHostname" Foreground="#333350" FontSize="10"
+                               VerticalAlignment="Center" FontFamily="Consolas"/>
+                    <TextBlock Text="CTRL+SHIFT+U :: STAFF_OVERRIDE" Foreground="#1a1a30"
+                               FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"
+                               FontFamily="Consolas"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ========== 5-MIN WARNING BANNER ========== -->
+        <Border x:Name="WarningBanner" VerticalAlignment="Top" Margin="0,52,0,0" Visibility="Collapsed"
+                Padding="16,8" HorizontalAlignment="Stretch" BorderBrush="#ff2d78" BorderThickness="0,0,0,2">
+            <Border.Background>
+                <SolidColorBrush Color="#ff2d78" Opacity="0.08"/>
+            </Border.Background>
+            <TextBlock x:Name="WarningText" 
+                       Text="⚠ УВАГА :: ЗАЛИШИЛОСЬ МЕНШЕ 5 ХВ — ПОПОВНІТЬ БАЛАНС АБО ПОДОВЖІТЬ СЕСІЮ"
+                       Foreground="#ff2d78" FontSize="12" FontWeight="Bold"
+                       HorizontalAlignment="Center" FontFamily="Consolas">
+                <TextBlock.Effect>
+                    <DropShadowEffect Color="#ff2d78" BlurRadius="8" ShadowDepth="0" Opacity="0.4"/>
+                </TextBlock.Effect>
+            </TextBlock>
+        </Border>
     </Grid>
 </Window>
