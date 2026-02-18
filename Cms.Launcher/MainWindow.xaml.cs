@@ -18,6 +18,10 @@ public partial class MainWindow : Window
     private TextBlock? _lockCountdown;
     private bool _staffUnlocked = false;
 
+    // Kiosk mode
+    private bool _kioskMode = false;
+    private KioskKeyboardHook? _kioskHook;
+
     // Session state
     private Guid? _userId;
     private string? _username;
@@ -32,11 +36,46 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        Closing += OnWindowClosing;
         KeyDown += OnKeyDown;
 
         // Allow Enter in login form
         UsernameBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) PasswordBox.Focus(); };
         PasswordBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) OnLoginClick(null!, null!); };
+
+        // Detect kiosk mode
+        DetectKioskMode();
+    }
+
+    private void DetectKioskMode()
+    {
+        try
+        {
+            // Check for kiosk.json next to the executable
+            var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+            var kioskConfigPath = Path.Combine(exeDir, "kiosk.json");
+            if (File.Exists(kioskConfigPath))
+            {
+                _kioskMode = true;
+                _kioskHook = new KioskKeyboardHook();
+                _kioskHook.Install();
+            }
+        }
+        catch { /* not in kiosk mode */ }
+    }
+
+    private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_kioskMode && !_staffUnlocked)
+        {
+            // Prevent closing in kiosk mode unless staff unlocked
+            e.Cancel = true;
+        }
+        else
+        {
+            // Cleanup
+            _kioskHook?.Dispose();
+        }
     }
 
     // ──── KEYBOARD SHORTCUTS ────
