@@ -444,3 +444,9 @@ F:\v.wae\club-management-system\Cms.Server\obj\Release\net8.0\win-x64\refint\Cms
 F:\v.wae\club-management-system\Cms.Server\obj\Release\net8.0\win-x64\Cms.Server.pdb
 F:\v.wae\club-management-system\Cms.Server\obj\Release\net8.0\win-x64\Cms.Server.genruntimeconfig.cache
 F:\v.wae\club-management-system\Cms.Server\obj\Release\net8.0\win-x64\ref\Cms.Server.dll
+F:\v.wae\club-management-system\Cms.Server\bin\Release\net8.0\win-x64\Microsoft.Data.Sqlite.dll
+F:\v.wae\club-management-system\Cms.Server\bin\Release\net8.0\win-x64\Microsoft.EntityFrameworkCore.Sqlite.dll
+F:\v.wae\club-management-system\Cms.Server\bin\Release\net8.0\win-x64\SQLitePCLRaw.batteries_v2.dll
+F:\v.wae\club-management-system\Cms.Server\bin\Release\net8.0\win-x64\SQLitePCLRaw.core.dll
+F:\v.wae\club-management-system\Cms.Server\bin\Release\net8.0\win-x64\SQLitePCLRaw.provider.e_sqlite3.dll
+F:\v.wae\club-management-system\Cms.Server\bin\Release\net8.0\win-x64\e_sqlite3.dll

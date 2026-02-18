@@ -1,2 +1,61 @@
+# =====================
+# VM folders
+# =====================
 VM2/
 VMs/
+
+# =====================
+# .NET build artifacts
+# =====================
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.nupkg
+*.snupkg
+
+# =====================
+# Node / Next.js
+# =====================
+node_modules/
+.next/
+out/
+
+# =====================
+# Build / Deploy output
+# =====================
+deploy/
+publish/
+
+# =====================
+# IDE
+# =====================
+.vs/
+.vscode/
+.idea/
+*.swp
+*~
+
+# =====================
+# OS
+# =====================
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# =====================
+# Database (dev only)
+# =====================
+*.db-shm
+*.db-wal
+
+# =====================
+# Agent workflows
+# =====================
+.agent/
