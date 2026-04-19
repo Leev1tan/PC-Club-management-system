@@ -1,5 +1,0 @@
-F:\v.wae\club-management-system\publish\installers\client-package\agent\appsettings.Development.json
-F:\v.wae\club-management-system\publish\installers\client-package\agent\appsettings.json
-F:\v.wae\club-management-system\publish\installers\client-package\agent\Cms.Agent.Service.pdb
-F:\v.wae\club-management-system\publish\installers\client-package\agent\Cms.Shared.pdb
-F:\v.wae\club-management-system\publish\installers\client-package\agent\Cms.Agent.Service.exe

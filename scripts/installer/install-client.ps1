@@ -125,7 +125,25 @@ if ($KioskMode) {
     $kioskUser = "ClubUser"
     $kioskPassword = "ClubKiosk2024!" # Internal only, user never types this
     
-    # 7a: Create restricted ClubUser account
+    # 7a: Ensure admin recovery account exists
+    $adminUser = "ClubAdmin"
+    $existingAdmin = Get-LocalUser -Name $adminUser -ErrorAction SilentlyContinue
+    if (-not $existingAdmin) {
+        Write-Host "   Creating '$adminUser' recovery account..." -ForegroundColor Cyan
+        $adminPass = Read-Host "   Enter password for $adminUser (staff recovery account)" -AsSecureString
+        New-LocalUser -Name $adminUser `
+            -Password $adminPass `
+            -FullName "Club Administrator" `
+            -Description "Staff recovery account for kiosk PCs" `
+            -PasswordNeverExpires | Out-Null
+        Add-LocalGroupMember -Group "Administrators" -Member $adminUser -ErrorAction SilentlyContinue
+        Write-Host "   Admin '$adminUser' created (Administrators group)" -ForegroundColor Green
+        Write-Host "   Use Ctrl+Alt+Del > Switch User > ClubAdmin to escape kiosk" -ForegroundColor Green
+    } else {
+        Write-Host "   Admin '$adminUser' already exists" -ForegroundColor Gray
+    }
+    
+    # 7b: Create restricted ClubUser account
     Write-Host "   Creating '$kioskUser' account..." -ForegroundColor Gray
     try {
         $existingUser = Get-LocalUser -Name $kioskUser -ErrorAction SilentlyContinue

@@ -54,6 +54,12 @@ internal static class KeyboardBlocker
 
     private static bool ShouldBlock(KBDLLHOOKSTRUCT kb)
     {
+        // ALWAYS allow Ctrl+Shift+U (staff unlock escape)
+        if (kb.vkCode == 0x55 /* VK_U */ &&
+            (IsKeyDown(VK_LCONTROL) || IsKeyDown(VK_RCONTROL)) &&
+            (IsKeyDown(0xA0) /* VK_LSHIFT */ || IsKeyDown(0xA1) /* VK_RSHIFT */))
+            return false;
+
         // Windows keys
         if (kb.vkCode == VK_LWIN || kb.vkCode == VK_RWIN) return true;
 

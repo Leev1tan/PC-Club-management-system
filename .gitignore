@@ -32,6 +32,20 @@ out/
 # =====================
 deploy/
 publish/
+artifacts/
+
+# =====================
+# Test / Coverage output
+# =====================
+TestResults/
+coverage/
+*.trx
+*.coverage
+
+# =====================
+# Logs
+# =====================
+*.log
 
 # =====================
 # IDE
@@ -52,6 +66,9 @@ Desktop.ini
 # =====================
 # Database (dev only)
 # =====================
+*.db
+*.sqlite
+*.sqlite3
 *.db-shm
 *.db-wal
 

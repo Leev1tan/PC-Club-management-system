@@ -3,6 +3,21 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Support running as Windows Service
+builder.Host.UseWindowsService();
+
+// Explicit URL binding (launchSettings.json only works with dotnet run)
+var urls = builder.Configuration["Urls"];
+if (!string.IsNullOrWhiteSpace(urls))
+{
+    builder.WebHost.UseUrls(urls);
+}
+else if (!builder.Environment.IsDevelopment())
+{
+    // Default for production/service: listen on all interfaces
+    builder.WebHost.UseUrls("http://0.0.0.0:5081");
+}
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
