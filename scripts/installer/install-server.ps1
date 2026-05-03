@@ -25,6 +25,7 @@ if (-not (Test-IsAdmin)) {
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Club Management System - Server Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  Project by Volodymyr Shabat" -ForegroundColor DarkGray
 Write-Host ""
 
 # Step 1: Create installation directory
@@ -32,6 +33,11 @@ Write-Host "[1/5] Creating installation directory..." -ForegroundColor Yellow
 if (!(Test-Path $InstallPath)) {
     New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
 }
+
+$serviceName = "ClubServer"
+try { Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue } catch {}
+try { sc.exe delete $serviceName 2>$null | Out-Null } catch {}
+Start-Sleep -Seconds 2
 
 # Step 2: Copy server files
 Write-Host "[2/5] Copying server files..." -ForegroundColor Yellow
@@ -62,6 +68,7 @@ $config = @{
     }
     Discovery = @{
         Enabled = $true
+        Port = $DiscoveryPort
         HttpPort = $HttpPort
     }
     Urls = "http://0.0.0.0:$HttpPort"
@@ -87,14 +94,7 @@ try {
 
 # Step 5: Install and start Windows Service
 Write-Host "[5/5] Installing Windows Service..." -ForegroundColor Yellow
-$serviceName = "ClubServer"
 $exePath = Join-Path $InstallPath "Cms.Server.exe"
-
-# Stop and remove existing service
-try { Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue } catch {}
-try { sc.exe delete $serviceName 2>$null | Out-Null } catch {}
-
-Start-Sleep -Seconds 2
 
 # Create new service
 $binPath = "`"$exePath`""

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using System.Text.Json;
 
 namespace Cms.Agent.Service;
 
@@ -14,7 +15,8 @@ public class Worker : BackgroundService
     private Guid _deviceId;
     private string? _deviceKey;
     private DateTimeOffset? _sessionEndUtc;
-    private bool _explicitlyUnlocked = false;
+    private bool _manualLockRequested;
+    private string? _serverUrl;
 
     // Performance counters for real metrics
     private PerformanceCounter? _cpuCounter;
@@ -28,41 +30,117 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Initialize performance counters
         InitializeCounters();
+        LoadRuntimeState();
 
         var configuredUrl = _config["Server:BaseUrl"];
-        var baseUrl = await ResolveServerUrlAsync(configuredUrl, stoppingToken);
-        
-        _logger.LogInformation("Agent starting, server URL: {BaseUrl}", baseUrl);
-        
-        var http = _httpClientFactory.CreateClient();
-        http.BaseAddress = new Uri(baseUrl);
-
-        // Initial registration with retry
-        await EnsureRegisteredWithRetryAsync(http, stoppingToken);
+        var explicitServerUrl = IsExplicitServerUrl(configuredUrl);
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            try
+            var baseUrl = await ResolveServerUrlAsync(configuredUrl, stoppingToken);
+            _serverUrl = NormalizeBaseUrl(baseUrl);
+            WriteLauncherConfig();
+
+            _logger.LogInformation("Agent connecting to server URL: {BaseUrl}", _serverUrl);
+
+            var http = _httpClientFactory.CreateClient();
+            http.BaseAddress = new Uri(_serverUrl + "/");
+
+            var registered = await EnsureRegisteredWithRetryAsync(http, stoppingToken, retryForever: explicitServerUrl);
+            if (!registered)
             {
-                var hbOk = await SendHeartbeatAsync(http, stoppingToken);
-                if (!hbOk)
-                {
-                    _logger.LogWarning("Heartbeat unauthorized; re-registering");
-                    _deviceId = Guid.Empty;
-                    _deviceKey = null;
-                    await EnsureRegisteredWithRetryAsync(http, stoppingToken);
-                }
-                await PollAndExecuteAsync(http, stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Agent loop error");
+                await UpdateSessionStateAsync();
+                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                continue;
             }
 
-            await UpdateSessionStateAsync();
-            await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+            var rediscover = false;
+            while (!stoppingToken.IsCancellationRequested && !rediscover)
+            {
+                try
+                {
+                    var hbOk = await SendHeartbeatAsync(http, stoppingToken);
+                    if (!hbOk)
+                    {
+                        _logger.LogWarning("Heartbeat unauthorized; re-registering");
+                        _deviceId = Guid.Empty;
+                        _deviceKey = null;
+                        registered = await EnsureRegisteredWithRetryAsync(http, stoppingToken, retryForever: explicitServerUrl);
+                        if (!registered)
+                        {
+                            rediscover = true;
+                            break;
+                        }
+                    }
+                    await PollAndExecuteAsync(http, stoppingToken);
+                }
+                catch (HttpRequestException ex)
+                {
+                    _logger.LogWarning(ex, "Server connection failed");
+                    rediscover = !explicitServerUrl;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Agent loop error");
+                }
+
+                await UpdateSessionStateAsync();
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+            }
+        }
+    }
+
+    private static bool IsExplicitServerUrl(string? configuredUrl)
+    {
+        return !string.IsNullOrWhiteSpace(configuredUrl) &&
+               !configuredUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase) &&
+               !configuredUrl.Contains("127.0.0.1");
+    }
+
+    private static string NormalizeBaseUrl(string baseUrl)
+    {
+        return baseUrl.Trim().TrimEnd('/');
+    }
+
+    private void WriteLauncherConfig()
+    {
+        if (string.IsNullOrWhiteSpace(_serverUrl)) return;
+
+        try
+        {
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            var dir = Path.Combine(programData, "ClubAgent");
+            Directory.CreateDirectory(dir);
+            var configPath = Path.Combine(dir, "config.json");
+            var json = JsonSerializer.Serialize(new LauncherConfig(_serverUrl), JsonOptions);
+            File.WriteAllText(configPath, json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write launcher config");
+        }
+    }
+
+    private void LoadRuntimeState()
+    {
+        try
+        {
+            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            var path = Path.Combine(programData, "ClubAgent", "state.json");
+            if (!File.Exists(path)) return;
+
+            var state = JsonSerializer.Deserialize<AgentState>(File.ReadAllText(path), JsonOptions);
+            if (state == null) return;
+
+            _sessionEndUtc = state.SessionEndUtc;
+            _manualLockRequested = state.IsLocked &&
+                                   string.Equals(state.LockReason, "manual", StringComparison.OrdinalIgnoreCase);
+            _serverUrl = state.ServerUrl;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load runtime state");
         }
     }
 
@@ -152,17 +230,18 @@ public class Worker : BackgroundService
     }
 
 
-    private async Task EnsureRegisteredWithRetryAsync(HttpClient http, CancellationToken ct)
+    private async Task<bool> EnsureRegisteredWithRetryAsync(HttpClient http, CancellationToken ct, bool retryForever)
     {
         var delay = TimeSpan.FromSeconds(2);
         var maxDelay = TimeSpan.FromMinutes(1);
+        var attempts = 0;
 
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 await EnsureRegisteredAsync(http, ct);
-                return;
+                return true;
             }
             catch (HttpRequestException ex)
             {
@@ -174,17 +253,26 @@ public class Worker : BackgroundService
                 _logger.LogError(ex, "Registration failed unexpectedly, retrying in {Delay}s", (int)delay.TotalSeconds);
             }
 
+            attempts++;
+            if (!retryForever && attempts >= 3)
+            {
+                _logger.LogWarning("Registration failed after {Attempts} attempts; rediscovery will run again", attempts);
+                return false;
+            }
+
             try
             {
                 await Task.Delay(delay, ct);
             }
             catch (TaskCanceledException)
             {
-                return;
+                return false;
             }
 
             delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, maxDelay.TotalSeconds));
         }
+
+        return false;
     }
 
 
@@ -283,7 +371,20 @@ public class Worker : BackgroundService
     private async Task PollAndExecuteAsync(HttpClient http, CancellationToken ct)
     {
         if (_deviceId == Guid.Empty || string.IsNullOrWhiteSpace(_deviceKey)) return;
-        var cmds = await http.GetFromJsonAsync<List<CommandView>>($"api/devices/{_deviceId}/commands?max=5", ct) ?? new();
+
+        using var pollReq = new HttpRequestMessage(HttpMethod.Get, $"api/devices/{_deviceId}/commands?max=5");
+        pollReq.Headers.Add("X-Device-Key", _deviceKey);
+        var pollResp = await http.SendAsync(pollReq, ct);
+        if (pollResp.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _logger.LogWarning("Command poll unauthorized; re-registering");
+            _deviceId = Guid.Empty;
+            _deviceKey = null;
+            return;
+        }
+        pollResp.EnsureSuccessStatusCode();
+
+        var cmds = await pollResp.Content.ReadFromJsonAsync<List<CommandView>>(cancellationToken: ct) ?? new();
         foreach (var cmd in cmds)
         {
             string status = "done";
@@ -324,6 +425,7 @@ public class Worker : BackgroundService
 
             var ack = new AckCommandRequest { Status = status, Result = result };
             using var req = new HttpRequestMessage(HttpMethod.Post, $"api/devices/{_deviceId}/commands/{cmd.Id}/ack");
+            req.Headers.Add("X-Device-Key", _deviceKey);
             req.Content = JsonContent.Create(ack);
             try
             {
@@ -341,26 +443,11 @@ public class Worker : BackgroundService
     {
         try
         {
-            var json = payload?.ToString();
-            if (!string.IsNullOrWhiteSpace(json))
+            if (TryReadEndUtc(payload, out var endUtc))
             {
-                var marker = "\"endUtc\":";
-                var idx = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-                if (idx >= 0)
-                {
-                    var start = json.IndexOf('"', idx + marker.Length);
-                    var end = json.IndexOf('"', start + 1);
-                    if (start > 0 && end > start)
-                    {
-                        var iso = json.Substring(start + 1, end - start - 1);
-                        if (DateTimeOffset.TryParse(iso, out var dt))
-                        {
-                            _sessionEndUtc = dt;
-                            _explicitlyUnlocked = false;
-                            _logger.LogInformation("Session end set to {End}", _sessionEndUtc);
-                        }
-                    }
-                }
+                _sessionEndUtc = endUtc;
+                _manualLockRequested = false;
+                _logger.LogInformation("Session end set to {End}", _sessionEndUtc);
             }
         }
         catch (Exception ex)
@@ -368,6 +455,57 @@ public class Worker : BackgroundService
             _logger.LogError(ex, "Failed to parse session_set payload");
         }
         return Task.CompletedTask;
+    }
+
+    private static bool TryReadEndUtc(object? payload, out DateTimeOffset endUtc)
+    {
+        endUtc = default;
+
+        if (payload is JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Object &&
+                element.TryGetProperty("endUtc", out var endProperty) &&
+                endProperty.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(endProperty.GetString(), out endUtc))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        var json = payload?.ToString();
+        if (string.IsNullOrWhiteSpace(json)) return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("endUtc", out var endProperty) &&
+                endProperty.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(endProperty.GetString(), out endUtc))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            // Legacy fallback for unexpected payload formats.
+            var marker = "\"endUtc\":";
+            var idx = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                var start = json.IndexOf('"', idx + marker.Length);
+                var end = json.IndexOf('"', start + 1);
+                if (start > 0 && end > start)
+                {
+                    var iso = json.Substring(start + 1, end - start - 1);
+                    return DateTimeOffset.TryParse(iso, out endUtc);
+                }
+            }
+        }
+
+        return false;
     }
 
     private Task UpdateSessionStateAsync()
@@ -383,39 +521,34 @@ public class Worker : BackgroundService
             File.WriteAllText(hbPath, DateTimeOffset.UtcNow.ToString("O"));
             var path = Path.Combine(dir, "state.json");
 
-            bool isLocked = false;
+            bool sessionExpired = false;
             long remaining = 0;
 
-            if (_explicitlyUnlocked)
-            {
-                isLocked = false;
-                remaining = 0;
-            }
-            else if (_sessionEndUtc.HasValue)
+            if (_sessionEndUtc.HasValue)
             {
                 var now = DateTimeOffset.UtcNow;
                 var left = _sessionEndUtc.Value - now;
                 if (left <= TimeSpan.Zero)
                 {
-                    isLocked = true;
+                    sessionExpired = true;
                     remaining = 0;
                 }
                 else
                 {
-                    remaining = (long)left.TotalSeconds;
+                    remaining = (long)Math.Ceiling(left.TotalSeconds);
                 }
             }
 
-            // Only check file state if not explicitly unlocked
-            bool fileIsLocked = false;
-            if (!_explicitlyUnlocked && File.Exists(path))
-            {
-                var content = File.ReadAllText(path);
-                fileIsLocked = content.Contains("\"isLocked\":true", StringComparison.OrdinalIgnoreCase);
-            }
-            var finalLocked = isLocked || fileIsLocked;
+            var finalLocked = _manualLockRequested || sessionExpired;
+            var lockReason = _manualLockRequested ? "manual" : sessionExpired ? "session_expired" : "none";
 
-            var json = "{\"isLocked\":" + (finalLocked ? "true" : "false") + ",\"remainingSeconds\":" + remaining + "}";
+            var json = JsonSerializer.Serialize(new AgentState(
+                finalLocked,
+                remaining,
+                _sessionEndUtc,
+                lockReason,
+                _serverUrl
+            ), JsonOptions);
             File.WriteAllText(path, json);
         }
         catch
@@ -460,14 +593,7 @@ public class Worker : BackgroundService
     {
         try
         {
-            if (!isLocked)
-            {
-                _explicitlyUnlocked = true;
-            }
-            else
-            {
-                _explicitlyUnlocked = false;
-            }
+            _manualLockRequested = isLocked;
 
             var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             var dir = Path.Combine(programData, "ClubAgent");
@@ -475,15 +601,31 @@ public class Worker : BackgroundService
             var path = Path.Combine(dir, "state.json");
 
             long remaining = 0;
-            if (_sessionEndUtc.HasValue && !isLocked)
+            var sessionExpired = false;
+            if (_sessionEndUtc.HasValue)
             {
                 var left = _sessionEndUtc.Value - DateTimeOffset.UtcNow;
-                if (left > TimeSpan.Zero) remaining = (long)left.TotalSeconds;
+                if (left > TimeSpan.Zero)
+                {
+                    remaining = (long)Math.Ceiling(left.TotalSeconds);
+                }
+                else
+                {
+                    sessionExpired = true;
+                }
             }
 
-            var json = "{\"isLocked\":" + (isLocked ? "true" : "false") + ",\"remainingSeconds\":" + remaining + "}";
+            var finalLocked = _manualLockRequested || sessionExpired;
+            var lockReason = _manualLockRequested ? "manual" : sessionExpired ? "session_expired" : "none";
+            var json = JsonSerializer.Serialize(new AgentState(
+                finalLocked,
+                remaining,
+                _sessionEndUtc,
+                lockReason,
+                _serverUrl
+            ), JsonOptions);
             File.WriteAllText(path, json);
-            _logger.LogInformation("Lock state set to {IsLocked}", isLocked);
+            _logger.LogInformation("Manual lock state set to {IsLocked}", isLocked);
         }
         catch (Exception ex)
         {
@@ -491,6 +633,21 @@ public class Worker : BackgroundService
         }
         return Task.CompletedTask;
     }
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
+    private sealed record AgentState(
+        bool IsLocked,
+        long RemainingSeconds,
+        DateTimeOffset? SessionEndUtc,
+        string LockReason,
+        string? ServerUrl);
+
+    private sealed record LauncherConfig(string ServerUrl);
 
     private sealed class CommandView
     {

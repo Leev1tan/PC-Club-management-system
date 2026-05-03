@@ -1,5 +1,7 @@
 # Club Management System – Strategy and Tactics
 
+Project authorship: created and maintained by Volodymyr Shabat.
+
 This document is the end-to-end plan and execution guide for a cybersport PC club management system. It covers goals, architecture, APIs, data model, milestones, security, deployment, discovery, operations, and acceptance criteria.
 
 ## 1) Goals and Scope

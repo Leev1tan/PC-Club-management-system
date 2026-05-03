@@ -100,8 +100,14 @@ public class EfDeviceRepository : IDeviceRepository
 
     public IEnumerable<CommandView> PollCommands(Guid deviceId, int max)
     {
-        var pending = _db.Commands
-            .Where(c => c.DeviceId == deviceId && c.Status == "pending")
+        var retryBefore = DateTimeOffset.UtcNow.AddSeconds(-30);
+        var candidates = _db.Commands
+            .Where(c => c.DeviceId == deviceId &&
+                        (c.Status == "pending" || c.Status == "delivered"))
+            .ToList();
+
+        var pending = candidates
+            .Where(c => c.Status == "pending" || c.CreatedUtc <= retryBefore)
             .OrderBy(c => c.CreatedUtc)
             .Take(Math.Max(1, max))
             .ToList();

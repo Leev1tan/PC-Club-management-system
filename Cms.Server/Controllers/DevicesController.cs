@@ -97,17 +97,33 @@ public class DevicesController : ControllerBase
     }
 
     [HttpGet("{deviceId:guid}/commands")]
-    public ActionResult<IEnumerable<CommandView>> Poll(Guid deviceId, [FromQuery] int max = 10)
+    public async Task<ActionResult<IEnumerable<CommandView>>> Poll(
+        Guid deviceId,
+        [FromHeader(Name = "X-Device-Key")] string? deviceKey,
+        [FromQuery] int max = 10)
     {
+        if (!await IsAuthorizedDeviceAsync(deviceId, deviceKey)) return Unauthorized();
         return Ok(_devices.PollCommands(deviceId, max));
     }
 
     [HttpPost("{deviceId:guid}/commands/{commandId:guid}/ack")]
-    public IActionResult Ack(Guid deviceId, Guid commandId, [FromBody] AckCommandRequest request)
+    public async Task<IActionResult> Ack(
+        Guid deviceId,
+        Guid commandId,
+        [FromHeader(Name = "X-Device-Key")] string? deviceKey,
+        [FromBody] AckCommandRequest request)
     {
+        if (!await IsAuthorizedDeviceAsync(deviceId, deviceKey)) return Unauthorized();
         var ok = _devices.AckCommand(deviceId, commandId, request);
         if (!ok) return NotFound();
         return Ok();
+    }
+
+    private async Task<bool> IsAuthorizedDeviceAsync(Guid deviceId, string? deviceKey)
+    {
+        if (string.IsNullOrWhiteSpace(deviceKey)) return false;
+        return await _db.Devices.AsNoTracking()
+            .AnyAsync(d => d.Id == deviceId && d.DeviceKey == deviceKey);
     }
 }
 

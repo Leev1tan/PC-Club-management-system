@@ -312,15 +312,9 @@ public partial class MainWindow : Window
             var configPath = Path.Combine(programData, "ClubAgent", "config.json");
             if (File.Exists(configPath))
             {
-                var configJson = File.ReadAllText(configPath);
-                var urlIdx = configJson.IndexOf("\"serverUrl\":", StringComparison.OrdinalIgnoreCase);
-                if (urlIdx >= 0)
-                {
-                    var afterQuote = configJson.IndexOf('"', urlIdx + 12) + 1;
-                    var endQuote = configJson.IndexOf('"', afterQuote);
-                    if (afterQuote > 0 && endQuote > afterQuote)
-                        _serverUrl = configJson.Substring(afterQuote, endQuote - afterQuote);
-                }
+                var config = JsonSerializer.Deserialize<LauncherConfig>(File.ReadAllText(configPath), LauncherJson.Options);
+                if (!string.IsNullOrWhiteSpace(config?.ServerUrl))
+                    _serverUrl = config.ServerUrl.TrimEnd('/');
             }
         }
         catch { }
@@ -347,21 +341,23 @@ public partial class MainWindow : Window
             }
 
             var json = File.ReadAllText(path);
-            var isLocked = json.Contains("\"isLocked\":true", StringComparison.OrdinalIgnoreCase);
+            var state = JsonSerializer.Deserialize<LauncherState>(json, LauncherJson.Options);
+            if (state == null)
+            {
+                SetUnlocked();
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(state.ServerUrl))
+                _serverUrl = state.ServerUrl.TrimEnd('/');
+
+            var isLocked = state.IsLocked;
 
             // If server sent unlock, clear staff override
             if (!isLocked)
                 _staffUnlocked = false;
 
-            // Parse remaining seconds
-            long remaining = 0;
-            var remIdx = json.IndexOf("\"remainingSeconds\":", StringComparison.OrdinalIgnoreCase);
-            if (remIdx >= 0)
-            {
-                var after = json.Substring(remIdx + 19);
-                var digits = new string(after.TakeWhile(char.IsDigit).ToArray());
-                long.TryParse(digits, out remaining);
-            }
+            var remaining = state.RemainingSeconds;
 
             // Update lock overlay countdown
             if (_lockCountdown != null)
@@ -481,4 +477,21 @@ public partial class MainWindow : Window
 }
 
 // ──── DTOs ────
+internal static class LauncherJson
+{
+    public static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+}
+
+internal record LauncherConfig(string? ServerUrl);
+
+internal record LauncherState(
+    bool IsLocked,
+    long RemainingSeconds,
+    DateTimeOffset? SessionEndUtc,
+    string? LockReason,
+    string? ServerUrl);
+
 internal record UserResponse(Guid id, string username, string displayName, decimal balance, decimal bonusPoints);

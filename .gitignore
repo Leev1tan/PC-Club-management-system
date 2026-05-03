@@ -33,6 +33,7 @@ out/
 deploy/
 publish/
 artifacts/
+tools/Installer.Bootstrapper/Payload.zip
 
 # =====================
 # Test / Coverage output

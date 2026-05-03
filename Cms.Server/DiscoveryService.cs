@@ -13,7 +13,7 @@ public class DiscoveryService : BackgroundService
 {
     private readonly ILogger<DiscoveryService> _logger;
     private readonly IConfiguration _config;
-    private const int DiscoveryPort = 5082;
+    private const int DefaultDiscoveryPort = 5082;
     private const string DiscoveryRequest = "CMS_DISCOVER";
     private const string ResponsePrefix = "CMS_SERVER:";
 
@@ -32,11 +32,12 @@ public class DiscoveryService : BackgroundService
             return;
         }
 
-        _logger.LogInformation("Starting UDP discovery listener on port {Port}", DiscoveryPort);
+        var discoveryPort = _config.GetValue<int>("Discovery:Port", DefaultDiscoveryPort);
+        _logger.LogInformation("Starting UDP discovery listener on port {Port}", discoveryPort);
 
         using var udp = new UdpClient();
         udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        udp.Client.Bind(new IPEndPoint(IPAddress.Any, DiscoveryPort));
+        udp.Client.Bind(new IPEndPoint(IPAddress.Any, discoveryPort));
 
         while (!stoppingToken.IsCancellationRequested)
         {

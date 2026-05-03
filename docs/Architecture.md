@@ -1,5 +1,7 @@
 # PC Club Management System — Architecture
 
+Project authorship: created and maintained by Volodymyr Shabat.
+
 ## Overview
 
 The PC Club Management System is a distributed application for managing gaming PCs in a cybersport club environment. It enables central control of Windows gaming stations including session management with time limits, device locking/unlocking, and remote commands.

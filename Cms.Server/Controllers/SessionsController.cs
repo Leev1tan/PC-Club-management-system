@@ -29,6 +29,23 @@ public class SessionsController : ControllerBase
         var device = await _db.Devices.FindAsync(req.DeviceId);
         if (device == null) return NotFound("Device not found");
 
+        var now = DateTimeOffset.UtcNow;
+        var activeForDevice = await _db.Sessions
+            .Where(s => s.DeviceId == req.DeviceId && s.Status == "active")
+            .ToListAsync();
+
+        foreach (var expired in activeForDevice.Where(s =>
+                     s.IsPrepaid && s.EndUtc.HasValue && s.EndUtc.Value <= now))
+        {
+            expired.Status = "ended";
+        }
+
+        var blockingSession = activeForDevice.FirstOrDefault(s =>
+            s.Status == "active" &&
+            (!s.IsPrepaid || !s.EndUtc.HasValue || s.EndUtc.Value > now));
+        if (blockingSession != null)
+            return Conflict("Device already has an active session.");
+
         // Resolve tariff: explicit > zone default > system default
         TariffEntity? tariff = null;
         if (req.TariffId.HasValue)
@@ -40,7 +57,6 @@ public class SessionsController : ControllerBase
         if (tariff == null)
             return BadRequest("No tariff configured. Create a tariff first.");
 
-        var now = DateTimeOffset.UtcNow;
         bool isPrepaid = req.DurationMinutes.HasValue && req.DurationMinutes > 0;
         var endUtc = isPrepaid ? now.AddMinutes(req.DurationMinutes!.Value) : (DateTimeOffset?)null;
         decimal totalCost = isPrepaid ? Math.Round(tariff.PricePerHour * req.DurationMinutes!.Value / 60m, 2) : 0;

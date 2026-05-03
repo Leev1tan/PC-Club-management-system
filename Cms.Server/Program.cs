@@ -51,6 +51,7 @@ builder.Services.AddScoped<Cms.Server.Repositories.ISessionRepository, Cms.Serve
 
 // UDP Discovery for LAN auto-discovery
 builder.Services.AddHostedService<Cms.Server.DiscoveryService>();
+builder.Services.AddHostedService<Cms.Server.SessionExpiryService>();
 
 var app = builder.Build();
 
@@ -66,6 +67,8 @@ app.UseSwagger();
 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Club Management API v1"));
 
 app.UseCors();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseAuthorization();
 
 app.MapControllers();

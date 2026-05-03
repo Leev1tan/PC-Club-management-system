@@ -25,6 +25,7 @@ if (-not (Test-IsAdmin)) {
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Club Management System - Client Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  Project by Volodymyr Shabat" -ForegroundColor DarkGray
 Write-Host ""
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -69,6 +70,14 @@ $config = @{
 }
 
 $config | ConvertTo-Json -Depth 5 | Set-Content -Path $agentConfig
+
+$programDataConfigDir = Join-Path $env:ProgramData "ClubAgent"
+if (!(Test-Path $programDataConfigDir)) {
+    New-Item -ItemType Directory -Path $programDataConfigDir -Force | Out-Null
+}
+@{
+    serverUrl = $ServerUrl
+} | ConvertTo-Json -Depth 3 | Set-Content -Path (Join-Path $programDataConfigDir "config.json")
 
 if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
     Write-Host "   Server URL: Auto-discovery (LAN broadcast)" -ForegroundColor Gray
