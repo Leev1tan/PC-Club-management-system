@@ -74,6 +74,7 @@ else
 }
 
 // Repositories
+builder.Services.AddSingleton<DeviceRuntimeState>();
 builder.Services.AddScoped<Cms.Server.Repositories.IDeviceRepository, Cms.Server.Repositories.EfDeviceRepository>();
 builder.Services.AddScoped<Cms.Server.Repositories.ISessionRepository, Cms.Server.Repositories.EfSessionRepository>();
 

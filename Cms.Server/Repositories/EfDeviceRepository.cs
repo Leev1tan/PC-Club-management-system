@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Cms.Server.Controllers;
 using Cms.Server.Data;
+using Cms.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace Cms.Server.Repositories;
@@ -9,10 +10,12 @@ namespace Cms.Server.Repositories;
 public class EfDeviceRepository : IDeviceRepository
 {
     private readonly CmsDbContext _db;
+    private readonly DeviceRuntimeState? _runtime;
 
-    public EfDeviceRepository(CmsDbContext db)
+    public EfDeviceRepository(CmsDbContext db, DeviceRuntimeState? runtime = null)
     {
         _db = db;
+        _runtime = runtime;
     }
 
     public DeviceRegistrationResponse Register(DeviceRegistrationRequest request)
@@ -137,6 +140,15 @@ public class EfDeviceRepository : IDeviceRepository
         cmd.Status = request.Status;
         cmd.Result = request.Result;
         _db.SaveChanges();
+
+        // Remember the lock state the agent confirmed, so the admin UI can show it
+        if (_runtime != null && string.Equals(request.Status, "done", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(cmd.Type, CommandTypes.Lock, StringComparison.OrdinalIgnoreCase))
+                _runtime.SetLocked(deviceId, true);
+            else if (string.Equals(cmd.Type, CommandTypes.Unlock, StringComparison.OrdinalIgnoreCase))
+                _runtime.SetLocked(deviceId, false);
+        }
         return true;
     }
 }

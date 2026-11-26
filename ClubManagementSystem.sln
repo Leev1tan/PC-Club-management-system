@@ -11,6 +11,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cms.Launcher", "Cms.Launche
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cms.Shared", "Cms.Shared\Cms.Shared.csproj", "{14255476-8B76-4898-A6E4-5E259BEDAA84}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{86CB3745-6C28-4F92-A25A-381477D66515}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cms.Server.Tests", "tests\Cms.Server.Tests\Cms.Server.Tests.csproj", "{811FB490-22AF-4F11-BF0E-C1C501B409C7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -36,5 +40,12 @@ Global
 		{14255476-8B76-4898-A6E4-5E259BEDAA84}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{14255476-8B76-4898-A6E4-5E259BEDAA84}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{14255476-8B76-4898-A6E4-5E259BEDAA84}.Release|Any CPU.Build.0 = Release|Any CPU
+		{811FB490-22AF-4F11-BF0E-C1C501B409C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{811FB490-22AF-4F11-BF0E-C1C501B409C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{811FB490-22AF-4F11-BF0E-C1C501B409C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{811FB490-22AF-4F11-BF0E-C1C501B409C7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{811FB490-22AF-4F11-BF0E-C1C501B409C7} = {86CB3745-6C28-4F92-A25A-381477D66515}
 	EndGlobalSection
 EndGlobal

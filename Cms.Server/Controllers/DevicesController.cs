@@ -12,11 +12,13 @@ public class DevicesController : ControllerBase
 {
     private readonly IDeviceRepository _devices;
     private readonly CmsDbContext _db;
+    private readonly DeviceRuntimeState? _runtime;
 
-    public DevicesController(IDeviceRepository devices, CmsDbContext db)
+    public DevicesController(IDeviceRepository devices, CmsDbContext db, DeviceRuntimeState? runtime = null)
     {
         _devices = devices;
         _db = db;
+        _runtime = runtime;
     }
 
     [HttpPost("register")]
@@ -48,6 +50,13 @@ public class DevicesController : ControllerBase
             .AsNoTracking()
             .ToDictionaryAsync(s => s.DeviceId);
 
+        // Commands queued for a device but not yet acknowledged by its agent
+        var pendingCommands = await _db.Commands.AsNoTracking()
+            .Where(c => c.Status == "pending" || c.Status == "delivered")
+            .GroupBy(c => c.DeviceId)
+            .Select(g => new { DeviceId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.DeviceId, x => x.Count);
+
         return Ok(devices.Select(d =>
         {
             var status = (d.LastSeenUtc.HasValue && (now - d.LastSeenUtc.Value) < TimeSpan.FromSeconds(20)) ? "online" : "offline";
@@ -62,7 +71,9 @@ public class DevicesController : ControllerBase
                 d.ZoneId, zoneName, zoneColor,
                 d.PositionX, d.PositionY,
                 hasSession ? "occupied" : (status == "offline" ? "offline" : "free"),
-                session?.Id, session?.UserId, session?.EndUtc
+                session?.Id, session?.UserId, session?.EndUtc,
+                _runtime?.IsLocked(d.Id),
+                pendingCommands.TryGetValue(d.Id, out var pending) ? pending : 0
             );
         }));
     }
@@ -137,7 +148,9 @@ public record DeviceDetailView(
     Guid? ZoneId, string? ZoneName, string? ZoneColor,
     int? PositionX, int? PositionY,
     string OccupancyStatus, // "free", "occupied", "offline"
-    Guid? ActiveSessionId, Guid? ActiveUserId, DateTimeOffset? SessionEndUtc
+    Guid? ActiveSessionId, Guid? ActiveUserId, DateTimeOffset? SessionEndUtc,
+    bool? IsLocked = null,  // last lock state confirmed by the agent; null = unknown
+    int PendingCommands = 0 // queued commands not yet acknowledged by the agent
 );
 public record EnqueueCommandRequest(string Type, object? Payload);
 public record CommandView(Guid Id, string Type, object? Payload);

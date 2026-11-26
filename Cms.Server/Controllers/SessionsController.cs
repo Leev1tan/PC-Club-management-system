@@ -164,6 +164,58 @@ public class SessionsController : ControllerBase
         return Ok(ToDetailView(session, null, null, null, null));
     }
 
+    /// <summary>
+    /// Extend a prepaid (fixed-duration) session by N minutes. The extra time is
+    /// charged at the session tariff and deducted from the player balance if a player is set.
+    /// </summary>
+    [HttpPost("{id:guid}/extend")]
+    public async Task<ActionResult<SessionDetailView>> Extend(Guid id, [FromBody] ExtendSessionRequest req)
+    {
+        if (req.Minutes <= 0 || req.Minutes > 24 * 60)
+            return BadRequest("Minutes must be between 1 and 1440");
+
+        var session = await _db.Sessions.FindAsync(id);
+        if (session == null) return NotFound();
+        if (session.Status != "active") return BadRequest("Session is not active");
+        if (!session.IsPrepaid || !session.EndUtc.HasValue)
+            return BadRequest("Open-ended sessions have no end time to extend");
+
+        var tariff = session.TariffId.HasValue ? await _db.Tariffs.FindAsync(session.TariffId.Value) : null;
+        var extraCost = tariff != null ? Math.Round(tariff.PricePerHour * req.Minutes / 60m, 2) : 0m;
+        var device = await _db.Devices.FindAsync(session.DeviceId);
+
+        UserEntity? user = null;
+        if (session.UserId.HasValue)
+        {
+            user = await _db.Users.FindAsync(session.UserId.Value);
+            if (user != null)
+            {
+                if (user.Balance < extraCost)
+                    return BadRequest($"Insufficient balance. Need {extraCost} ₴, have {user.Balance} ₴");
+                user.Balance -= extraCost;
+                _db.Transactions.Add(new TransactionEntity
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = user.Id,
+                    Amount = -extraCost,
+                    Type = "session_charge",
+                    Description = $"Продовження сесії на {device?.Hostname ?? "?"} (+{req.Minutes} хв) — {extraCost} ₴",
+                    CreatedUtc = DateTimeOffset.UtcNow
+                });
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var baseEnd = session.EndUtc.Value > now ? session.EndUtc.Value : now;
+        session.EndUtc = baseEnd.AddMinutes(req.Minutes);
+        session.TotalCost += extraCost;
+        await _db.SaveChangesAsync();
+
+        _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest("session_set", new { endUtc = session.EndUtc }));
+
+        return Ok(ToDetailView(session, tariff?.Name, tariff?.PricePerHour, user?.Username, device?.Hostname));
+    }
+
     [HttpGet]
     public async Task<ActionResult<IEnumerable<SessionDetailView>>> List([FromQuery] string? status)
     {
@@ -249,6 +301,7 @@ public class SessionsController : ControllerBase
 }
 
 public record StartSessionRequest(Guid DeviceId, Guid? TariffId, Guid? UserId, int? DurationMinutes);
+public record ExtendSessionRequest(int Minutes);
 
 public record SessionDetailView(
     Guid Id, Guid DeviceId, string? DeviceHostname,
