@@ -1,4 +1,6 @@
+using Cms.Server.Auth;
 using Cms.Server.Data;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -6,6 +8,7 @@ namespace Cms.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Policy = Policies.AnyStaff)]
 public class ZonesController : ControllerBase
 {
     private readonly CmsDbContext _db;
@@ -28,6 +31,7 @@ public class ZonesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<ZoneView>> Create([FromBody] CreateZoneRequest req)
     {
         var zone = new ZoneEntity
@@ -43,6 +47,7 @@ public class ZonesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<ZoneView>> Update(Guid id, [FromBody] CreateZoneRequest req)
     {
         var zone = await _db.Zones.FindAsync(id);
@@ -55,6 +60,7 @@ public class ZonesController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = Policies.Management)]
     public async Task<IActionResult> Delete(Guid id)
     {
         var zone = await _db.Zones.FindAsync(id);

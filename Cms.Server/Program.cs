@@ -1,4 +1,5 @@
 using Cms.Server;
+using Cms.Server.Auth;
 using Cms.Server.Data;
 using Cms.Server.Demo;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,7 @@ else if (!builder.Environment.IsDevelopment())
 }
 
 var demo = DemoOptions.FromConfiguration(builder.Configuration);
+var paths = ServerPaths.Resolve(builder.Configuration, builder.Environment.ContentRootPath);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -30,24 +32,23 @@ builder.Services.AddSwaggerGen(c =>
     c.SwaggerDoc("v1", new() { Title = "Club Management API", Version = "v1" });
 });
 
-// CORS. The admin UI is normally served from the same origin as the API
-// (Windows installer: wwwroot; containers: reverse proxy / ingress path split),
-// so cross-origin access is only needed for development setups.
-//   Cors:AllowedOrigins  - comma separated list (or JSON array) of allowed origins
-//   Cors:AllowAnyOrigin  - legacy behaviour, default true; the Docker image sets it to false
+// CORS: same origin only by default. The admin UI is served from the same origin as the API
+// (Windows installer: wwwroot; containers: the admin-ui proxy or an ingress path split).
+//   Cors:AllowedOrigins  - comma separated list (or JSON array) of extra allowed origins, for example a
+//                          development UI on http://localhost:3000; cookies are allowed for these origins
 var corsOrigins = ReadList(builder.Configuration, "Cors:AllowedOrigins");
-var corsAllowAny = builder.Configuration.GetValue("Cors:AllowAnyOrigin", true);
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
         if (corsOrigins.Length > 0)
-            policy.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod();
-        else if (corsAllowAny)
-            policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin();
+            policy.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
         // else: no cross-origin access at all (same-origin only)
     });
 });
+
+// Staff login (cookie), roles and policies, login rate limit, forwarded headers
+builder.AddStaffAuth(paths, demo.Enabled);
 
 // Database: PostgreSQL for production/containers, SQLite for single-PC installs and testing.
 //   Database:Provider    - "postgres" or "sqlite"; when empty the legacy rule is used:
@@ -94,7 +95,11 @@ builder.Services.AddDemoMode(demo);
 
 var app = builder.Build();
 
-// Create or migrate the database (PostgreSQL: EF Core migrations; SQLite: EnsureCreated)
+if (builder.Configuration.GetValue("Cors:AllowAnyOrigin", false))
+    app.Logger.LogWarning("Cors:AllowAnyOrigin is no longer supported and is ignored; use Cors:AllowedOrigins.");
+app.Logger.LogInformation("Data directory: {DataDirectory}", paths.DataDirectory);
+
+// Create or migrate the database (PostgreSQL: EF Core migrations; SQLite: EnsureCreated + additive upgrade)
 await DatabaseInitializer.InitializeAsync(app.Services, app.Logger);
 
 if (demo.Enabled)
@@ -110,6 +115,14 @@ if (demo.Enabled)
         return 1;
     }
 }
+else
+{
+    // First start: initial owner from the environment, or a one-time setup code for the setup screen
+    await StaffBootstrapper.RunAsync(app.Services, builder.Configuration, app.Logger);
+}
+
+if (builder.Configuration.GetValue("ReverseProxy:TrustForwardedHeaders", false))
+    app.UseForwardedHeaders();
 
 // Swagger enabled in all environments
 app.UseSwagger();
@@ -119,6 +132,9 @@ app.UseCors();
 app.UseDemoRestrictions(demo);
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseCsrfProtection(corsOrigins);
+app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();
@@ -132,8 +148,8 @@ IResult Health() => Results.Ok(new
     version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0",
     demoMode = demo.Enabled
 });
-app.MapGet("/health", Health);
-app.MapGet("/api/health", Health);
+app.MapGet("/health", Health).AllowAnonymous();
+app.MapGet("/api/health", Health).AllowAnonymous();
 
 app.Run();
 return 0;

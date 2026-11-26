@@ -11,6 +11,20 @@ public sealed class DemoOptions
     public const string PlayerLogin = "demo";
     public const string PlayerPassword = "demo";
 
+    /// <summary>
+    /// Staff accounts that exist ONLY in a demo database (seeded on every demo reset, shown on the
+    /// login page in demo mode, documented in README). Outside demo mode no account is ever seeded.
+    /// </summary>
+    public const string StaffPassword = "demo";
+
+    public static readonly IReadOnlyList<(string Username, string DisplayName, string Role)> StaffAccounts = new[]
+    {
+        ("demo-owner", "Demo Owner", Cms.Server.Auth.StaffRoles.Owner),
+        ("demo-manager", "Demo Manager", Cms.Server.Auth.StaffRoles.Manager),
+        ("demo-cashier", "Demo Cashier", Cms.Server.Auth.StaffRoles.Cashier),
+        ("demo-tech", "Demo Tech", Cms.Server.Auth.StaffRoles.Tech),
+    };
+
     public bool Enabled { get; init; }
     public TimeSpan ResetInterval { get; init; } = TimeSpan.FromHours(6);
 

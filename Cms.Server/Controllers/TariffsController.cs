@@ -1,4 +1,6 @@
+using Cms.Server.Auth;
 using Cms.Server.Data;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -6,6 +8,7 @@ namespace Cms.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Policy = Policies.FrontDesk)]
 public class TariffsController : ControllerBase
 {
     private readonly CmsDbContext _db;
@@ -24,6 +27,7 @@ public class TariffsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<TariffView>> Create([FromBody] CreateTariffRequest req)
     {
         var tariff = new TariffEntity
@@ -40,6 +44,7 @@ public class TariffsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<TariffView>> Update(Guid id, [FromBody] CreateTariffRequest req)
     {
         var tariff = await _db.Tariffs.FindAsync(id);
@@ -53,6 +58,7 @@ public class TariffsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = Policies.Management)]
     public async Task<IActionResult> Delete(Guid id)
     {
         var tariff = await _db.Tariffs.FindAsync(id);

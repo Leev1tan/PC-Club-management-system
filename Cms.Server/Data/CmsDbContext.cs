@@ -14,6 +14,8 @@ public class CmsDbContext : DbContext
     public DbSet<TariffEntity> Tariffs => Set<TariffEntity>();
     public DbSet<UserEntity> Users => Set<UserEntity>();
     public DbSet<TransactionEntity> Transactions => Set<TransactionEntity>();
+    public DbSet<StaffUserEntity> StaffUsers => Set<StaffUserEntity>();
+    public DbSet<ClubSettingEntity> ClubSettings => Set<ClubSettingEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -92,6 +94,25 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.HasOne<UserEntity>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => e.CreatedUtc);
+        });
+
+        modelBuilder.Entity<StaffUserEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Username).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => e.Username).IsUnique();
+            entity.Property(e => e.DisplayName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.PasswordHash).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Role).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.SecurityStamp).HasMaxLength(64).IsRequired();
+        });
+
+        modelBuilder.Entity<ClubSettingEntity>(entity =>
+        {
+            entity.HasKey(e => e.Key);
+            entity.Property(e => e.Key).HasMaxLength(100);
+            entity.Property(e => e.Value).HasMaxLength(4000);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(64);
         });
     }
 }
@@ -183,4 +204,34 @@ public class TransactionEntity
     public string Type { get; set; } = string.Empty; // topup, session_charge, bonus
     public string? Description { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>Admin UI / API account of a club employee (not a player).</summary>
+public class StaffUserEntity
+{
+    public Guid Id { get; set; }
+    public string Username { get; set; } = string.Empty;   // lower case
+    public string DisplayName { get; set; } = string.Empty;
+    public string PasswordHash { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;       // Owner, Manager, Cashier, Tech
+    public bool IsActive { get; set; } = true;
+    /// <summary>Changes on password, role or status change; invalidates existing login cookies.</summary>
+    public string SecurityStamp { get; set; } = Guid.NewGuid().ToString("N");
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? LastLoginUtc { get; set; }
+}
+
+/// <summary>Club-wide settings that the owner changes at run time (key/value).</summary>
+public class ClubSettingEntity
+{
+    public string Key { get; set; } = string.Empty;
+    public string? Value { get; set; }
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public string? UpdatedBy { get; set; }
+}
+
+public static class ClubSettingKeys
+{
+    /// <summary>Written once when the first owner account is created (guards the setup screen).</summary>
+    public const string SetupCompleted = "setup.completed";
 }

@@ -1,5 +1,7 @@
+using Cms.Server.Auth;
 using Cms.Server.Data;
 using Cms.Server.Repositories;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,6 +9,7 @@ namespace Cms.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Policy = Policies.FrontDesk)]
 public class SessionsController : ControllerBase
 {
     private readonly CmsDbContext _db;
@@ -270,6 +273,7 @@ public class SessionsController : ControllerBase
     /// Revenue summary for the finance tab
     /// </summary>
     [HttpGet("revenue")]
+    [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<RevenueSummary>> Revenue()
     {
         var now = DateTimeOffset.UtcNow;

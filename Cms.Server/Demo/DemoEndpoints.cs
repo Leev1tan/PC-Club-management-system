@@ -6,7 +6,8 @@ public static class DemoEndpoints
 {
     /// <summary>
     /// In the public demo, block actions that would break the demo for other visitors until the
-    /// next reset: every DELETE under /api, and agent registration (demo PCs are simulated).
+    /// next reset: every DELETE under /api, agent registration (demo PCs are simulated), and
+    /// changes of staff accounts, passwords and club settings (visitors could lock others out).
     /// </summary>
     public static IApplicationBuilder UseDemoRestrictions(this IApplicationBuilder app, DemoOptions options)
     {
@@ -15,9 +16,14 @@ public static class DemoEndpoints
         return app.Use(async (context, next) =>
         {
             var request = context.Request;
+            var write = !HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method) && !HttpMethods.IsOptions(request.Method);
             var blocked =
                 (HttpMethods.IsDelete(request.Method) && request.Path.StartsWithSegments("/api")) ||
-                (HttpMethods.IsPost(request.Method) && request.Path.StartsWithSegments("/api/devices/register"));
+                (HttpMethods.IsPost(request.Method) && request.Path.StartsWithSegments("/api/devices/register")) ||
+                (write && request.Path.StartsWithSegments("/api/staff")) ||
+                (write && request.Path.StartsWithSegments("/api/settings")) ||
+                (write && request.Path.StartsWithSegments("/api/auth/password")) ||
+                (write && request.Path.StartsWithSegments("/api/auth/setup"));
             if (blocked)
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -35,7 +41,8 @@ public static class DemoEndpoints
             options.Enabled,
             options.Enabled && options.ResetInterval > TimeSpan.Zero ? options.ResetInterval.TotalHours : null,
             options.Enabled ? state.LastResetUtc : null,
-            options.Enabled ? state.NextResetUtc : null)));
+            options.Enabled ? state.NextResetUtc : null)))
+            .AllowAnonymous();
         return app;
     }
 }

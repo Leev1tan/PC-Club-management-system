@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
+using Cms.Server.Auth;
 using Cms.Server.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +11,7 @@ namespace Cms.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Policy = Policies.FrontDesk)]
 public class UsersController : ControllerBase
 {
     private readonly CmsDbContext _db;
@@ -55,6 +59,8 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("login")]
+    [AllowAnonymous] // player login on the lock screen (Cms.Launcher)
+    [EnableRateLimiting(AuthConstants.AuthRateLimitPolicy)]
     public async Task<ActionResult<UserView>> Login([FromBody] LoginRequest req)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == req.Username.Trim().ToLower());

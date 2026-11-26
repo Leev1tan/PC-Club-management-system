@@ -1,4 +1,6 @@
-using System.Collections.Concurrent;
+using Cms.Server.Auth;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Cms.Server.Data;
 using Cms.Server.Repositories;
@@ -22,6 +24,8 @@ public class DevicesController : ControllerBase
     }
 
     [HttpPost("register")]
+    [AllowAnonymous] // agent; authenticated by enrollment token or device key
+    [EnableRateLimiting(AuthConstants.AuthRateLimitPolicy)]
     public ActionResult<DeviceRegistrationResponse> Register([FromBody] DeviceRegistrationRequest request)
     {
         var result = _devices.Register(request);
@@ -29,6 +33,7 @@ public class DevicesController : ControllerBase
     }
 
     [HttpPost("heartbeat")]
+    [AllowAnonymous] // agent; authenticated by X-Device-Key
     public IActionResult Heartbeat([FromHeader(Name = "X-Device-Key")] string? deviceKey, [FromBody] DeviceHeartbeatRequest request)
     {
         if (string.IsNullOrWhiteSpace(deviceKey)) return Unauthorized();
@@ -38,6 +43,7 @@ public class DevicesController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = Policies.AnyStaff)]
     public async Task<ActionResult<IEnumerable<DeviceDetailView>>> List()
     {
         var now = DateTimeOffset.UtcNow;
@@ -79,6 +85,7 @@ public class DevicesController : ControllerBase
     }
 
     [HttpPut("{deviceId:guid}/zone")]
+    [Authorize(Policy = Policies.DeviceAdmin)]
     public async Task<IActionResult> AssignZone(Guid deviceId, [FromBody] AssignZoneRequest req)
     {
         var device = await _db.Devices.FindAsync(deviceId);
@@ -89,6 +96,7 @@ public class DevicesController : ControllerBase
     }
 
     [HttpPut("{deviceId:guid}/position")]
+    [Authorize(Policy = Policies.DeviceAdmin)]
     public async Task<IActionResult> SetPosition(Guid deviceId, [FromBody] SetPositionRequest req)
     {
         var device = await _db.Devices.FindAsync(deviceId);
@@ -100,6 +108,7 @@ public class DevicesController : ControllerBase
     }
 
     [HttpPost("{deviceId:guid}/commands")]
+    [Authorize(Policy = Policies.AnyStaff)]
     public ActionResult<CommandView> Enqueue(Guid deviceId, [FromBody] EnqueueCommandRequest request)
     {
         var cmd = _devices.EnqueueCommand(deviceId, request);
@@ -108,6 +117,7 @@ public class DevicesController : ControllerBase
     }
 
     [HttpGet("{deviceId:guid}/commands")]
+    [AllowAnonymous] // agent; authenticated by X-Device-Key
     public async Task<ActionResult<IEnumerable<CommandView>>> Poll(
         Guid deviceId,
         [FromHeader(Name = "X-Device-Key")] string? deviceKey,
@@ -118,6 +128,7 @@ public class DevicesController : ControllerBase
     }
 
     [HttpPost("{deviceId:guid}/commands/{commandId:guid}/ack")]
+    [AllowAnonymous] // agent; authenticated by X-Device-Key
     public async Task<IActionResult> Ack(
         Guid deviceId,
         Guid commandId,

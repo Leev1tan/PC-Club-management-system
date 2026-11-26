@@ -1,3 +1,4 @@
+using Cms.Server.Auth;
 using Cms.Server.Controllers;
 using Cms.Server.Data;
 using Microsoft.EntityFrameworkCore;
@@ -58,7 +59,8 @@ public static class DemoSeeder
                && !await db.Users.AnyAsync(ct)
                && !await db.Zones.AnyAsync(ct)
                && !await db.Tariffs.AnyAsync(ct)
-               && !await db.Sessions.AnyAsync(ct);
+               && !await db.Sessions.AnyAsync(ct)
+               && !await db.StaffUsers.AnyAsync(ct);
     }
 
     public static async Task<DemoSeedResult> ResetAsync(CmsDbContext db, DateTimeOffset now, Random rng, CancellationToken ct = default)
@@ -74,6 +76,8 @@ public static class DemoSeeder
         await db.Tariffs.ExecuteDeleteAsync(ct);
         await db.Users.ExecuteDeleteAsync(ct);
         await db.Zones.ExecuteDeleteAsync(ct);
+        await db.StaffUsers.ExecuteDeleteAsync(ct);
+        await db.ClubSettings.ExecuteDeleteAsync(ct);
         db.ChangeTracker.Clear();
 
         var result = Seed(db, now, rng);
@@ -126,6 +130,17 @@ public static class DemoSeeder
                 pcs.Add(new SimulatedPc(device.Id, hostname, device.DeviceKey, ip, offline, null));
             }
             row += (spec.Count + 5) / 6 + 1;
+        }
+
+        // Demo staff accounts (public demo password, demo databases only)
+        var staffHash = Passwords.Hash(DemoOptions.StaffPassword);
+        foreach (var (username, displayName, role) in DemoOptions.StaffAccounts)
+        {
+            db.StaffUsers.Add(new StaffUserEntity
+            {
+                Id = Guid.NewGuid(), Username = username, DisplayName = displayName,
+                PasswordHash = staffHash, Role = role, IsActive = true, CreatedUtc = now
+            });
         }
 
         var night = new TariffEntity { Id = Guid.NewGuid(), Name = "Нічний (22:00–08:00)", PricePerHour = 25m, ZoneId = null };
