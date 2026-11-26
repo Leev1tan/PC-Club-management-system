@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  server:
+    name: Server and Shared (Linux, build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build Cms.Shared
+        run: dotnet build Cms.Shared/Cms.Shared.csproj -c Release
+
+      - name: Build Cms.Server
+        run: dotnet build Cms.Server/Cms.Server.csproj -c Release
+
+      - name: Test
+        run: dotnet test tests/Cms.Server.Tests/Cms.Server.Tests.csproj -c Release --logger "trx;LogFileName=server-tests.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-test-results
+          path: TestResults
+
+  windows:
+    name: Agent, Launcher and Windows server package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build Cms.Agent.Service
+        run: dotnet build Cms.Agent.Service/Cms.Agent.Service.csproj -c Release
+
+      - name: Build Cms.Launcher
+        run: dotnet build Cms.Launcher/Cms.Launcher.csproj -c Release
+
+      # Same publish command as scripts/installer/build-packages.ps1 (Windows server install path)
+      - name: Publish Cms.Server for Windows (installer layout)
+        run: dotnet publish Cms.Server -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/server
+
+      - name: Test server on Windows
+        run: dotnet test tests/Cms.Server.Tests/Cms.Server.Tests.csproj -c Release
+
+  admin-ui:
+    name: Admin UI (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin-ui/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Build (static export to admin-ui/out)
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  docker:
+    name: Docker images (build, smoke test, push on v* tags)
+    needs: [server, admin-ui]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image owner (ghcr.io needs lowercase)
+        id: owner
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Server image tags
+        id: meta-server
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.name }}/ccms-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Admin UI image tags
+        id: meta-ui
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.name }}/ccms-admin-ui
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Cms.Server/Dockerfile
+          load: true
+          tags: |
+            ${{ steps.meta-server.outputs.tags }}
+            ccms-server:local
+          labels: ${{ steps.meta-server.outputs.labels }}
+          cache-from: type=gha,scope=ccms-server
+          cache-to: type=gha,mode=max,scope=ccms-server
+
+      - name: Build admin UI image
+        uses: docker/build-push-action@v6
+        with:
+          context: admin-ui
+          load: true
+          tags: |
+            ${{ steps.meta-ui.outputs.tags }}
+            ccms-admin-ui:local
+          labels: ${{ steps.meta-ui.outputs.labels }}
+          cache-from: type=gha,scope=ccms-admin-ui
+          cache-to: type=gha,mode=max,scope=ccms-admin-ui
+
+      - name: Smoke test (docker compose, demo mode)
+        env:
+          DEMO_MODE: "true"
+          CMS_BIND_ADDRESS: 127.0.0.1
+        run: |
+          POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+          export POSTGRES_PASSWORD
+          docker compose up -d --no-build
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:5081/api/health && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:5081/api/devices \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d) == 20, len(d); print(len(d), "demo PCs")'
+          curl -fsS http://127.0.0.1:5081/ | grep -q "<title>"
+
+      - name: Compose logs
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop compose stack
+        if: always()
+        run: docker compose down -v
+
+      - name: Log in to ghcr.io
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push images (version tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          OWNER: ${{ steps.owner.outputs.name }}
+        run: |
+          for image in ccms-server ccms-admin-ui; do
+            docker push --all-tags "ghcr.io/${OWNER}/${image}"
+          done
