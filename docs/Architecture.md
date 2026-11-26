@@ -36,11 +36,11 @@ graph TB
 
 | Project | Type | Description |
 |---------|------|-------------|
-| [Cms.Server](file:///f:/v.wae/club-management-system/Cms.Server) | ASP.NET Core Web API | Central management server with REST endpoints |
-| [Cms.Agent.Service](file:///f:/v.wae/club-management-system/Cms.Agent.Service) | .NET Worker Service | Windows background service running on each PC |
-| [Cms.Launcher](file:///f:/v.wae/club-management-system/Cms.Launcher) | WPF Application | Kiosk UI with lock screen overlay |
-| [Cms.Shared](file:///f:/v.wae/club-management-system/Cms.Shared) | Class Library | Shared contracts (currently minimal) |
-| [admin-ui](file:///f:/v.wae/club-management-system/admin-ui) | Next.js | Web dashboard for administrators |
+| [Cms.Server](../Cms.Server) | ASP.NET Core Web API | Central management server with REST endpoints |
+| [Cms.Agent.Service](../Cms.Agent.Service) | .NET Worker Service | Windows background service running on each PC |
+| [Cms.Launcher](../Cms.Launcher) | WPF Application | Kiosk UI with lock screen overlay |
+| [Cms.Shared](../Cms.Shared) | Class Library | Shared contracts (currently minimal) |
+| [admin-ui](../admin-ui) | Next.js | Web dashboard for administrators |
 
 ---
 
@@ -50,17 +50,17 @@ graph TB
 
 **Technology**: ASP.NET Core 8, Entity Framework Core, PostgreSQL
 
-**Entry Point**: [Program.cs](file:///f:/v.wae/club-management-system/Cms.Server/Program.cs)
+**Entry Point**: [Program.cs](../Cms.Server/Program.cs)
 
 **Key Components**:
 
 | File | Purpose |
 |------|---------|
-| [DevicesController.cs](file:///f:/v.wae/club-management-system/Cms.Server/Controllers/DevicesController.cs) | Device registration, heartbeats, command queue |
-| [SessionsController.cs](file:///f:/v.wae/club-management-system/Cms.Server/Controllers/SessionsController.cs) | Session start/end, duration management |
-| [CmsDbContext.cs](file:///f:/v.wae/club-management-system/Cms.Server/Data/CmsDbContext.cs) | EF Core DbContext with entity definitions |
-| [IDeviceRepository.cs](file:///f:/v.wae/club-management-system/Cms.Server/Repositories/IDeviceRepository.cs) | Device operations interface |
-| [ISessionRepository.cs](file:///f:/v.wae/club-management-system/Cms.Server/Repositories/ISessionRepository.cs) | Session operations interface |
+| [DevicesController.cs](../Cms.Server/Controllers/DevicesController.cs) | Device registration, heartbeats, command queue |
+| [SessionsController.cs](../Cms.Server/Controllers/SessionsController.cs) | Session start/end, duration management |
+| [CmsDbContext.cs](../Cms.Server/Data/CmsDbContext.cs) | EF Core DbContext with entity definitions |
+| [IDeviceRepository.cs](../Cms.Server/Repositories/IDeviceRepository.cs) | Device operations interface |
+| [ISessionRepository.cs](../Cms.Server/Repositories/ISessionRepository.cs) | Session operations interface |
 
 **REST API Endpoints**:
 
@@ -74,7 +74,11 @@ POST /api/devices/{id}/commands/{cmdId}/ack → Acknowledge command
 
 POST /api/sessions               → Start new session
 POST /api/sessions/{id}/end      → End session early
+POST /api/sessions/{id}/extend   → Add minutes to a prepaid session
 GET  /api/sessions               → List all sessions
+
+GET  /health, /api/health        → Health check
+GET  /api/demo                   → Demo mode status (banner in the admin UI)
 ```
 
 ---
@@ -83,7 +87,7 @@ GET  /api/sessions               → List all sessions
 
 **Technology**: .NET 8 Worker Service, runs as Windows Service
 
-**Entry Point**: [Worker.cs](file:///f:/v.wae/club-management-system/Cms.Agent.Service/Worker.cs)
+**Entry Point**: [Worker.cs](../Cms.Agent.Service/Worker.cs)
 
 **Responsibilities**:
 1. **Self-Registration**: Registers with server on first start, stores `deviceId` and `deviceKey`
@@ -115,12 +119,12 @@ GET  /api/sessions               → List all sessions
 
 **Technology**: WPF (.NET 8), runs in full-screen kiosk mode
 
-**Entry Point**: [MainWindow.xaml.cs](file:///f:/v.wae/club-management-system/Cms.Launcher/MainWindow.xaml.cs)
+**Entry Point**: [MainWindow.xaml.cs](../Cms.Launcher/MainWindow.xaml.cs)
 
 **Features**:
 - Full-screen overlay when PC is locked
 - Session countdown timer display
-- Keyboard blocking when locked (via [KeyboardBlocker.cs](file:///f:/v.wae/club-management-system/Cms.Launcher/KeyboardBlocker.cs))
+- Keyboard blocking when locked (via [KeyboardBlocker.cs](../Cms.Launcher/KeyboardBlocker.cs))
 - Staff unlock with PIN (`Ctrl+Shift+U`, PIN: `1234`)
 - Fail-open mechanism: unlocks if agent heartbeat is stale (>15s)
 
@@ -133,9 +137,9 @@ GET  /api/sessions               → List all sessions
 
 ### 4. Admin UI (Next.js)
 
-**Technology**: Next.js 14, React, Tailwind CSS
+**Technology**: Next.js 15 (static export), React 19, Tailwind CSS
 
-**Entry Point**: [page.tsx](file:///f:/v.wae/club-management-system/admin-ui/app/page.tsx)
+**Entry Point**: [page.tsx](../admin-ui/app/page.tsx)
 
 **Features**:
 - Real-time device list (polls every 5 seconds)
@@ -268,6 +272,24 @@ sequenceDiagram
 
 ---
 
+### Server deployment options
+
+The club PCs always run Windows (agent + launcher). The server has two equal options:
+
+| | Windows PC (installer) | Docker compose |
+|---|---|---|
+| Server process | `ClubServer` Windows service (`Cms.Server.exe`) | `ccms-server` container (Linux, ASP.NET Core 8) |
+| Admin UI | static files in the server `wwwroot` | `ccms-admin-ui` container (nginx), proxies `/api` to the server |
+| Database | SQLite (default) or PostgreSQL | PostgreSQL 16 container |
+| Club URL | `http://<server>:5081` | `http://<server>:5081` |
+| Schema | SQLite: created on start; PostgreSQL: EF Core migrations on start | EF Core migrations on start |
+
+In both cases the admin UI calls the API on its own origin (`/api/...`). For a public demo behind an
+ingress, route `/` to the admin UI and `/api` to the server. See the [README](../README.md) for
+commands and [ClubDeployment.md](ClubDeployment.md) for the club network.
+
+---
+
 ## Security Considerations
 
 | Aspect | Implementation |
@@ -287,12 +309,12 @@ sequenceDiagram
 | **Server** | .NET 8, ASP.NET Core, EF Core, PostgreSQL |
 | **Agent** | .NET 8 Worker Service, Windows Service |
 | **Launcher** | .NET 8, WPF, Windows Low-Level Keyboard Hook |
-| **Admin UI** | Next.js 14, React, Tailwind CSS |
+| **Admin UI** | Next.js 15 (static export), React 19, Tailwind CSS |
 | **Build** | Visual Studio 2022, dotnet CLI, npm |
 
 ---
 
 ## Related Documentation
 
-- [ProjectPlan.md](file:///f:/v.wae/club-management-system/docs/ProjectPlan.md) — Strategy, milestones, and detailed planning
-- [TestChecklist.md](file:///f:/v.wae/club-management-system/docs/TestChecklist.md) — Manual testing procedures
+- [ProjectPlan.md](ProjectPlan.md) — Strategy, milestones, and detailed planning
+- [TestChecklist.md](TestChecklist.md) — Manual testing procedures
