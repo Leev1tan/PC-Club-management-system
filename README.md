@@ -26,8 +26,10 @@ Project authorship: created and maintained by Volodymyr Shabat.
 
 ## Screenshots
 
-> Screenshots and a link to the public live demo will be added here.
-> To see the UI now, start the [demo mode](#demo-mode) locally: it needs only Docker.
+**Live demo:** https://club-demo.k3s.ksm.in.ua (demo mode: 20 simulated PCs, data resets every 6 hours, nothing is real).
+You can also run the same [demo mode](#demo-mode) locally: it needs only Docker.
+
+![Dashboard (demo mode)](docs/screenshots/dashboard.png)
 
 Planned images (in `docs/screenshots/`): dashboard, PC map, session dialog, players, tariffs, finance.
 
@@ -71,7 +73,7 @@ Status of each product area. "Partial" means a basic version works and more is p
 | 8 | Game launcher and account pool | Planned | – | Game grid in the launcher, club account pool |
 | 9 | Tournaments | Planned | – | Batch unlock of a zone for a match |
 | 10 | Analytics and reports | Partial | Revenue today/week/month, occupancy by zone | Owner dashboard, occupancy heatmap, CSV export |
-| 11 | Deployment | Partial | Windows installers, Docker compose, demo mode, CI | Public live demo, pre-built release binaries, multi-club |
+| 11 | Deployment | Partial | Windows installers, Docker compose, demo mode, CI | Pre-built release binaries, multi-club (public live demo: done) |
 | 12 | Languages and currency | Partial | Admin UI in Ukrainian, prices in ₴ | Ukrainian/English switch, currency and time zone settings |
 
 Important: the admin UI and the API have **no login yet** (planned in area 6). Run the server only on the club LAN, not open to the internet, until roles and login exist.
