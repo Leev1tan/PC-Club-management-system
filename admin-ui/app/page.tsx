@@ -1,6 +1,9 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
+// Same origin by default: the API is served under /api on the host that serves this UI
+// (Cms.Server wwwroot, the admin-ui container proxy, or an ingress path split).
+// NEXT_PUBLIC_API_URL (build time) points the UI to another API origin, e.g. for `npm run dev`.
 const API = process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5081');
 
@@ -14,6 +17,7 @@ type Device = {
   zoneId: string | null; zoneName: string | null; zoneColor: string | null;
   positionX: number | null; positionY: number | null;
   occupancyStatus: string; activeSessionId: string | null; activeUserId: string | null; sessionEndUtc: string | null;
+  isLocked?: boolean | null; pendingCommands?: number;
 };
 type Session = {
   id: string; deviceId: string; deviceHostname: string | null;
@@ -25,6 +29,7 @@ type Session = {
 type Revenue = { today: number; week: number; month: number; currency: string };
 type Transaction = { id: string; userId: string; amount: number; type: string; description: string | null; createdUtc: string };
 type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' };
+type DemoInfo = { enabled: boolean; resetIntervalHours: number | null; lastResetUtc: string | null; nextResetUtc: string | null };
 
 // ===== Tab IDs =====
 type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'users' | 'tariffs' | 'finance';
@@ -54,6 +59,11 @@ function timeRemaining(endUtc: string | null): string {
   return h > 0 ? `${h}г ${m % 60}хв` : `${m}хв`;
 }
 
+async function errorText(res: Response): Promise<string> {
+  const text = await res.text();
+  try { return JSON.parse(text).error ?? text; } catch { return text || `HTTP ${res.status}`; }
+}
+
 function timeAgo(iso: string | null): string {
   if (!iso) return 'Ніколи';
   const diff = Date.now() - new Date(iso).getTime();
@@ -76,6 +86,9 @@ export default function AdminPage() {
   const [revenue, setRevenue] = useState<Revenue | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [loading, setLoading] = useState(true);
+  const [demo, setDemo] = useState<DemoInfo | null>(null);
+  const [zoneFilter, setZoneFilter] = useState<string | null>(null);
+  const [sessionFilter, setSessionFilter] = useState<'all' | 'active' | 'ended'>('all');
 
   // Modal state
   const [sessionModal, setSessionModal] = useState<{ deviceId: string; hostname: string } | null>(null);
@@ -110,19 +123,47 @@ export default function AdminPage() {
     setLoading(false);
   }, []);
 
+  // The tab and modal components below are declared inside this component, so every
+  // re-render remounts them and resets their inputs. Auto-refresh therefore pauses
+  // while a modal is open.
+  const modalOpen = !!(sessionModal || zoneModal || tariffModal || topUpModal);
+  const modalOpenRef = useRef(false);
+  useEffect(() => { modalOpenRef.current = modalOpen; }, [modalOpen]);
+
   useEffect(() => {
     fetchAll();
-    const iv = setInterval(fetchAll, 5000);
+    const iv = setInterval(() => { if (!modalOpenRef.current) fetchAll(); }, 5000);
     return () => clearInterval(iv);
   }, [fetchAll]);
 
+  useEffect(() => {
+    fetch(`${API}/api/demo`).then(r => (r.ok ? r.json() : null)).then(setDemo).catch(() => { /* older server */ });
+  }, []);
+
   // ===== API Actions =====
   const sendCommand = async (deviceId: string, type: string, payload?: object) => {
-    await fetch(`${API}/api/devices/${deviceId}/commands`, {
+    const res = await fetch(`${API}/api/devices/${deviceId}/commands`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, payload: payload || null }),
     });
+    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast(`Команду "${type}" надіслано`, 'success');
+    fetchAll();
+    setTimeout(fetchAll, 2500); // the agent usually confirms within 1-2 s
+  };
+
+  const sendMessage = (deviceId: string, hostname: string) => {
+    const text = window.prompt(`Повідомлення на екран ${hostname}:`);
+    if (text && text.trim()) sendCommand(deviceId, 'message', { text: text.trim() });
+  };
+
+  const extendSession = async (sessionId: string, minutes: number) => {
+    const res = await fetch(`${API}/api/sessions/${sessionId}/extend`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ minutes }),
+    });
+    if (res.ok) { toast(`Сесію продовжено на ${minutes} хв ✓`, 'success'); fetchAll(); }
+    else toast(`Помилка: ${await errorText(res)}`, 'error');
   };
 
   const startSession = async (deviceId: string, tariffId: string, userId: string | null, duration: number | null) => {
@@ -150,7 +191,8 @@ export default function AdminPage() {
   };
 
   const deleteZone = async (id: string) => {
-    await fetch(`${API}/api/zones/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API}/api/zones/${id}`, { method: 'DELETE' });
+    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast('Зону видалено', 'info');
     fetchAll();
   };
@@ -165,7 +207,8 @@ export default function AdminPage() {
   };
 
   const deleteTariff = async (id: string) => {
-    await fetch(`${API}/api/tariffs/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API}/api/tariffs/${id}`, { method: 'DELETE' });
+    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast('Тариф видалено', 'info');
     fetchAll();
   };
@@ -311,7 +354,6 @@ export default function AdminPage() {
 
   // ===== PC Map Tab =====
   function MapTab() {
-    const [zoneFilter, setZoneFilter] = useState<string | null>(null);
     const filtered = zoneFilter ? devices.filter(d => d.zoneId === zoneFilter) : devices;
 
     return (
@@ -356,12 +398,22 @@ export default function AdminPage() {
                 </div>
                 {d.sessionEndUtc && <div className="pc-card-timer">{timeRemaining(d.sessionEndUtc)}</div>}
                 {d.zoneName && <div className="pc-card-zone">{d.zoneName}</div>}
+                <div className="pc-card-flags">
+                  {d.isLocked === true && <span title="Заблоковано">🔒</span>}
+                  {d.isLocked === false && <span title="Розблоковано">🔓</span>}
+                  {(d.pendingCommands ?? 0) > 0 && <span title="Команди чекають на підтвердження від ПК">⏳ {d.pendingCommands}</span>}
+                </div>
 
                 {pcPopover === d.id && (
                   <div className="popover" onClick={e => e.stopPropagation()}>
                     {d.occupancyStatus === 'free' && (
                       <button className="popover-item" onClick={() => { setPcPopover(null); setSessionModal({ deviceId: d.id, hostname: d.hostname }); }}>
                         🎮 Розпочати сесію
+                      </button>
+                    )}
+                    {d.activeSessionId && d.sessionEndUtc && (
+                      <button className="popover-item" onClick={() => { setPcPopover(null); extendSession(d.activeSessionId!, 30); }}>
+                        ➕ Продовжити +30 хв
                       </button>
                     )}
                     {d.activeSessionId && (
@@ -372,6 +424,7 @@ export default function AdminPage() {
                     <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'lock'); }}>🔒 Заблокувати</button>
                     <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'unlock'); }}>🔓 Розблокувати</button>
                     <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'restart'); }}>🔄 Перезавантажити</button>
+                    <button className="popover-item" onClick={() => { setPcPopover(null); sendMessage(d.id, d.hostname); }}>💬 Повідомлення</button>
                     <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'logoff'); }}>🚪 Вийти з системи</button>
                   </div>
                 )}
@@ -442,7 +495,8 @@ export default function AdminPage() {
 
   // ===== Sessions Tab =====
   function SessionsTab() {
-    const [filter, setFilter] = useState<'all' | 'active' | 'ended'>('all');
+    const filter = sessionFilter;
+    const setFilter = setSessionFilter;
     const filtered = filter === 'all' ? sessions : sessions.filter(s => s.status === filter);
 
     return (
@@ -937,6 +991,15 @@ export default function AdminPage() {
 
       {/* Main */}
       <main className="main-content">
+        {demo?.enabled && (
+          <div className="demo-banner">
+            <strong>LIVE DEMO</strong> · {demo.resetIntervalHours
+              ? `Дані скидаються кожні ${demo.resetIntervalHours} год · Data resets every ${demo.resetIntervalHours} h`
+              : 'Дані скидаються при перезапуску · Data resets on restart'}
+            {demo.nextResetUtc && ` · наступне / next: ${fmtTime(demo.nextResetUtc)}`}
+            {' · ПК симульовані / PCs are simulated'}
+          </div>
+        )}
         <div className="top-bar">
           <span className="top-bar-title">
             {tabs.find(t => t.id === activeTab)?.icon} {tabs.find(t => t.id === activeTab)?.label}

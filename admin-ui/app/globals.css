@@ -3,7 +3,7 @@
    All class names aligned with page.tsx component
    ═══════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@300;400;500;600;700&family=Rajdhani:wght@300;400;500;600;700&display=swap');
+/* Fonts: self-hosted via next/font in app/layout.tsx (no runtime requests to Google) */
 
 @tailwind base;
 @tailwind components;
@@ -44,9 +44,9 @@
   --border-glow: rgba(0, 240, 255, 0.3);
   --speed: 0.15s;
 
-  --font-display: 'Orbitron', monospace;
-  --font-mono: 'JetBrains Mono', monospace;
-  --font-body: 'Rajdhani', sans-serif;
+  --font-display: var(--font-orbitron), 'Orbitron', monospace;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --font-body: var(--font-rajdhani), 'Rajdhani', sans-serif;
 }
 
 /* ── Reset ── */
@@ -470,6 +470,27 @@ body::after {
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-top: 4px;
+}
+.pc-card-flags {
+  display: flex;
+  gap: 6px;
+  min-height: 14px;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ── Live demo banner ── */
+.demo-banner {
+  padding: 6px 24px;
+  border-bottom: 1px solid var(--neon-yellow);
+  background: rgba(255, 224, 25, 0.08);
+  color: var(--neon-yellow);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-align: center;
 }
 
 /* Status dot (diamond) */
