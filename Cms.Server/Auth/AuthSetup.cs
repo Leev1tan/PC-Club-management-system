@@ -67,7 +67,9 @@ public static class AuthSetup
                 options.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return Task.CompletedTask; };
                 options.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; };
                 options.Events.OnValidatePrincipal = ValidatePrincipalAsync;
-            });
+            })
+            .AddScheme<AuthenticationSchemeOptions, DeviceKeyAuthenticationHandler>(DeviceKeyAuthenticationHandler.SchemeName, null);
+        services.AddSingleton(DeviceEnrollmentOptions.FromConfiguration(config));
 
         services.AddAuthorization(options =>
         {
@@ -78,6 +80,13 @@ public static class AuthSetup
                     .RequireAuthenticatedUser()
                     .RequireRole(roles));
             }
+            options.AddPolicy(Policies.Device, policy => policy
+                .AddAuthenticationSchemes(DeviceKeyAuthenticationHandler.SchemeName)
+                .RequireClaim(DeviceKeyAuthenticationHandler.DeviceIdClaim));
+            options.AddPolicy(Policies.ApprovedDevice, policy => policy
+                .AddAuthenticationSchemes(DeviceKeyAuthenticationHandler.SchemeName)
+                .RequireClaim(DeviceKeyAuthenticationHandler.DeviceIdClaim)
+                .RequireClaim(DeviceKeyAuthenticationHandler.StatusClaim, DeviceStatuses.Approved));
             // Every endpoint without its own attribute needs a signed-in staff member
             options.FallbackPolicy = new AuthorizationPolicyBuilder(CookieAuthenticationDefaults.AuthenticationScheme)
                 .RequireAuthenticatedUser()

@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
 using System.Text.Json;
+using Cms.Server.Auth;
 using Cms.Server.Controllers;
 
 namespace Cms.Server.Repositories;
@@ -22,22 +22,23 @@ public class InMemoryDeviceRepository : IDeviceRepository
 
     private record CommandRecord(Guid Id, string Type, string? PayloadJson);
 
-    public DeviceRegistrationResponse Register(DeviceRegistrationRequest request)
+    /// <summary>Always creates a new pending device; never returns the key of an existing one.</summary>
+    public DeviceRegistrationResult Register(DeviceRegistrationRequest request)
     {
-        var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
+        var key = DeviceKeys.Generate();
         var device = new DeviceRecord(Guid.NewGuid(), request.Hostname, request.OsVersion, request.AgentVersion, key);
         _devices[device.Id] = device;
         _keyToId[key] = device.Id;
-        return new DeviceRegistrationResponse(device.Id, key);
+        return DeviceRegistrationResult.Ok(new DeviceRegistrationResponse(device.Id, key, DeviceStatuses.Pending), DeviceRegistrationKind.Pending);
     }
 
-    public bool Heartbeat(string deviceKey, DeviceHeartbeatRequest request)
+    public string? Heartbeat(string deviceKey, DeviceHeartbeatRequest request)
     {
-        if (!_keyToId.TryGetValue(deviceKey, out var deviceId)) return false;
-        if (!_devices.TryGetValue(deviceId, out var device)) return false;
+        if (!_keyToId.TryGetValue(deviceKey, out var deviceId)) return null;
+        if (!_devices.TryGetValue(deviceId, out var device)) return null;
         device.LastSeenUtc = DateTimeOffset.UtcNow;
         device.LastIp = request.Ip;
-        return true;
+        return DeviceStatuses.Pending;
     }
 
     public IEnumerable<DeviceView> List()

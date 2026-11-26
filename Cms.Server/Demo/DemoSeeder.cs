@@ -112,13 +112,16 @@ public static class DemoSeeder
                 var hostname = $"{spec.HostPrefix}-{i:00}";
                 var offline = hostname == OfflineHostname;
                 var ip = $"10.3.3.{ipSuffix++}";
+                var deviceKey = $"demo-{Guid.NewGuid():N}"; // the database stores only its hash
                 var device = new DeviceEntity
                 {
                     Id = Guid.NewGuid(),
                     Hostname = hostname,
                     OsVersion = "Microsoft Windows NT 10.0.22631.0",
                     AgentVersion = AgentVersion,
-                    DeviceKey = $"demo-{Guid.NewGuid():N}",
+                    DeviceKey = DeviceKeys.Hash(deviceKey),
+                    Status = DeviceStatuses.Approved,
+                    RegisteredUtc = now.AddDays(-30),
                     LastSeenUtc = offline ? now.AddHours(-3).AddMinutes(-12) : now,
                     LastIp = ip,
                     ZoneId = zone.Id,
@@ -127,7 +130,7 @@ public static class DemoSeeder
                 };
                 db.Devices.Add(device);
                 devices.Add((device, tariff));
-                pcs.Add(new SimulatedPc(device.Id, hostname, device.DeviceKey, ip, offline, null));
+                pcs.Add(new SimulatedPc(device.Id, hostname, deviceKey, ip, offline, null));
             }
             row += (spec.Count + 5) / 6 + 1;
         }

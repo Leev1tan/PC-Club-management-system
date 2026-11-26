@@ -117,6 +117,16 @@ namespace Cms.Server.Migrations
                     b.Property<int?>("PositionY")
                         .HasColumnType("integer");
 
+                    b.Property<DateTimeOffset?>("RegisteredUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("approved");
+
                     b.Property<Guid?>("ZoneId")
                         .HasColumnType("uuid");
 

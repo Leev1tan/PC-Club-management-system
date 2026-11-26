@@ -44,6 +44,10 @@ public static class DatabaseInitializer
                             logger.LogWarning("Upgraded the SQLite database schema: added {Changes}", string.Join(", ", changes));
                     }
                 }
+
+                var hashed = await Cms.Server.Auth.DeviceKeys.HashLegacyKeysAsync(db, ct);
+                if (hashed > 0)
+                    logger.LogWarning("Replaced {Count} stored device key(s) with their SHA-256 hash", hashed);
                 return;
             }
             catch (Exception ex) when (attempt < MaxAttempts && ex is NpgsqlException or System.Net.Sockets.SocketException or TimeoutException)

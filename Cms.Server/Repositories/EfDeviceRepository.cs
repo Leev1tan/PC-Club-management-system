@@ -1,5 +1,5 @@
-using System.Security.Cryptography;
 using System.Text.Json;
+using Cms.Server.Auth;
 using Cms.Server.Controllers;
 using Cms.Server.Data;
 using Cms.Shared;
@@ -11,44 +11,103 @@ public class EfDeviceRepository : IDeviceRepository
 {
     private readonly CmsDbContext _db;
     private readonly DeviceRuntimeState? _runtime;
+    private readonly DeviceEnrollmentOptions _enrollment;
 
-    public EfDeviceRepository(CmsDbContext db, DeviceRuntimeState? runtime = null)
+    public EfDeviceRepository(CmsDbContext db, DeviceRuntimeState? runtime = null, DeviceEnrollmentOptions? enrollment = null)
     {
         _db = db;
         _runtime = runtime;
+        _enrollment = enrollment ?? new DeviceEnrollmentOptions();
     }
 
-    public DeviceRegistrationResponse Register(DeviceRegistrationRequest request)
+    /// <summary>
+    /// Registration never hands out the key of an existing PC:
+    ///  1. With the current device key: updates the PC and returns the same key (re-registration).
+    ///  2. With the enrollment token: approved at once; a PC with the same host name gets a NEW key
+    ///     (reinstall), which ends the old key.
+    ///  3. Without both: a new "pending" PC that does nothing until staff approve it.
+    /// </summary>
+    public DeviceRegistrationResult Register(DeviceRegistrationRequest request)
     {
-        // Check if device with same hostname already exists — re-register
-        var existing = _db.Devices.FirstOrDefault(d => d.Hostname == request.Hostname);
-        if (existing != null)
+        var now = DateTimeOffset.UtcNow;
+        var hostname = (request.Hostname ?? string.Empty).Trim();
+        if (hostname.Length is 0 or > 255) return DeviceRegistrationResult.Invalid("Hostname is required (at most 255 characters).");
+        var os = Truncate(request.OsVersion, 255);
+        var agentVersion = Truncate(request.AgentVersion, 50);
+
+        if (!string.IsNullOrEmpty(request.DeviceKey))
         {
-            existing.OsVersion = request.OsVersion;
-            existing.AgentVersion = request.AgentVersion;
-            existing.LastSeenUtc = DateTimeOffset.UtcNow;
+            var hash = DeviceKeys.Hash(request.DeviceKey);
+            var known = _db.Devices.FirstOrDefault(d => d.DeviceKey == hash);
+            if (known == null || known.Status == DeviceStatuses.Revoked || (request.DeviceId.HasValue && request.DeviceId != known.Id))
+                return DeviceRegistrationResult.Unauthorized("Unknown or revoked device key.");
+            known.OsVersion = os;
+            known.AgentVersion = agentVersion;
+            known.LastSeenUtc = now;
             _db.SaveChanges();
-            return new DeviceRegistrationResponse(existing.Id, existing.DeviceKey);
+            return DeviceRegistrationResult.Ok(new DeviceRegistrationResponse(known.Id, request.DeviceKey, known.Status), DeviceRegistrationKind.ReRegistered);
         }
 
-        var key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
+        var key = DeviceKeys.Generate();
+        if (!string.IsNullOrEmpty(request.Token))
+        {
+            if (!_enrollment.TokenMatches(request.Token))
+                return DeviceRegistrationResult.Unauthorized("Wrong enrollment token.");
+
+            // Reinstall of a known PC: keep its zone, position and history, replace the key
+            var existing = _db.Devices.Where(d => d.Hostname == hostname && d.Status != DeviceStatuses.Revoked)
+                .AsEnumerable()
+                .OrderBy(d => d.Status == DeviceStatuses.Approved ? 0 : 1)
+                .FirstOrDefault();
+            if (existing != null)
+            {
+                existing.DeviceKey = DeviceKeys.Hash(key);
+                existing.Status = DeviceStatuses.Approved;
+                existing.OsVersion = os;
+                existing.AgentVersion = agentVersion;
+                existing.LastSeenUtc = now;
+                _db.SaveChanges();
+                return DeviceRegistrationResult.Ok(new DeviceRegistrationResponse(existing.Id, key, existing.Status), DeviceRegistrationKind.ReEnrolled);
+            }
+            return DeviceRegistrationResult.Ok(Create(hostname, os, agentVersion, key, DeviceStatuses.Approved, now), DeviceRegistrationKind.Enrolled);
+        }
+
+        if (!_enrollment.AllowPendingRegistration)
+            return DeviceRegistrationResult.Unauthorized("An enrollment token is required to register a PC.");
+        if (_db.Devices.Count(d => d.Status == DeviceStatuses.Pending) >= _enrollment.MaxPendingDevices)
+            return DeviceRegistrationResult.Unauthorized("Too many PCs wait for approval. Approve or reject them in the admin UI.");
+        return DeviceRegistrationResult.Ok(Create(hostname, os, agentVersion, key, DeviceStatuses.Pending, now), DeviceRegistrationKind.Pending);
+    }
+
+    private DeviceRegistrationResponse Create(string hostname, string os, string agentVersion, string key, string status, DateTimeOffset now)
+    {
         var device = new DeviceEntity
         {
             Id = Guid.NewGuid(),
-            Hostname = request.Hostname,
-            OsVersion = request.OsVersion,
-            AgentVersion = request.AgentVersion,
-            DeviceKey = key
+            Hostname = hostname,
+            OsVersion = os,
+            AgentVersion = agentVersion,
+            DeviceKey = DeviceKeys.Hash(key),
+            Status = status,
+            RegisteredUtc = now,
+            LastSeenUtc = now
         };
         _db.Devices.Add(device);
         _db.SaveChanges();
-        return new DeviceRegistrationResponse(device.Id, key);
+        return new DeviceRegistrationResponse(device.Id, key, status);
     }
 
-    public bool Heartbeat(string deviceKey, DeviceHeartbeatRequest request)
+    private static string Truncate(string? value, int max)
     {
-        var device = _db.Devices.FirstOrDefault(d => d.DeviceKey == deviceKey);
-        if (device == null) return false;
+        var v = value?.Trim() ?? string.Empty;
+        return v.Length <= max ? v : v[..max];
+    }
+
+    public string? Heartbeat(string deviceKey, DeviceHeartbeatRequest request)
+    {
+        var hash = DeviceKeys.Hash(deviceKey);
+        var device = _db.Devices.FirstOrDefault(d => d.DeviceKey == hash);
+        if (device == null || device.Status == DeviceStatuses.Revoked) return null;
 
         device.LastSeenUtc = DateTimeOffset.UtcNow;
         device.LastIp = request.Ip;
@@ -63,7 +122,7 @@ public class EfDeviceRepository : IDeviceRepository
             Ip = request.Ip
         });
         _db.SaveChanges();
-        return true;
+        return device.Status;
     }
 
     public IEnumerable<DeviceView> List()

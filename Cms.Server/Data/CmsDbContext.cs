@@ -27,6 +27,7 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.AgentVersion).HasMaxLength(50);
             entity.Property(e => e.DeviceKey).HasMaxLength(500).IsRequired();
             entity.HasIndex(e => e.DeviceKey).IsUnique();
+            entity.Property(e => e.Status).HasMaxLength(20).IsRequired().HasDefaultValue("approved");
             entity.HasOne<ZoneEntity>().WithMany().HasForeignKey(e => e.ZoneId).OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -125,7 +126,11 @@ public class DeviceEntity
     public string Hostname { get; set; } = string.Empty;
     public string OsVersion { get; set; } = string.Empty;
     public string AgentVersion { get; set; } = string.Empty;
+    /// <summary>"sha256:" + SHA-256 of the device key (see Auth/DeviceKeys); never the key itself.</summary>
     public string DeviceKey { get; set; } = string.Empty;
+    /// <summary>pending (waits for staff approval), approved, revoked.</summary>
+    public string Status { get; set; } = "approved";
+    public DateTimeOffset? RegisteredUtc { get; set; }
     public DateTimeOffset? LastSeenUtc { get; set; }
     public string? LastIp { get; set; }
     public Guid? ZoneId { get; set; }

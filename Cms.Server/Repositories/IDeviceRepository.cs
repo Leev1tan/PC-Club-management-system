@@ -4,8 +4,9 @@ using Cms.Server.Controllers;
 
 public interface IDeviceRepository
 {
-    DeviceRegistrationResponse Register(DeviceRegistrationRequest request);
-    bool Heartbeat(string deviceKey, DeviceHeartbeatRequest request);
+    DeviceRegistrationResult Register(DeviceRegistrationRequest request);
+    /// <summary>Records a heartbeat. Returns the device status, or null when the key is unknown or revoked.</summary>
+    string? Heartbeat(string deviceKey, DeviceHeartbeatRequest request);
     IEnumerable<DeviceView> List();
     CommandView? EnqueueCommand(Guid deviceId, EnqueueCommandRequest request);
     IEnumerable<CommandView> PollCommands(Guid deviceId, int max);

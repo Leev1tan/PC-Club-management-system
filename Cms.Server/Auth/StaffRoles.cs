@@ -38,6 +38,11 @@ public static class Policies
     /// <summary>Owner only: staff accounts and club settings.</summary>
     public const string OwnerOnly = "OwnerOnly";
 
+    /// <summary>Agent of a registered PC (X-Device-Key), also while it waits for approval.</summary>
+    public const string Device = "Device";
+    /// <summary>Agent of an approved PC: may fetch and acknowledge commands.</summary>
+    public const string ApprovedDevice = "ApprovedDevice";
+
     internal static readonly IReadOnlyDictionary<string, string[]> Roles = new Dictionary<string, string[]>
     {
         [AnyStaff] = StaffRoles.All,
