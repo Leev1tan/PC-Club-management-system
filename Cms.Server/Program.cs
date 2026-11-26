@@ -1,12 +1,14 @@
+using Cms.Server;
 using Cms.Server.Data;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Support running as Windows Service
+// Support running as Windows Service (no-op on Linux / in containers)
 builder.Host.UseWindowsService();
 
-// Explicit URL binding (launchSettings.json only works with dotnet run)
+// Explicit URL binding (launchSettings.json only works with dotnet run).
+// In containers set ASPNETCORE_URLS (the Docker image uses http://+:8080).
 var urls = builder.Configuration["Urls"];
 if (!string.IsNullOrWhiteSpace(urls))
 {
@@ -24,24 +26,50 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new() { Title = "Club Management API", Version = "v1" });
 });
+
+// CORS. The admin UI is normally served from the same origin as the API
+// (Windows installer: wwwroot; containers: reverse proxy / ingress path split),
+// so cross-origin access is only needed for development setups.
+//   Cors:AllowedOrigins  - comma separated list (or JSON array) of allowed origins
+//   Cors:AllowAnyOrigin  - legacy behaviour, default true; the Docker image sets it to false
+var corsOrigins = ReadList(builder.Configuration, "Cors:AllowedOrigins");
+var corsAllowAny = builder.Configuration.GetValue("Cors:AllowAnyOrigin", true);
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin();
+        if (corsOrigins.Length > 0)
+            policy.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod();
+        else if (corsAllowAny)
+            policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin();
+        // else: no cross-origin access at all (same-origin only)
     });
 });
 
-// Database - Use SQLite for easy testing, PostgreSQL for production
+// Database: PostgreSQL for production/containers, SQLite for single-PC installs and testing.
+//   Database:Provider    - "postgres" or "sqlite"; when empty the legacy rule is used:
+//                          no connection string, or one that contains "localhost" => SQLite
+//   Database:SqlitePath  - SQLite file path (default: cms.db in the working directory)
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("localhost"))
+var provider = (builder.Configuration["Database:Provider"] ?? string.Empty).Trim().ToLowerInvariant();
+var useSqlite = provider switch
 {
-    builder.Services.AddDbContext<CmsDbContext>(options => 
-        options.UseSqlite("Data Source=cms.db"));
+    "sqlite" => true,
+    "postgres" or "postgresql" or "npgsql" => false,
+    _ => string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("localhost")
+};
+if (useSqlite)
+{
+    var sqlitePath = builder.Configuration["Database:SqlitePath"];
+    if (string.IsNullOrWhiteSpace(sqlitePath)) sqlitePath = "cms.db";
+    builder.Services.AddDbContext<CmsDbContext>(options =>
+        options.UseSqlite($"Data Source={sqlitePath}"));
 }
 else
 {
-    builder.Services.AddDbContext<CmsDbContext>(options => 
+    if (string.IsNullOrWhiteSpace(connectionString))
+        throw new InvalidOperationException("Database:Provider is postgres but ConnectionStrings:DefaultConnection is empty.");
+    builder.Services.AddDbContext<CmsDbContext>(options =>
         options.UseNpgsql(connectionString));
 }
 
@@ -50,17 +78,13 @@ builder.Services.AddScoped<Cms.Server.Repositories.IDeviceRepository, Cms.Server
 builder.Services.AddScoped<Cms.Server.Repositories.ISessionRepository, Cms.Server.Repositories.EfSessionRepository>();
 
 // UDP Discovery for LAN auto-discovery
-builder.Services.AddHostedService<Cms.Server.DiscoveryService>();
-builder.Services.AddHostedService<Cms.Server.SessionExpiryService>();
+builder.Services.AddHostedService<DiscoveryService>();
+builder.Services.AddHostedService<SessionExpiryService>();
 
 var app = builder.Build();
 
-// Auto-create/migrate database
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<CmsDbContext>();
-    db.Database.EnsureCreated();
-}
+// Create or migrate the database (PostgreSQL: EF Core migrations; SQLite: EnsureCreated)
+await DatabaseInitializer.InitializeAsync(app.Services, app.Logger);
 
 // Swagger enabled in all environments
 app.UseSwagger();
@@ -73,12 +97,27 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// Health endpoint
-app.MapGet("/health", () => Results.Ok(new 
-{ 
-    status = "healthy", 
+// Health endpoint (/api/health is the same, for setups that route only /api to the server)
+IResult Health() => Results.Ok(new
+{
+    status = "healthy",
     timestamp = DateTimeOffset.UtcNow,
     version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0"
-}));
+});
+app.MapGet("/health", Health);
+app.MapGet("/api/health", Health);
 
 app.Run();
+
+static string[] ReadList(IConfiguration config, string key)
+{
+    var section = config.GetSection(key);
+    var values = section.GetChildren().Select(c => c.Value).ToList();
+    if (values.Count == 0) values.Add(section.Value);
+    return values
+        .SelectMany(v => (v ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        .ToArray();
+}
+
+// Allows WebApplicationFactory-based tests to reference the entry point.
+public partial class Program { }

@@ -61,6 +61,7 @@ $config = @{
         LogLevel = @{
             Default = "Information"
             "Microsoft.Hosting.Lifetime" = "Information"
+            "Microsoft.EntityFrameworkCore" = "Warning"
         }
     }
     ConnectionStrings = @{
