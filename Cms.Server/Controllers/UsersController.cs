@@ -107,7 +107,8 @@ public class UsersController : ControllerBase
         return Ok(txs.Select(t => new TransactionView(t.Id, t.UserId, t.Amount, t.Type, t.Description, t.CreatedUtc)));
     }
 
-    private static string HashPassword(string password)
+    // NOTE: unsalted SHA-256 (legacy). Replace with a salted KDF when real accounts are added.
+    internal static string HashPassword(string password)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
         return Convert.ToBase64String(bytes);

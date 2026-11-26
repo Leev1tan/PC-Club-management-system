@@ -21,4 +21,8 @@
     <ProjectReference Include="..\Cms.Shared\Cms.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cms.Server.Tests" />
+  </ItemGroup>
+
 </Project>

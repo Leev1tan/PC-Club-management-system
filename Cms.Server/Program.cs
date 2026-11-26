@@ -1,5 +1,6 @@
 using Cms.Server;
 using Cms.Server.Data;
+using Cms.Server.Demo;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,6 +20,8 @@ else if (!builder.Environment.IsDevelopment())
     // Default for production/service: listen on all interfaces
     builder.WebHost.UseUrls("http://0.0.0.0:5081");
 }
+
+var demo = DemoOptions.FromConfiguration(builder.Configuration);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -78,37 +81,62 @@ builder.Services.AddSingleton<DeviceRuntimeState>();
 builder.Services.AddScoped<Cms.Server.Repositories.IDeviceRepository, Cms.Server.Repositories.EfDeviceRepository>();
 builder.Services.AddScoped<Cms.Server.Repositories.ISessionRepository, Cms.Server.Repositories.EfSessionRepository>();
 
-// UDP Discovery for LAN auto-discovery
-builder.Services.AddHostedService<DiscoveryService>();
+// Background services
+if (!demo.Enabled)
+{
+    // UDP Discovery for LAN auto-discovery (not useful for the public demo)
+    builder.Services.AddHostedService<DiscoveryService>();
+}
 builder.Services.AddHostedService<SessionExpiryService>();
+
+// Demo mode: seeded demo club + simulated PCs (DEMO_MODE=true)
+builder.Services.AddDemoMode(demo);
 
 var app = builder.Build();
 
 // Create or migrate the database (PostgreSQL: EF Core migrations; SQLite: EnsureCreated)
 await DatabaseInitializer.InitializeAsync(app.Services, app.Logger);
 
+if (demo.Enabled)
+{
+    // Wipes and re-seeds the demo club. Refuses to touch a database that holds non-demo data.
+    try
+    {
+        await app.Services.GetRequiredService<DemoResetter>().ResetOnStartupAsync();
+    }
+    catch (InvalidOperationException ex)
+    {
+        app.Logger.LogCritical("{Message}", ex.Message);
+        return 1;
+    }
+}
+
 // Swagger enabled in all environments
 app.UseSwagger();
 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Club Management API v1"));
 
 app.UseCors();
+app.UseDemoRestrictions(demo);
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapDemoEndpoints();
 
 // Health endpoint (/api/health is the same, for setups that route only /api to the server)
 IResult Health() => Results.Ok(new
 {
     status = "healthy",
     timestamp = DateTimeOffset.UtcNow,
-    version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0"
+    version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0",
+    demoMode = demo.Enabled
 });
 app.MapGet("/health", Health);
 app.MapGet("/api/health", Health);
 
 app.Run();
+return 0;
 
 static string[] ReadList(IConfiguration config, string key)
 {
