@@ -7,6 +7,7 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege: read-only by default; only the publish job may write packages.
 permissions:
   contents: read
 
@@ -18,14 +19,17 @@ env:
   DOTNET_NOLOGO: "1"
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
 
+# Third-party actions are pinned to full commit SHAs (version in the comment).
+# Dependabot (.github/dependabot.yml) keeps the pins up to date.
+
 jobs:
   server:
     name: Server and Shared (Linux, build + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: 8.0.x
 
@@ -40,7 +44,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: server-test-results
           path: TestResults
@@ -49,9 +53,9 @@ jobs:
     name: Agent, Launcher and Windows server package
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: 8.0.x
 
@@ -75,9 +79,9 @@ jobs:
       run:
         working-directory: admin-ui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -91,63 +95,30 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
 
   docker:
-    name: Docker images (build, smoke test, push on v* tags)
+    name: Docker images (build + compose smoke test)
     needs: [server, admin-ui]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Image owner (ghcr.io needs lowercase)
-        id: owner
-        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Server image tags
-        id: meta-server
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ steps.owner.outputs.name }}/ccms-server
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
-
-      - name: Admin UI image tags
-        id: meta-ui
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ steps.owner.outputs.name }}/ccms-admin-ui
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build server image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: Cms.Server/Dockerfile
           load: true
-          tags: |
-            ${{ steps.meta-server.outputs.tags }}
-            ccms-server:local
-          labels: ${{ steps.meta-server.outputs.labels }}
+          tags: ccms-server:local
           cache-from: type=gha,scope=ccms-server
           cache-to: type=gha,mode=max,scope=ccms-server
 
       - name: Build admin UI image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: admin-ui
           load: true
-          tags: |
-            ${{ steps.meta-ui.outputs.tags }}
-            ccms-admin-ui:local
-          labels: ${{ steps.meta-ui.outputs.labels }}
+          tags: ccms-admin-ui:local
           cache-from: type=gha,scope=ccms-admin-ui
           cache-to: type=gha,mode=max,scope=ccms-admin-ui
 
@@ -175,19 +146,65 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  publish:
+    name: Publish images to ghcr.io (v* tags only)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [docker, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Image owner (ghcr.io needs lowercase)
+        id: owner
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       - name: Log in to ghcr.io
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push images (version tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          OWNER: ${{ steps.owner.outputs.name }}
-        run: |
-          for image in ccms-server ccms-admin-ui; do
-            docker push --all-tags "ghcr.io/${OWNER}/${image}"
-          done
+      - name: Server image tags
+        id: meta-server
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.name }}/ccms-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Admin UI image tags
+        id: meta-ui
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.name }}/ccms-admin-ui
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push server image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: Cms.Server/Dockerfile
+          push: true
+          tags: ${{ steps.meta-server.outputs.tags }}
+          labels: ${{ steps.meta-server.outputs.labels }}
+          cache-from: type=gha,scope=ccms-server
+
+      - name: Build and push admin UI image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: admin-ui
+          push: true
+          tags: ${{ steps.meta-ui.outputs.tags }}
+          labels: ${{ steps.meta-ui.outputs.labels }}
+          cache-from: type=gha,scope=ccms-admin-ui
