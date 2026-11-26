@@ -1,0 +1,81 @@
+# PC Club Management System - club server as containers (PostgreSQL + API + admin UI).
+# This is an alternative to the Windows server installer (ClubServerSetup.exe); the club
+# PCs (Cms.Agent.Service + Cms.Launcher) are Windows machines in both cases.
+#
+#   docker compose up -d                    # build images (first run) and start
+#   DEMO_MODE=true docker compose up -d     # demo club with 20 simulated PCs (empty database only!)
+#   docker compose logs -f server
+#   docker compose down                     # stop (data stays in the "ccms-pgdata" volume)
+#
+# One published port, the same as the Windows installer: http://<server-ip>:5081
+#   /        admin UI
+#   /api     server API (proxied by the admin-ui container) - Windows agents use this URL:
+#            ClubClientSetup.exe -ServerUrl "http://<server-ip>:5081"
+#   /swagger API documentation
+# UDP auto-discovery does not work from a container network; install clients with -ServerUrl.
+#
+# Settings come from environment variables or a .env file next to this file (see .env.example):
+#   POSTGRES_PASSWORD   database password (internal network only; set your own)
+#   CMS_BIND_ADDRESS    host address for the published port (default 0.0.0.0 = all interfaces)
+#   CMS_PORT            published port for UI + API (default 5081, same as the Windows installer)
+#   DEMO_MODE           true = seed a demo club and simulate the PCs (default false)
+#   DEMO_RESET_HOURS    demo wipe + re-seed interval in hours (default 6; 0 = only on restart)
+#   CMS_SERVER_IMAGE / CMS_UI_IMAGE   use pre-built images instead of building locally
+
+name: ccms
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cms
+      POSTGRES_USER: cms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cms -d cms"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    # No published port: only the server container talks to the database
+
+  server:
+    image: ${CMS_SERVER_IMAGE:-ccms-server:local}
+    build:
+      context: .
+      dockerfile: Cms.Server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=cms;Username=cms;Password=${POSTGRES_PASSWORD:-change-me}"
+      Database__Provider: postgres
+      DEMO_MODE: ${DEMO_MODE:-false}
+      DEMO_RESET_HOURS: ${DEMO_RESET_HOURS:-6}
+    # Not published: browsers and agents reach the API through the admin-ui port (/api).
+    # To expose the API port directly as well, uncomment:
+    # ports:
+    #   - "127.0.0.1:8080:8080"
+
+  admin-ui:
+    image: ${CMS_UI_IMAGE:-ccms-admin-ui:local}
+    build:
+      context: admin-ui
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      API_UPSTREAM: http://server:8080
+    ports:
+      - "${CMS_BIND_ADDRESS:-0.0.0.0}:${CMS_PORT:-5081}:3000"
+
+volumes:
+  pgdata:
+    name: ccms-pgdata
+
+networks:
+  default:
+    name: ccms-net

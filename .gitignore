@@ -44,6 +44,11 @@ coverage/
 *.coverage
 
 # =====================
+# Local environment (docker compose)
+# =====================
+.env
+
+# =====================
 # Logs
 # =====================
 *.log
