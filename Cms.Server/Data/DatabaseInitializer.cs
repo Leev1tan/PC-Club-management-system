@@ -8,7 +8,8 @@ namespace Cms.Server.Data;
 /// <summary>
 /// Creates or upgrades the database schema at startup.
 /// PostgreSQL: applies EF Core migrations (Cms.Server/Migrations).
-/// SQLite (single-PC installs, tests): EnsureCreated(), as before.
+/// SQLite (single-PC installs, tests): EnsureCreated() for a new database; an existing
+/// database gets missing tables, columns and indexes from <see cref="SqliteSchemaUpgrader"/>.
 /// </summary>
 public static class DatabaseInitializer
 {
@@ -34,7 +35,14 @@ public static class DatabaseInitializer
                 }
                 else
                 {
-                    await db.Database.EnsureCreatedAsync(ct);
+                    // New database: create the full schema. Existing database: add what a newer
+                    // version needs (EnsureCreated does nothing on an existing database).
+                    if (!await db.Database.EnsureCreatedAsync(ct))
+                    {
+                        var changes = await SqliteSchemaUpgrader.UpgradeAsync(db, ct);
+                        if (changes.Count > 0)
+                            logger.LogWarning("Upgraded the SQLite database schema: added {Changes}", string.Join(", ", changes));
+                    }
                 }
                 return;
             }
