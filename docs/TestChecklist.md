@@ -125,6 +125,18 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\scripts\install-launcher-aut
 Log off and log back in:
 - [ ] Launcher starts automatically
 
+### Test 9: Tariff Rules, Packages, Pause and Transfer (phase 3)
+Prepare (Owner or Manager, admin UI → Тарифи): a tariff for the PC's zone with a rule ending 5 minutes
+from now, a 3 h package for the zone, and a cashback tier (for example from 200 ₴: 10 %).
+- [ ] Start dialog → Тариф → 1 год: the cost box shows two price slices around the rule boundary
+- [ ] Start dialog → Пакет: the package shows its end time; start it for a player paid from the balance
+- [ ] Player card: balance and bonus went down by the package price (bonus first); "Баланс збігається з журналом ✓"
+- [ ] Pause on the map: the VM locks and the launcher countdown stops; Resume: unlocks, end moved by the pause
+- [ ] Transfer to another free PC: the old PC locks, the new PC unlocks with the same end time
+- [ ] Open-ended session: end it after a few minutes as a guest with "Картка": the ledger (Owner → `/api/ledger`) has a card row
+- [ ] Cashier cannot refund or correct; Manager refund takes back the cashback of the refunded amount
+- [ ] Audit log shows session.paused / resumed / transferred and package / tariff changes
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

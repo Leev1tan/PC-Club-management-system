@@ -68,6 +68,8 @@ The installer:
   `C:\Windows\System32`) is copied there on the first start; the old file stays until you delete it.
 - creates an enrollment token for the club PCs (or keeps the one of an earlier install) and prints it.
 - prints the one-time setup code for the first Owner account.
+- sets the club time zone for tariff rules and packages (`-TimeZone`, default Europe/Kyiv; an earlier
+  install keeps its value). Docker: `CMS_TIMEZONE` in `.env`.
 
 Check locally:
 
@@ -128,6 +130,11 @@ server never creates a default account.
 3. Staff: create one account per employee with the smallest role that fits (Cashier for the front desk,
    Tech for PC maintenance, Manager for tariffs and corrections). Do not share accounts: the audit log
    records who did what.
+
+4. Tariffs: for every zone create a tariff with its base price and time rules (for example
+   Mon–Thu 08:00–17:00 cheaper, every day 22:00–08:00 night price), the rounding step and the minimum
+   charge; then the packages (3 h, 5 h, night pack 22:00–08:00) and, if you want, cashback tiers on
+   top-ups. Owner or Manager only.
 
 If the setup code is lost, restart the server (`Restart-Service ClubServer` or
 `docker compose restart server`): it writes a new code while no staff account exists.
@@ -197,6 +204,13 @@ private: only SYSTEM, Administrators and LOCAL SERVICE have access
 - A timed session unlocks the PC, counts down, and locks at expiry.
 - Restarting the client during an active session preserves the original end time.
 - Restarting the ClubAgent service does not require reinstalling the client.
+- A session started at 16:30 and ended at 17:30 costs 30 minutes of the day price plus 30 minutes of the
+  evening price (with such rules); the price quote in the start dialog shows the split.
+- A night pack started at 23:00 ends at 08:00; a pause does not move that time.
+- Pause locks the PC and stops the countdown; resume unlocks it with the end moved by the pause.
+- Transfer to a free PC locks the old PC and unlocks the new one; a dearer zone shows the price difference.
+- Players → card: the balance and the bonus match the ledger ("Баланс збігається з журналом").
+  A Cashier can top up but cannot refund or correct.
 
 ## Network Security
 

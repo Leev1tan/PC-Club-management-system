@@ -7,9 +7,9 @@ PC Club Management System is an on-prem management platform for gaming clubs and
 
 Project authorship: created and maintained by Volodymyr Shabat.
 
-**English.** An open-source, self-hosted system to run a computer club: a live map of the PCs, sessions and hourly tariffs, player balances, a Windows lock-screen shell (kiosk) and remote commands. The server runs inside the club (on a Windows PC or in Docker), so the club keeps working when the internet is down. The gaming PCs are Windows 10/11.
+**English.** An open-source, self-hosted system to run a computer club: a live map of the PCs, sessions with time-of-day tariffs, packages and night packs, player balances with bonuses and an append-only money ledger, a Windows lock-screen shell (kiosk) and remote commands. The server runs inside the club (on a Windows PC or in Docker), so the club keeps working when the internet is down. The gaming PCs are Windows 10/11.
 
-**Українською.** Відкрита система керування комп'ютерним клубом, яка працює локально у вашому клубі: карта ПК, сесії та погодинні тарифи, баланси гравців, захищена оболонка блокування для Windows (kiosk) і віддалені команди на ПК. Сервер стоїть у клубі (на Windows-ПК або в Docker), тому клуб працює навіть без інтернету. Ігрові ПК — Windows 10/11.
+**Українською.** Відкрита система керування комп'ютерним клубом, яка працює локально у вашому клубі: карта ПК, сесії з тарифами за часом доби, пакети й нічні пакети, баланси гравців із бонусами та журналом грошових операцій, захищена оболонка блокування для Windows (kiosk) і віддалені команди на ПК. Сервер стоїть у клубі (на Windows-ПК або в Docker), тому клуб працює навіть без інтернету. Ігрові ПК — Windows 10/11.
 
 ## Contents
 
@@ -58,6 +58,13 @@ Planned images (in `docs/screenshots/`): dashboard, PC map, session dialog, play
 
 More detail: [docs/Architecture.md](docs/Architecture.md).
 
+### Tariffs, packages and money in short
+
+- **Tariff** = base price per hour for a zone + rules such as "Mon–Thu 08:00–17:00: 45 ₴/h" or "every day 22:00–08:00: 40 ₴/h" (club time). Time is billed per minute and split at every rule boundary: a session 16:30–17:30 pays 30 minutes of the day price and 30 minutes of the evening price. Post-paid time is rounded up to the tariff step (1, 5, 15 minutes …) and the tariff can have a minimum charge.
+- **Package** = fixed price in one zone: a duration (3 h, 5 h), a time window with a cut-off (night pack 22:00–08:00 ends at 08:00, whenever it starts), or both (morning pack). Sold from the player balance or for cash/card at the desk.
+- **Pause** stops the time and locks the PC; **resume** moves the end by the paused time (never past a package cut-off). **Transfer** moves a session to a free PC; a move to a dearer zone pays the price difference for the remaining time.
+- **Player money**: real balance + bonus balance. Cashback tiers add bonus on top-ups; bonus pays only for PC time, first by default. Every movement is a ledger row; refunds and corrections need Manager or Owner and a reason.
+
 ## Features: done and planned
 
 Status of each product area. "Partial" means a basic version works and more is planned.
@@ -65,8 +72,8 @@ Status of each product area. "Partial" means a basic version works and more is p
 | # | Area | Status | Works today | Planned |
 | --- | --- | --- | --- | --- |
 | 1 | Lock screen and kiosk shell (Windows) | Partial | Full-screen lock, keyboard blocking, session countdown, staff PIN unlock (set by the owner, checked offline), stays locked if the agent stops | Low-time warnings, clean teardown of game and browser sessions |
-| 2 | Sessions and tariffs | Partial | Hourly tariffs per zone, prepaid and open-ended sessions, auto-lock at expiry, extend a session | Fixed packages (3 h, 5 h), night packs, day/weekday rules, pause and move a session |
-| 3 | Player accounts and balances | Partial | Players with salted password or PIN, top-up, balance correction with reason, transaction history, no double-spend | Bonus balance rules, append-only ledger, loyalty tiers, player web portal |
+| 2 | Sessions and tariffs | Partial | Tariffs per zone with time-of-day and weekday rules, per-minute billing split at every rule boundary, rounding step and minimum charge; prepaid and open-ended sessions; fixed packages (3 h, 5 h, morning pack) and night packs with a cut-off, bound to a zone; pause / resume (time stops) and transfer to another PC with the price difference; auto-lock at expiry | Promo codes and happy hours, post-paid limits for trusted players |
+| 3 | Player accounts and balances | Partial | Players with salted password or PIN; real balance and a separate bonus balance (PC time only); cashback tiers on top-ups; top-up (cash/card), refund and corrections with a reason; append-only ledger of every money movement, reconciled with the balances; no negative balances, no double-spend | Loyalty tiers, bonus expiry, player web portal |
 | 4 | PC map and remote control | Partial | Live PC grid by zone, online/offline, lock/unlock/restart/log off/message, start/extend/end session | Drag-and-drop map, Wake-on-LAN and shutdown, hardware telemetry, process kill |
 | 5 | Bar / POS and stock | Planned | – | Product catalog, sales (cash, card, balance), stock tracking |
 | 6 | Staff roles, shifts, cash reports, audit log | Partial | Staff login with roles (Owner, Manager, Cashier, Tech), immutable audit log | Shift open/close, cash variance, Z-report |
@@ -75,7 +82,7 @@ Status of each product area. "Partial" means a basic version works and more is p
 | 9 | Tournaments | Planned | – | Batch unlock of a zone for a match |
 | 10 | Analytics and reports | Partial | Revenue today/week/month, occupancy by zone | Owner dashboard, occupancy heatmap, CSV export |
 | 11 | Deployment | Partial | Windows installers, Docker compose, demo mode, CI | Pre-built release binaries, multi-club (public live demo: done) |
-| 12 | Languages and currency | Partial | Admin UI in Ukrainian, prices in ₴ | Ukrainian/English switch, currency and time zone settings |
+| 12 | Languages and currency | Partial | Admin UI in Ukrainian (strings of the new screens in one file, `admin-ui/app/i18n.ts`), prices in ₴, club time zone setting | Ukrainian/English switch, currency setting |
 
 Every admin page and API call needs a staff login with a role; club PCs authenticate with their own device key. Read [Security](#security) before you install the system in a club.
 
@@ -148,8 +155,8 @@ With the enrollment token the PC is approved at once. Without it, the PC appears
 
 Demo mode shows the system without any Windows PCs. With `DEMO_MODE=true` the server:
 
-- seeds a demo club: zones Standard (12 PCs), VIP (6) and Bootcamp/Pro (2), zone tariffs and a night tariff, 8 players and about a week of session history;
-- simulates the 20 PCs: heartbeats, and it runs queued commands (lock, unlock, session start/extend/end, restart, message, log off) like a real agent, so the PC map changes live; one PC stays offline on purpose, and "walk-in guests" start sessions now and then;
+- seeds a demo club with typical Ukrainian prices (₴): zones Standard (12 PCs), VIP (6) and Bootcamp/Pro (2); zone tariffs with weekday-day, weekend-day, evening and night prices; 3 h and 5 h packs, a morning pack and a night pack (22:00–08:00) per zone; cashback 5/10/15 % on top-ups; 8 players whose balances and bonuses come from their ledger history (top-ups, cashback, sessions, packages, a refund, a correction); about a week of session history and live sessions (packages, a paused session, an open-ended one);
+- simulates the 20 PCs: heartbeats, and it runs queued commands (lock, unlock, session start/extend/end, restart, message, log off) like a real agent, so the PC map changes live; one PC stays offline on purpose; walk-in guests (cash or card) and players (from the balance) start sessions and buy packages now and then, and sessions are paused and resumed;
 - wipes and re-seeds everything on start and every `DEMO_RESET_HOURS` hours (default 6);
 - seeds four public demo staff accounts and shows them on the login page (see below);
 - shows a "LIVE DEMO" banner in the admin UI, blocks `DELETE` requests, agent registration and changes of staff accounts, passwords and settings, and never connects to the internet.
@@ -184,8 +191,8 @@ What protects a club installation (phase 2). Report security problems to the aut
 | Role | May do |
 | --- | --- |
 | Owner | everything, including staff accounts and settings (staff PIN) |
-| Manager | sessions, players, balance corrections, tariffs and zones, deletes, revenue, audit log |
-| Cashier | sessions, players, top-ups, PC commands; **not**: tariffs, zones, deletes, balance corrections, revenue, audit log |
+| Manager | sessions, players, refunds and balance/bonus corrections, tariffs and their rules, packages, cashback, zones, deletes, revenue, ledger, audit log |
+| Cashier | sessions (start with a tariff or a package, pause, resume, transfer, extend, end), players, top-ups, PC commands; reads tariffs and packages; **not**: tariff/package/cashback changes, zones, deletes, refunds, corrections, revenue, ledger, audit log |
 | Tech | PC map, devices (commands, zones, approval); nothing else |
 
 **First start (no staff account yet).** The server never creates a default account. Either set `CMS_INITIAL_OWNER_USERNAME` and `CMS_INITIAL_OWNER_PASSWORD` (at least 8 characters) for the first start, or use the setup screen of the admin UI with the one-time code in `<data directory>/setup-code.txt`:
@@ -201,9 +208,9 @@ Both work only while no staff account exists; the code is deleted when the Owner
 
 **Lock screen.** There is no default staff PIN. The owner sets it in the admin UI (Settings, at least 8 characters); the server stores and sends only a PBKDF2 hash (600 000 iterations), and the launcher checks the PIN locally, so `Ctrl+Shift+U` + PIN also works while the server or the agent is down. The lock screen fails closed: when the agent heartbeat is older than 15 s or its state is missing, the PC stays locked. Three wrong PINs pause the prompt for 30 s, doubling up to 15 minutes.
 
-**Money.** Balance changes are single conditional database updates in a transaction with the ledger row: a balance cannot go negative and cannot be spent twice. The database allows only one active session per PC. A post-paid session takes at most the balance; the rest is shown as due at the desk.
+**Money.** Every money movement is one row of an append-only ledger (`LedgerEntries`: top-up, refund, correction, session charge, package purchase, cashback, cashback reversal; walk-in guest payments at the desk too). A database trigger refuses `UPDATE` and `DELETE` on it, and a player with ledger rows cannot be deleted. Balance changes are single conditional database updates in the same transaction as the ledger row, so a balance (real or bonus) cannot go negative and cannot be spent twice; each row stores the balances after it, and `GET /api/ledger/reconcile` checks that every balance equals the sum of its rows. Bonus pays only for PC time and is never paid out; a refund takes back the cashback of the refunded amount. The database allows only one active session per PC. A post-paid session takes at most the balances; the rest is due at the desk (cash or card). On the first start of this version, the balances and the history of an earlier version are copied into the ledger once.
 
-**Audit log.** Logins, failed logins, staff and settings changes, PC approval and commands, unlocks without an active session ("time without payment"), sessions, top-ups, balance corrections and tariff changes are written to an append-only table (a database trigger refuses `UPDATE` and `DELETE`). Owner and Manager see it read-only in the admin UI (Audit log).
+**Audit log.** Logins, failed logins, staff and settings changes, PC approval and commands, unlocks without an active session ("time without payment"), sessions (start, extend, pause, resume, transfer, end), top-ups, refunds, balance and bonus corrections, tariff, package and cashback changes are written to an append-only table (a database trigger refuses `UPDATE` and `DELETE`). Owner and Manager see it read-only in the admin UI (Audit log).
 
 **Limits (read before you go live).**
 
@@ -233,6 +240,7 @@ Server settings (environment variables; in `appsettings.json` use `:` instead of
 | `Retention__HeartbeatDays` / `Retention__HeartbeatSampleMinutes` | `7` / `5` | Keep heartbeat samples 7 days; store one sample per PC per 5 minutes. |
 | `Retention__CommandDays` / `Retention__CommandExpireMinutes` | `30` / `60` | Delete finished commands after 30 days; a command not delivered in 60 minutes expires and never runs. |
 | `Urls` / `ASPNETCORE_URLS` | `http://0.0.0.0:5081` (`http://+:8080` in the image) | Listen address. |
+| `Club__TimeZone` | `Europe/Kyiv` | Club time zone for time-of-day tariff rules and package windows (IANA or Windows id). Docker: `CMS_TIMEZONE`; Windows installer: `-TimeZone`. |
 | `DEMO_MODE` | `false` | Demo club and simulated PCs. |
 | `DEMO_RESET_HOURS` | `6` | Demo reset interval; `0` = reset only on start. |
 | `Cors__AllowedOrigins` | empty | Comma-separated origins, only if the UI is served from another origin (same origin only by default). |
@@ -240,7 +248,7 @@ Server settings (environment variables; in `appsettings.json` use `:` instead of
 
 Admin UI container: `API_UPSTREAM` (default `http://server:8080`) is where `/api`, `/swagger` and `/health` are proxied. The UI always calls the API on its own origin; the build argument `NEXT_PUBLIC_API_URL` can point it to another origin.
 
-Docker compose (`.env`): `POSTGRES_PASSWORD`, `CMS_ENROLLMENT_TOKEN`, `CMS_INITIAL_OWNER_USERNAME` / `CMS_INITIAL_OWNER_PASSWORD`, `CMS_PORT` (5081), `CMS_BIND_ADDRESS` (0.0.0.0), `DEMO_MODE`, `DEMO_RESET_HOURS`, `CMS_SERVER_IMAGE`, `CMS_UI_IMAGE`. See [.env.example](.env.example). Server data (cookie keys, setup code) is in the volume `ccms-serverdata`, the database in `ccms-pgdata`.
+Docker compose (`.env`): `POSTGRES_PASSWORD`, `CMS_ENROLLMENT_TOKEN`, `CMS_INITIAL_OWNER_USERNAME` / `CMS_INITIAL_OWNER_PASSWORD`, `CMS_PORT` (5081), `CMS_BIND_ADDRESS` (0.0.0.0), `CMS_TIMEZONE` (Europe/Kyiv), `DEMO_MODE`, `DEMO_RESET_HOURS`, `CMS_SERVER_IMAGE`, `CMS_UI_IMAGE`. See [.env.example](.env.example). Server data (cookie keys, setup code) is in the volume `ccms-serverdata`, the database in `ccms-pgdata`.
 
 ## Development
 
