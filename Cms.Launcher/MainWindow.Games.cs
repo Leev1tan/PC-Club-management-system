@@ -123,10 +123,98 @@ public partial class MainWindow
         return tile;
     }
 
+    private bool _accountBusy;
+
+    /// <summary>account-pool.json of the agent (a planted or unreadable file counts as no platform).</summary>
+    private AccountPoolSettings ReadAccountPoolSettings()
+    {
+        try
+        {
+            var path = Path.Combine(AgentFiles.Directory, AgentFiles.AccountPoolFile);
+            if (File.Exists(path) && IsTrustedAgentFile(path)) return AccountPoolSettings.Parse(ReadShared(path)) ?? AccountPoolSettings.None;
+        }
+        catch
+        {
+            // unreadable: no platform
+        }
+        return AccountPoolSettings.None;
+    }
+
+    /// <summary>
+    /// A game that needs a club account: the agent leases one for this session and, the first time, hands over the
+    /// credentials; the client of the platform starts with the login arguments of this PC. The secret is never shown;
+    /// it lives only in this method and in the argument list of the client process. Next time (the same session) the
+    /// client is logged in already and the game starts at once.
+    /// </summary>
+    private async Task<bool> PrepareAccountAsync(CatalogGame game)
+    {
+        var platform = game.AccountPlatform!;
+        var name = AccountMessages.PlatformName(platform);
+        var login = ReadAccountPoolSettings().For(platform);
+        if (!AccountLogin.IsUsable(login))
+        {
+            MessageBox.Show(this, LauncherTexts.Format(_texts.AccountNotConfigured, name), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+            return false;
+        }
+        var res = await AskAgentAsync(new PipeRequest(PipeOps.Account, GameId: game.Id));
+        if (!res.Ok)
+        {
+            MessageBox.Show(this, AccountMessages.For(res, platform, _texts), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+        var lease = res.As<AccountLease>();
+        if (lease == null)
+        {
+            MessageBox.Show(this, LauncherTexts.Format(_texts.AccountFailed, "—"), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+        if (lease.Delivered) return true;
+        var plan = AccountLogin.Plan(login, lease.Login, lease.Secret, Environment.ExpandEnvironmentVariables);
+        lease = lease with { Login = null, Secret = null };
+        if (plan == null)
+        {
+            MessageBox.Show(this, LauncherTexts.Format(_texts.AccountFailed, "—"), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+        GameNowText.Text = LauncherTexts.Format(_texts.AccountLoggingIn, lease.LoginMask, name);
+        try
+        {
+            var psi = new ProcessStartInfo(plan.FileName) { UseShellExecute = false };
+            foreach (var argument in plan.Arguments) psi.ArgumentList.Add(argument);
+            using var client = Process.Start(psi);
+            if (client != null)
+            {
+                try { _startedProcesses.Add(new StartedProcess(client.Id, client.ProcessName)); } catch (InvalidOperationException) { /* exited at once */ }
+            }
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or FileNotFoundException)
+        {
+            MessageBox.Show(this, LauncherTexts.Format(_texts.AccountFailed, ex.GetType().Name), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+        // The client logs in before the game asks it to start
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        return true;
+    }
+
     /// <summary>Starts a catalog entry (only while the PC is unlocked) and reports it to the agent.</summary>
-    private void StartGame(CatalogGame game)
+    private async void StartGame(CatalogGame game)
     {
         if (_lastDecision is not { Locked: false }) return;
+        if (game.AccountPlatform != null)
+        {
+            if (_accountBusy) return;
+            _accountBusy = true;
+            try
+            {
+                if (!await PrepareAccountAsync(game)) return;
+            }
+            finally
+            {
+                _accountBusy = false;
+            }
+            if (_lastDecision is not { Locked: false }) return;
+        }
         var plan = GameStarter.Plan(game, Environment.ExpandEnvironmentVariables);
         if (plan == null)
         {

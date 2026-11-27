@@ -1,28 +1,38 @@
+using System.Diagnostics;
 using System.IO.Pipes;
 using System.Net;
 using System.Net.Http.Json;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text.Json;
 using Cms.Client;
+using Microsoft.Win32.SafeHandles;
 
 namespace Cms.Agent.Service;
 
 /// <summary>
 /// The pipe of the lock screen (Cms.Client.AgentPipe): the launcher runs as the player and cannot read the
 /// device key, so it asks the agent, and the agent asks the server with the key of this PC. Only these requests
-/// exist: the offers of the zone, the player login, the end of the player's session, the bar menu, a bar order and
-/// the player's cancel of a new order.
-/// The secret of a login goes to the server only; it is never logged or written to disk.
+/// exist: the offers of the zone, the player login, the end of the player's session, the bar menu, a bar order,
+/// the player's cancel of a new order, and a club account for a game.
+/// The secret of a login goes to the server only; it is never logged or written to disk. The credentials of a club
+/// account go only to the installed lock screen (the program of the pipe client is checked), in memory, never logged.
 /// </summary>
 public partial class Worker
 {
     private static readonly TimeSpan PipeServerTimeout = TimeSpan.FromSeconds(15);
+    /// <summary>The installed lock screen; only this program gets club account credentials (AccountPool:LauncherPath).</summary>
+    private const string DefaultLauncherPath = @"C:\ClubLauncher\Cms.Launcher.exe";
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeClientProcessId(SafePipeHandle pipe, out uint clientProcessId);
 
     private async Task RunLauncherPipeAsync(CancellationToken ct)
     {
         try
         {
-            var server = new AgentPipeServer(CreatePipe, HandlePipeAsync, ex => _logger.LogDebug(ex, "Launcher pipe"));
+            var server = new AgentPipeServer(CreatePipe, HandlePipeAsync, ex => _logger.LogDebug(ex, "Launcher pipe"), AuthorizePipeClient);
             await server.RunAsync(ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -49,6 +59,72 @@ public partial class Worker
             options, AgentPipe.MaxMessageBytes, AgentPipe.MaxMessageBytes, security);
     }
 
+    /// <summary>
+    /// A club account request must come from the installed lock screen: the program of the pipe client (its process id from
+    /// the pipe) must be AccountPool:LauncherPath. Every other request is allowed (the players may use the pipe).
+    /// </summary>
+    private bool AuthorizePipeClient(NamedPipeServerStream stream, PipeRequest req)
+    {
+        if (req.Op != PipeOps.Account) return true;
+        var launcher = _config["AccountPool:LauncherPath"];
+        if (string.IsNullOrWhiteSpace(launcher)) launcher = DefaultLauncherPath;
+        string? path = null;
+        if (GetNamedPipeClientProcessId(stream.SafePipeHandle, out var pid))
+        {
+            try
+            {
+                using var process = Process.GetProcessById((int)pid);
+                path = process.MainModule?.FileName;
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                path = null; // the client went away, or its program cannot be read: refused
+            }
+        }
+        var ok = AgentPipeClient.IsTrustedLauncher(path, launcher);
+        if (!ok) _logger.LogWarning("Lock screen pipe: a club account request from {Path} refused (only {Launcher} may ask)", path ?? "?", launcher);
+        return ok;
+    }
+
+    private sealed record LeaseAnswer(long LeaseId, string Platform, string LoginMask, bool Delivered);
+    private sealed record CredentialAnswer(long LeaseId, string Platform, string Login, string Secret);
+
+    /// <summary>
+    /// A club account for a game: the lease of this PC (the server picks a free account of the platform), then, the first
+    /// time only, its credentials. They go to the lock screen in the answer and nowhere else (no log, no file).
+    /// </summary>
+    private async Task<PipeResponse> HandleAccountAsync(HttpClient http, PipeRequest req, CancellationToken ct)
+    {
+        if (req.GameId is not { } gameId || gameId == Guid.Empty) return PipeResponse.Error(400, "bad_request");
+        using var leaseMessage = new HttpRequestMessage(HttpMethod.Post, $"api/devices/{_deviceId}/game-account") { Content = JsonContent.Create(new { gameId }) };
+        leaseMessage.Headers.Add("X-Device-Key", _deviceKey);
+        using var leaseResponse = await http.SendAsync(leaseMessage, ct);
+        var leaseBody = await leaseResponse.Content.ReadAsStringAsync(ct);
+        if (!leaseResponse.IsSuccessStatusCode)
+        {
+            _logger.LogInformation("Lock screen: club account refused by the server ({Status})", (int)leaseResponse.StatusCode);
+            return new PipeResponse((int)leaseResponse.StatusCode, string.IsNullOrWhiteSpace(leaseBody) ? null : leaseBody);
+        }
+        var lease = JsonSerializer.Deserialize<LeaseAnswer>(leaseBody, JsonOptions);
+        if (lease == null) return PipeResponse.Error(502, "bad_answer");
+        if (lease.Delivered)
+            return new PipeResponse(200, JsonSerializer.Serialize(new AccountLease(lease.LeaseId, lease.Platform, lease.LoginMask, true), JsonOptions));
+
+        using var credentialMessage = new HttpRequestMessage(HttpMethod.Post, $"api/devices/{_deviceId}/game-account/{lease.LeaseId}/credential") { Content = JsonContent.Create(new { }) };
+        credentialMessage.Headers.Add("X-Device-Key", _deviceKey);
+        using var credentialResponse = await http.SendAsync(credentialMessage, ct);
+        var credentialBody = await credentialResponse.Content.ReadAsStringAsync(ct);
+        if (!credentialResponse.IsSuccessStatusCode)
+        {
+            _logger.LogInformation("Lock screen: the credentials of club account {Mask} refused by the server ({Status})", lease.LoginMask, (int)credentialResponse.StatusCode);
+            return new PipeResponse((int)credentialResponse.StatusCode, string.IsNullOrWhiteSpace(credentialBody) ? null : credentialBody);
+        }
+        var credential = JsonSerializer.Deserialize<CredentialAnswer>(credentialBody, JsonOptions);
+        if (credential == null) return PipeResponse.Error(502, "bad_answer");
+        _logger.LogInformation("Lock screen: club account {Mask} ({Platform}) handed to the lock screen", lease.LoginMask, lease.Platform);
+        return new PipeResponse(200, JsonSerializer.Serialize(new AccountLease(lease.LeaseId, lease.Platform, lease.LoginMask, false, credential.Login, credential.Secret), JsonOptions));
+    }
+
     private async Task<PipeResponse> HandlePipeAsync(PipeRequest req, CancellationToken ct)
     {
         string? serverUrl;
@@ -59,6 +135,17 @@ public partial class Worker
         var http = _httpClientFactory.CreateClient();
         http.BaseAddress = new Uri(serverUrl.TrimEnd('/') + "/");
         http.Timeout = PipeServerTimeout;
+        if (req.Op == PipeOps.Account)
+        {
+            try
+            {
+                return await HandleAccountAsync(http, req, ct);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+            {
+                return PipeResponse.Error((int)HttpStatusCode.ServiceUnavailable, "server_unreachable");
+            }
+        }
         using var message = req.Op switch
         {
             PipeOps.Offers => new HttpRequestMessage(HttpMethod.Get, $"api/devices/{_deviceId}/login-offers"),

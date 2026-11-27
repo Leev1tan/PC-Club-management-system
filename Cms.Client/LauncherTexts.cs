@@ -120,6 +120,13 @@ public sealed class LauncherTexts
     public required string GameStartFailed { get; init; }
     public required string GameNow { get; init; }
 
+    // Club accounts (account pool)
+    public required string AccountTitle { get; init; }
+    public required string AccountBusy { get; init; }
+    public required string AccountNotConfigured { get; init; }
+    public required string AccountFailed { get; init; }
+    public required string AccountLoggingIn { get; init; }
+
     // Staff PIN unlock (Ctrl+Shift+U)
     public required string UnlockTitle { get; init; }
     public required string PinWait { get; init; }
@@ -232,6 +239,11 @@ public sealed class LauncherTexts
         GameStarting = "Запуск: {0}",
         GameStartFailed = "Не вдалося запустити «{0}»: {1}",
         GameNow = "Зараз: {0}",
+        AccountTitle = "Клубний акаунт",
+        AccountBusy = "Усі клубні акаунти {0} зараз зайняті. Зверніться до адміністратора.",
+        AccountNotConfigured = "Цей ПК не налаштовано для входу в {0} клубним акаунтом. Зверніться до адміністратора.",
+        AccountFailed = "Не вдалося отримати клубний акаунт ({0}). Зверніться до адміністратора.",
+        AccountLoggingIn = "Клубний акаунт {0}: вхід у {1}…",
 
         UnlockTitle = "Розблокування",
         PinWait = "Забагато невірних спроб. Зачекайте {0} с.",
@@ -345,6 +357,11 @@ public sealed class LauncherTexts
         GameStarting = "Starting: {0}",
         GameStartFailed = "Could not start {0}: {1}",
         GameNow = "Now: {0}",
+        AccountTitle = "Club account",
+        AccountBusy = "All club accounts of {0} are in use now. Ask the staff.",
+        AccountNotConfigured = "This PC is not set up to log in to {0} with a club account. Ask the staff.",
+        AccountFailed = "The club account could not be given ({0}). Ask the staff.",
+        AccountLoggingIn = "Club account {0}: logging in to {1}…",
 
         UnlockTitle = "Unlock",
         PinWait = "Too many wrong attempts. Wait {0} s.",

@@ -87,6 +87,8 @@ public static class AgentFiles
     public const string CatalogFile = "games.json";
     /// <summary>What the lock screen closes and cleans up when a session ends (Cms.Client.TeardownSettings), from the agent's appsettings.json.</summary>
     public const string TeardownFile = "teardown.json";
+    /// <summary>How the lock screen logs in to the client of a platform with a club account (Cms.Client.AccountPoolSettings), from the agent's appsettings.json.</summary>
+    public const string AccountPoolFile = "account-pool.json";
     public const string DeviceFile = "device.json";
     public const string EnrollmentTokenFile = "enrollment-token.txt";
     /// <summary>

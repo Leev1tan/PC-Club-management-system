@@ -77,6 +77,7 @@ public partial class Worker : BackgroundService
         EnsureInboxDirectory();
         MigrateLegacyCredentials();
         WriteTeardownSettings();
+        WriteAccountPoolSettings();
         InitializeCounters();
         LoadRuntimeState();
 
@@ -895,6 +896,32 @@ public partial class Worker : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to write {Path}; the lock screen uses the defaults", path);
+        }
+    }
+
+    /// <summary>
+    /// account-pool.json for the lock screen, from the section "AccountPool:Platforms" of appsettings.json on this PC (only
+    /// administrators can change it; the server never sends it): how to log in to the client of each platform with a club
+    /// account. Without the section: no platform (games that need a club account say so on the lock screen).
+    /// </summary>
+    private void WriteAccountPoolSettings()
+    {
+        var path = Path.Combine(AgentDir, AgentFiles.AccountPoolFile);
+        try
+        {
+            var platforms = new Dictionary<string, PlatformLogin>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in _config.GetSection("AccountPool:Platforms").GetChildren())
+            {
+                var login = new PlatformLogin { ClientPath = p["ClientPath"], LoginArguments = p["LoginArguments"] };
+                if (AccountLogin.IsUsable(login)) platforms[p.Key.ToLowerInvariant()] = login;
+                else _logger.LogWarning("AccountPool: the platform {Platform} is ignored (ClientPath must be an absolute .exe path, LoginArguments must contain {{login}})", p.Key);
+            }
+            WriteAtomic(path, new AccountPoolSettings { Platforms = platforms }.ToJson());
+            _logger.LogInformation("Club accounts: {Count} platform(s) can log in on this PC", platforms.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write {Path}; games that need a club account cannot log in", path);
         }
     }
 

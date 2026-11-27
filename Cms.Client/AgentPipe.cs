@@ -19,16 +19,27 @@ public static class PipeOps
     public const string Order = "order";
     /// <summary>The player cancels the new order (POST /api/devices/{id}/orders/cancel).</summary>
     public const string OrderCancel = "order_cancel";
+    /// <summary>
+    /// A club account for a game (POST /api/devices/{id}/game-account, then once its credentials). Only the installed
+    /// lock screen may ask (the agent checks the program of the pipe client).
+    /// </summary>
+    public const string Account = "account";
 
-    public static readonly IReadOnlyList<string> All = new[] { Offers, Login, Logout, Menu, Order, OrderCancel };
+    public static readonly IReadOnlyList<string> All = new[] { Offers, Login, Logout, Menu, Order, OrderCancel, Account };
 }
+
+/// <summary>
+/// The answer of the agent to "account": the lease of the club account (masked login) and, the first time only, the login
+/// and the secret for the client of the platform. The lock screen uses them at once and never shows the secret.
+/// </summary>
+public sealed record AccountLease(long LeaseId, string Platform, string LoginMask, bool Delivered, string? Login = null, string? Secret = null);
 
 /// <summary>A line of a bar order (product and quantity).</summary>
 public sealed record PipeOrderItem(Guid ProductId, int Quantity);
 
-/// <summary>Items and Payment (balance or desk): a bar order.</summary>
+/// <summary>Items and Payment (balance or desk): a bar order. GameId: the game that needs a club account.</summary>
 public sealed record PipeRequest(string Op, string? Username = null, string? Secret = null, string? Offer = null, int? Minutes = null, Guid? PackageId = null,
-    IReadOnlyList<PipeOrderItem>? Items = null, string? Payment = null);
+    IReadOnlyList<PipeOrderItem>? Items = null, string? Payment = null, Guid? GameId = null);
 
 /// <summary>Status: the HTTP status of the server, or 503 when the agent or the server cannot answer. Body: the JSON of the server.</summary>
 public sealed record PipeResponse(int Status, string? Body)
@@ -133,14 +144,18 @@ public sealed class AgentPipeServer
     private readonly Func<bool, NamedPipeServerStream> _create;
     private readonly Func<PipeRequest, CancellationToken, Task<PipeResponse>> _handle;
     private readonly Action<Exception>? _log;
+    private readonly Func<NamedPipeServerStream, PipeRequest, bool>? _authorize;
     private readonly SemaphoreSlim _slots = new(AgentPipe.MaxConnections);
 
     /// <param name="create">Creates a listening instance; the argument is true for the first one (FirstPipeInstance on Windows).</param>
-    public AgentPipeServer(Func<bool, NamedPipeServerStream> create, Func<PipeRequest, CancellationToken, Task<PipeResponse>> handle, Action<Exception>? log = null)
+    /// <param name="authorize">Checks the client of a request (for example the program of the club account request); false = 403 pipe_client_untrusted.</param>
+    public AgentPipeServer(Func<bool, NamedPipeServerStream> create, Func<PipeRequest, CancellationToken, Task<PipeResponse>> handle, Action<Exception>? log = null,
+        Func<NamedPipeServerStream, PipeRequest, bool>? authorize = null)
     {
         _create = create;
         _handle = handle;
         _log = log;
+        _authorize = authorize;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -180,6 +195,16 @@ public sealed class AgentPipeServer
         }
     }
 
+    private bool SafeAuthorize(NamedPipeServerStream stream, PipeRequest req)
+    {
+        try { return _authorize!(stream, req); }
+        catch (Exception ex)
+        {
+            _log?.Invoke(ex);
+            return false; // fail closed
+        }
+    }
+
     private async Task ServeAsync(NamedPipeServerStream stream, CancellationToken ct)
     {
         await using (stream)
@@ -195,6 +220,7 @@ public sealed class AgentPipeServer
                 var req = AgentPipe.ParseRequest(line);
                 PipeResponse response;
                 if (req == null) response = PipeResponse.Error(400, "bad_request");
+                else if (_authorize != null && !SafeAuthorize(stream, req)) response = PipeResponse.Error(403, "pipe_client_untrusted");
                 else
                 {
                     try { response = await _handle(req, ct); }
@@ -220,6 +246,18 @@ public sealed class AgentPipeServer
 
 public static class AgentPipeClient
 {
+    /// <summary>
+    /// The agent gives a club account only to the installed lock screen: the program of the pipe client must be the
+    /// configured launcher (full path, case-insensitive, \ and / the same). A player's own program gets 403.
+    /// </summary>
+    public static bool IsTrustedLauncher(string? clientImagePath, string? launcherPath)
+    {
+        static string? Norm(string? p) => string.IsNullOrWhiteSpace(p) ? null : p.Trim().Replace('/', '\\').TrimEnd('\\');
+        var client = Norm(clientImagePath);
+        var launcher = Norm(launcherPath);
+        return client != null && launcher != null && string.Equals(client, launcher, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Sends one request. 503 agent_unavailable when the agent does not answer in time; 503 agent_untrusted
     /// when verify refuses the pipe server (it is not the agent).
