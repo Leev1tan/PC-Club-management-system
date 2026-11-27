@@ -45,12 +45,13 @@ public sealed class DemoResetter
     public async Task ResetAsync(CmsDbContext db, CancellationToken ct = default)
     {
         var now = _clock.UtcNow;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
         var seed = await DemoSeeder.ResetAsync(db, now, Random.Shared, _clock.Zone, ct);
         _runtime.Clear();
         _simulator.Load(seed, now);
         _state.MarkReset(now, _options.ResetInterval);
-        _logger.LogInformation("Demo club reset: {Count} simulated PCs; next reset {Next}",
-            seed.Pcs.Count, _state.NextResetUtc?.ToString("u") ?? "on restart");
+        _logger.LogInformation("Demo club reset in {Ms} ms: {Count} simulated PCs, {Days} days of history; next reset {Next}",
+            watch.ElapsedMilliseconds, seed.Pcs.Count, DemoSeeder.HistoryDays, _state.NextResetUtc?.ToString("u") ?? "on restart");
     }
 }
 

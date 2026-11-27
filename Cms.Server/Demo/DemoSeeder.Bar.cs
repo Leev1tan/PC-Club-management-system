@@ -1,6 +1,7 @@
 using Cms.Server.Auth;
 using Cms.Server.Billing;
 using Cms.Server.Data;
+using Cms.Server.Shifts;
 using Cms.Shared;
 
 namespace Cms.Server.Demo;
@@ -40,20 +41,21 @@ public static partial class DemoSeeder
     public const decimal ShiftFloat = 1000m;
     /// <summary>Units of one delivery (restock) of a product.</summary>
     public const int DeliveryQuantity = 24;
-    private const int ShiftHistoryDays = 18;
-    private const int BarHistoryDays = 9;
 
     private sealed partial class Seeding
     {
         private sealed record Window(DateTimeOffset Start, DateTimeOffset? End, bool Day, StaffUserEntity Opener);
         private sealed record Line(ProductEntity Product, int Quantity);
+        /// <summary>An audit row of the seed, made after the ids are known; CloseWindow: the close of that shift (made in BuildAuditChain).</summary>
+        private sealed record PlannedAudit(DateTimeOffset At, int Order, Func<AuditLogEntity>? Make, int? CloseWindow = null);
 
         private readonly Dictionary<string, StaffUserEntity> _staff = new();
         private readonly List<Window> _windows = new();
         private readonly List<ProductEntity> _products = new();
         private readonly Dictionary<Guid, ProductSpec> _specs = new();
-        private readonly List<(DateTimeOffset At, Func<AuditLogEntity> Make)> _audit = new();
+        private readonly List<PlannedAudit> _audit = new();
         private readonly Dictionary<int, (decimal Variance, string Note)> _variances = new();
+        private readonly Dictionary<int, decimal> _expected = new();
         private Random _bar = new();
 
         public List<ShiftEntity> Shifts { get; } = new();
@@ -68,37 +70,55 @@ public static partial class DemoSeeder
         private StaffUserEntity Manager => _staff[StaffRoles.Manager];
         private StaffUserEntity Owner => _staff[StaffRoles.Owner];
 
-        /// <summary>The shift that owns a moment (after PlanShifts).</summary>
-        public ShiftEntity? ShiftAt(DateTimeOffset at) =>
-            Shifts.LastOrDefault(s => s.OpenedUtc <= at && (s.ClosedUtc == null || at < s.ClosedUtc));
+        /// <summary>Index of the shift window that owns a moment (windows are back to back), or -1.</summary>
+        private int WindowIndexAt(DateTimeOffset at)
+        {
+            for (var i = _windows.Count - 1; i >= 0; i--)
+                if (_windows[i].Start <= at) return _windows[i].End == null || at < _windows[i].End ? i : -1;
+            return -1;
+        }
 
-        private Window? WindowAt(DateTimeOffset at) => _windows.LastOrDefault(w => w.Start <= at && (w.End == null || at < w.End));
+        /// <summary>The shift that owns a moment (after PlanShifts).</summary>
+        public ShiftEntity? ShiftAt(DateTimeOffset at) => WindowIndexAt(at) is var i and >= 0 && i < Shifts.Count ? Shifts[i] : null;
+
+        private Window? WindowAt(DateTimeOffset at) => WindowIndexAt(at) is var i and >= 0 ? _windows[i] : null;
 
         private DateTimeOffset LocalTime(DateTime localDate, int hour, int minute = 0) =>
             ClubTimeZone.LocalToUtc(localDate.Date.AddHours(hour).AddMinutes(minute), _zone);
 
         private DateTime Today => TimeZoneInfo.ConvertTime(_now, _zone).Date;
 
-        /// <summary>Back-to-back 12 h shifts at 09:00 and 21:00 club time; the last one is open (the demo cashier's).</summary>
+        /// <summary>
+        /// Back-to-back 12 h shifts at 09:00 (demo-cashier) and 21:00 (demo-manager) club time for the whole
+        /// history; the last one is open (the demo cashier's). A few closes had a cash variance.
+        /// </summary>
         private void PlanWindows()
         {
+            var first = LocalTime(Today.AddDays(-HistoryDays - 1), 21);
             var starts = new List<(DateTimeOffset Utc, bool Day)>();
-            for (var day = Today.AddDays(-ShiftHistoryDays); day <= Today; day = day.AddDays(1))
+            for (var day = Today.AddDays(-HistoryDays - 1); day <= Today; day = day.AddDays(1))
             {
                 starts.Add((LocalTime(day, 9), true));
                 starts.Add((LocalTime(day, 21), false));
             }
-            starts = starts.Where(s => s.Utc <= _now).ToList();
+            starts = starts.Where(s => s.Utc >= first && s.Utc <= _now).ToList();
             for (var i = 0; i < starts.Count; i++)
             {
                 var end = i + 1 < starts.Count ? starts[i + 1].Utc : (DateTimeOffset?)null;
                 _windows.Add(new Window(starts[i].Utc, end, starts[i].Day, end == null || starts[i].Day ? Cashier : Manager));
             }
-            // Yesterday's day shift closed with 15 ₴ missing; an older one with 10 ₴ too much
-            var yesterday = _windows.FindIndex(w => w.Day && w.End != null && TimeZoneInfo.ConvertTime(w.Start, _zone).Date == Today.AddDays(-1));
-            if (yesterday >= 0) _variances[yesterday] = (-15m, "Не вистачає 15 ₴ — перевірити чеки за вечір");
-            var older = _windows.FindIndex(w => w.Day && w.End != null && TimeZoneInfo.ConvertTime(w.Start, _zone).Date == Today.AddDays(-4));
-            if (older >= 0) _variances[older] = (10m, "Зайві 10 ₴ — гість не забрав решту");
+            int Find(int daysAgo, bool day) => _windows.FindIndex(w => w.Day == day && w.End != null && TimeZoneInfo.ConvertTime(w.Start, _zone).Date == Today.AddDays(-daysAgo));
+            void Variance(int daysAgo, bool day, decimal variance, string note)
+            {
+                var i = Find(daysAgo, day);
+                if (i >= 0) _variances[i] = (variance, note);
+            }
+            // Yesterday's day shift closed with 15 ₴ missing; older ones with small differences
+            Variance(1, true, -15m, "Не вистачає 15 ₴ — перевірити чеки за вечір");
+            Variance(4, true, 10m, "Зайві 10 ₴ — гість не забрав решту");
+            Variance(9, false, -20m, "Не вистачає 20 ₴ — помилка з рештою вночі");
+            Variance(16, true, -10m, "Не вистачає 10 ₴");
+            Variance(23, false, 5m, "Зайві 5 ₴");
         }
 
         private void Audit(DateTimeOffset at, StaffUserEntity? actor, string action, string targetType, Func<string?> targetId, string summary, object? details = null) =>
@@ -108,36 +128,33 @@ public static partial class DemoSeeder
         private void Audit(DateTimeOffset at, StaffUserEntity? actor, string action, string targetType, Func<string?> targetId, Func<string> summary, object? details = null)
         {
             if (at > _now) return;
-            _audit.Add((at, () => new AuditLogEntity
-            {
-                CreatedUtc = at, ActorId = actor?.Id, ActorUsername = actor?.Username, ActorRole = actor?.Role, Action = action,
-                TargetType = targetType, TargetId = targetId(), Summary = summary(),
-                DetailsJson = details == null ? null : System.Text.Json.JsonSerializer.Serialize(details, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
-                {
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                }),
-                Ip = actor == null ? null : "10.3.3.10"
-            }));
+            _audit.Add(new PlannedAudit(at, 2, () => Entry(at, actor, action, targetType, targetId(), summary(), details)));
         }
 
-        /// <summary>Audit rows of the seed (built after the ids of shifts and receipts are known).</summary>
-        public IEnumerable<AuditLogEntity> AuditEntries() => _audit.OrderBy(a => a.At).Select(a => a.Make()).ToList();
+        private static AuditLogEntity Entry(DateTimeOffset at, StaffUserEntity? actor, string action, string targetType, string? targetId, string summary, object? details) => new()
+        {
+            CreatedUtc = at, ActorId = actor?.Id, ActorUsername = actor?.Username, ActorRole = actor?.Role, Action = action,
+            TargetType = targetType, TargetId = targetId, Summary = summary,
+            DetailsJson = details == null ? null : System.Text.Json.JsonSerializer.Serialize(details, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+            {
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            }),
+            Ip = actor == null ? null : "10.3.3.10"
+        };
 
-        private void SeedBarAndDesk()
+        private void SeedBar()
         {
             _bar = new Random(_rng.Next());
-            PlanWindows();
-
             foreach (var (spec, i) in BarCatalog.Select((x, i) => (x, i)))
             {
                 var product = new ProductEntity
                 {
                     Id = Guid.NewGuid(), Name = spec.Name, Category = spec.Category, Price = spec.Price, IsActive = spec.Active,
-                    TrackStock = spec.Track, LowStockThreshold = spec.Track ? spec.Low : null, SortOrder = i, CreatedUtc = _now.AddDays(-40)
+                    TrackStock = spec.Track, LowStockThreshold = spec.Track ? spec.Low : null, SortOrder = i, CreatedUtc = _now.AddDays(-HistoryDays - 10)
                 };
                 _products.Add(product);
                 _specs[product.Id] = spec;
-                _db.Products.Add(product);
+                Club.Add(product);
             }
 
             var receipts = PlanReceipts();
@@ -179,8 +196,6 @@ public static partial class DemoSeeder
 
             if (refundable != null) RefundSale(refundable, refundable.CreatedUtc.AddMinutes(25), "Банка пошкоджена — повернення коштів");
             SeedPayout();
-            SeedDebtor();
-            SeedFreeTime();
             SeedAuditOnly();
 
             // The stock log in date order gives the quantity after each row and the cached stock
@@ -196,19 +211,23 @@ public static partial class DemoSeeder
             }
         }
 
+        /// <summary>Receipts of every shift: 12-20 in a day shift, 6-12 at night, more in busy weeks; players pay from the balance.</summary>
         private List<(DateTimeOffset At, List<Line> Lines, string Method, UserEntity? Player)> PlanReceipts()
         {
             var sellable = _products.Where(p => p.IsActive).ToList();
             var bag = sellable.SelectMany(p => Enumerable.Repeat(p, _specs[p.Id].Weight)).ToList();
             var list = new List<(DateTimeOffset, List<Line>, string, UserEntity?)>();
-            foreach (var w in _windows.Where(w => (w.End ?? _now) > _now.AddDays(-BarHistoryDays)))
+            foreach (var w in _windows)
             {
+                var from = w.Start.AddMinutes(5); // after the opening stock
                 var to = w.End ?? _now.AddMinutes(-2);
-                if (to <= w.Start) continue;
-                var count = w.End == null ? Math.Max(5, (int)((to - w.Start).TotalHours * 1.2)) : w.Day ? _bar.Next(8, 15) : _bar.Next(4, 9);
+                if (to <= from) continue;
+                var weekend = TimeZoneInfo.ConvertTime(w.Start, _zone).DayOfWeek is DayOfWeek.Friday or DayOfWeek.Saturday;
+                var count = w.End == null ? Math.Max(5, (int)((to - from).TotalHours * 1.4))
+                    : w.Day ? _bar.Next(12, 21) + (weekend ? 4 : 0) : _bar.Next(6, 13) + (weekend ? 3 : 0);
                 for (var k = 0; k < count; k++)
                 {
-                    var at = w.Start + TimeSpan.FromSeconds(_bar.NextDouble() * (to - w.Start).TotalSeconds);
+                    var at = from + TimeSpan.FromSeconds(_bar.NextDouble() * (to - from).TotalSeconds);
                     var lines = new List<Line>();
                     foreach (var product in Enumerable.Range(0, _bar.Next(1, 4)).Select(_ => bag[_bar.Next(bag.Count)]).Distinct())
                         lines.Add(new Line(product, product.Category == "Кава" || product.Name == "Хот-дог" ? 1 : _bar.Next(1, 3)));
@@ -221,12 +240,12 @@ public static partial class DemoSeeder
             return list.OrderBy(r => r.Item1).ToList();
         }
 
-        /// <summary>Opening stock of each tracked product (one row per product before the history).</summary>
+        /// <summary>Opening stock of each tracked product (one row per product at the start of the first shift).</summary>
         private Dictionary<Guid, int> OpeningStock(List<(DateTimeOffset At, List<Line> Lines, string Method, UserEntity? Player)> receipts)
         {
             var sold = receipts.SelectMany(r => r.Lines).GroupBy(l => l.Product.Id).ToDictionary(g => g.Key, g => g.Sum(l => l.Quantity));
             var stock = new Dictionary<Guid, int>();
-            var at = _windows[0].Start.AddHours(1);
+            var at = _windows[0].Start.AddMinutes(1);
             foreach (var product in _products.Where(p => p.TrackStock))
             {
                 var spec = _specs[product.Id];
@@ -338,19 +357,20 @@ public static partial class DemoSeeder
         {
             var ghost = new UserEntity
             {
-                Id = Guid.NewGuid(), Username = "ghost_ua", DisplayName = "Привид", PasswordHash = Passwords.Hash(DemoOptions.PlayerPassword),
+                Id = Guid.NewGuid(), Username = "ghost_ua", DisplayName = "Привид", PasswordHash = _users[0].PasswordHash,
                 CreatedUtc = _now.AddDays(-3)
             };
-            _db.Users.Add(ghost);
+            Club.Add(ghost);
             _users.Add(ghost);
             _wallets[ghost.Id] = (0m, 0m);
 
             var pc = _pcs.First(p => p.Device.Hostname == "STD-03");
             var start = LocalTime(Today.AddDays(-1), 18, 40);
             var stop = start.AddMinutes(145).AddSeconds(20);
-            if (stop > _now) return;
+            if (stop > _now || Blocked(pc, start, stop) != null) return;
             var cost = TariffCalculator.QuotePlayed(new[] { (pc.Pricing, start, stop) }, pc.Pricing, _zone).Total;
             var session = AddSession(pc, start, stop, cost, false, null, null, ghost, "ended");
+            Reserve(pc, start, stop);
             session.PaymentMethod = PaymentMethods.Debt;
             var opener = WindowAt(stop)?.Opener ?? Cashier;
             _playerEvents.Add((stop, 1, () => Post(ghost, stop, LedgerTypes.SessionCharge, PaymentMethods.Debt, cost, 0m, 0m, 0m,
@@ -371,33 +391,26 @@ public static partial class DemoSeeder
         {
             var pc = _pcs.First(p => p.Device.Hostname == "VIP-02");
             var start = LocalTime(Today.AddDays(-2), 19, 0);
-            if (start.AddMinutes(120) > _now) return;
+            var end = start.AddMinutes(120);
+            if (end > _now || Blocked(pc, start, end) != null) return;
             var winner = _users.Single(u => u.Username == "vika_gg");
             var value = TariffCalculator.QuoteFixed(pc.Pricing, start, 120, _zone).Total;
-            var session = AddSession(pc, start, start.AddMinutes(120), 0m, true, null, 120, winner, "ended");
+            var session = AddSession(pc, start, end, 0m, true, null, 120, winner, "ended");
+            Reserve(pc, start, end);
+            Playing(winner, start, end);
             session.PaymentMethod = PaymentMethods.Free;
             const string reason = "Переможниця турніру CS2 2×2: 2 години VIP";
             Audit(start, Manager, AuditActions.SessionFreeTime, "session", () => session.Id.ToString(),
                 $"Free time on {pc.Device.Hostname}: 120 min, worth {value} ₴: {reason}", new { pc.Device.Hostname, minutes = 120, value, reason, player = winner.Username });
         }
 
-        /// <summary>Audit rows without money: a price change, shift handovers, an emergency PIN unlock last night.</summary>
+        /// <summary>Audit rows without money: a price change, an emergency PIN unlock last night.</summary>
         private void SeedAuditOnly()
         {
             var monster = _products.First();
             var priceAt = LocalTime(Today.AddDays(-5), 11, 5);
             Audit(priceAt, Owner, AuditActions.ProductPriceChanged, "product", () => monster.Id.ToString(),
                 $"Price of '{monster.Name}' changed: 70.00 -> 75.00 ₴", new { before = new { monster.Name, Price = 70m }, after = new { monster.Name, monster.Price } });
-
-            foreach (var (w, i) in _windows.Select((w, i) => (w, i)).TakeLast(4))
-            {
-                var window = w;
-                Audit(window.Start.AddSeconds(1), window.Opener, AuditActions.ShiftOpened, "shift", () => ShiftAt(window.Start.AddSeconds(1))?.Id.ToString(),
-                    $"Shift opened with a float of {ShiftFloat} ₴", new { OpeningFloat = ShiftFloat });
-                if (window.End is not { } end) continue;
-                Audit(end.AddSeconds(-1), window.Opener, AuditActions.ShiftClosed, "shift", () => ShiftAt(end.AddSeconds(-1))?.Id.ToString(),
-                    "Shift closed (see the Z-report)", new { variance = _variances.TryGetValue(i, out var v) ? v.Variance : 0m });
-            }
 
             var night = LocalTime(Today, 2, 14);
             if (night > _now) night = night.AddDays(-1);
@@ -407,36 +420,124 @@ public static partial class DemoSeeder
                 new { eventId = Guid.NewGuid().ToString("N"), pc.Device.Hostname, occurredUtc = night, lockReason = nameof(LockReason.AgentSilent), windowsUser = "player" });
         }
 
-        /// <summary>One shift per window with the expected cash of its ledger rows; desk rows get the cashier on duty.</summary>
+        /// <summary>
+        /// One shift per window with the expected cash of its ledger rows (float + every cash amount, as
+        /// ShiftService.ExpectedCashAsync); desk rows get the staff member on duty. The shifts are closed in
+        /// BuildAuditChain, in audit order, so that each gets the anchor of the chain at its close.
+        /// </summary>
         private void PlanShifts()
         {
+            var byWindow = LedgerRows.GroupBy(r => WindowIndexAt(r.CreatedUtc)).ToDictionary(g => g.Key, g => g.ToList());
             foreach (var (w, i) in _windows.Select((w, i) => (w, i)))
             {
-                var rows = LedgerRows.Where(r => r.CreatedUtc >= w.Start && (w.End == null || r.CreatedUtc < w.End)).ToList();
+                var rows = byWindow.TryGetValue(i, out var list) ? list : new List<LedgerEntryEntity>();
                 foreach (var row in rows.Where(r => r.ActorUsername is null or "demo-cashier"))
                 {
                     row.ActorUsername = w.Opener.Username;
                     row.ActorId = w.Opener.Id;
                 }
-                var shift = new ShiftEntity
+                Shifts.Add(new ShiftEntity
                 {
-                    Status = w.End == null ? ShiftStatuses.Open : ShiftStatuses.Closed, OpenedUtc = w.Start,
+                    Status = ShiftStatuses.Open, OpenedUtc = w.Start,
                     OpenedById = w.Opener.Id, OpenedByUsername = w.Opener.Username, OpeningFloat = ShiftFloat
-                };
-                if (w.End != null)
-                {
-                    var expected = ShiftFloat + rows.Where(r => r.Method == PaymentMethods.Cash).Sum(r => r.DeskAmount);
-                    var (variance, note) = _variances.TryGetValue(i, out var v) ? v : (0m, (string?)null);
-                    shift.ClosedUtc = w.End;
-                    shift.ClosedById = w.Opener.Id;
-                    shift.ClosedByUsername = w.Opener.Username;
-                    shift.ExpectedCash = expected;
-                    shift.CountedCash = expected + variance;
-                    shift.Variance = variance;
-                    shift.CloseNote = note;
-                }
-                Shifts.Add(shift);
+                });
+                if (w.End != null) _expected[i] = ShiftFloat + rows.Where(r => r.Method == PaymentMethods.Cash).Sum(r => r.DeskAmount);
             }
+        }
+
+        /// <summary>
+        /// Ids in date order (shifts, receipts, their lines, the stock log, the ledger) and the links between
+        /// them, so the rows can be written in bulk and the ids still follow the dates.
+        /// </summary>
+        private void AssignIds()
+        {
+            long id = 0;
+            foreach (var shift in Shifts) shift.Id = ++id;
+
+            var sales = Sales.OrderBy(s => s.CreatedUtc).ToList();
+            Sales.Clear();
+            Sales.AddRange(sales);
+            id = 0;
+            foreach (var sale in Sales)
+            {
+                sale.Id = ++id;
+                sale.ShiftId = ShiftAt(sale.CreatedUtc)?.Id;
+            }
+            foreach (var (refund, original) in RefundOf) refund.RefundOfSaleId = original.Id;
+            id = 0;
+            foreach (var (sale, items) in SaleItems.OrderBy(x => x.Sale.Id))
+                foreach (var item in items)
+                {
+                    item.Id = ++id;
+                    item.SaleId = sale.Id;
+                }
+
+            var movements = Movements.OrderBy(m => m.CreatedUtc).ToList();
+            Movements.Clear();
+            Movements.AddRange(movements);
+            id = 0;
+            foreach (var m in Movements)
+            {
+                m.Id = ++id;
+                m.ShiftId = ShiftAt(m.CreatedUtc)?.Id;
+                if (MovementSale.TryGetValue(m, out var sale)) m.SaleId = sale.Id;
+            }
+
+            var rows = LedgerRows.OrderBy(r => r.CreatedUtc).ToList(); // stable: rows of one player keep their order
+            LedgerRows.Clear();
+            LedgerRows.AddRange(rows);
+            id = 0;
+            foreach (var row in LedgerRows)
+            {
+                row.Id = ++id;
+                row.ShiftId = ShiftAt(row.CreatedUtc)?.Id;
+                if (RowSale.TryGetValue(row, out var sale)) row.SaleId = sale.Id;
+            }
+        }
+
+        /// <summary>
+        /// The audit log of the seed as a hash chain (AuditChain.Compute, ids 1, 2, ...), with "shift.opened"
+        /// and "shift.closed" of every shift like ShiftService. A shift is closed with ShiftService.ApplyClose
+        /// at its place in the chain: its anchor is the last row before its "shift.closed" row, exactly as a
+        /// real close stores it, so /api/audit/verify checks every seeded shift.
+        /// </summary>
+        public List<AuditLogEntity> BuildAuditChain()
+        {
+            for (var i = 0; i < Shifts.Count; i++)
+            {
+                var index = i;
+                var shift = Shifts[i];
+                var previous = i > 0 ? Shifts[i - 1] : null;
+                // At the hand-over the close comes first (order 0), then the next shift opens (order 1)
+                _audit.Add(new PlannedAudit(shift.OpenedUtc, 1, () => Entry(shift.OpenedUtc, _windows[index].Opener, AuditActions.ShiftOpened, "shift",
+                    shift.Id.ToString(), ShiftService.OpenedSummary(shift, previous, "₴"), ShiftService.OpenedDetails(shift, previous))));
+                if (_windows[i].End is { } end) _audit.Add(new PlannedAudit(end, 0, null, i));
+            }
+
+            var chain = new List<AuditLogEntity>(_audit.Count);
+            var prev = AuditChain.Genesis;
+            foreach (var planned in _audit.Select((a, seq) => (a, seq)).OrderBy(x => x.a.At).ThenBy(x => x.a.Order).ThenBy(x => x.seq).Select(x => x.a))
+            {
+                AuditLogEntity entry;
+                if (planned.CloseWindow is { } i)
+                {
+                    var shift = Shifts[i];
+                    var w = _windows[i];
+                    var (variance, note) = _variances.TryGetValue(i, out var v) ? v : (0m, (string?)null);
+                    var head = chain.Count == 0 ? ((long?)null, (string?)null) : (chain[^1].Id, chain[^1].Hash);
+                    ShiftService.ApplyClose(shift, _expected[i] + variance, _expected[i], note, new StaffActor(w.Opener.Id, w.Opener.Username), w.End!.Value, head);
+                    entry = Entry(w.End.Value, w.Opener, AuditActions.ShiftClosed, "shift", shift.Id.ToString(), ShiftService.ClosedSummary(shift, "₴"), ShiftService.ClosedDetails(shift));
+                }
+                else entry = planned.Make!();
+
+                entry.Id = chain.Count + 1;
+                entry.CreatedUtc = AuditChain.Normalize(entry.CreatedUtc);
+                entry.PrevHash = prev;
+                entry.Hash = AuditChain.Compute(prev, entry);
+                prev = entry.Hash;
+                chain.Add(entry);
+            }
+            return chain;
         }
     }
 }
