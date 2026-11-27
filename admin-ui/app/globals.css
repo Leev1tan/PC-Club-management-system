@@ -1067,3 +1067,84 @@ body::after {
     min-width: unset;
   }
 }
+/* ══════════════════════════
+   LOGIN / SETUP
+   ══════════════════════════ */
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.auth-card {
+  min-width: 0;
+  width: 100%;
+  max-width: 460px;
+}
+
+.auth-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.45;
+}
+
+.auth-error {
+  color: var(--neon-magenta);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.demo-accounts-box {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--neon-yellow);
+}
+
+.demo-accounts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.demo-accounts .btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+}
+
+.demo-account-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--neon-yellow);
+}
+
+.user-chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.audit-details {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 420px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.staff-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  align-items: center;
+}

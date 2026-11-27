@@ -1,11 +1,8 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
-
-// Same origin by default: the API is served under /api on the host that serves this UI
-// (Cms.Server wwwroot, the admin-ui container proxy, or an ingress path split).
-// NEXT_PUBLIC_API_URL (build time) points the UI to another API origin, e.g. for `npm run dev`.
-const API = process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5081');
+import { AuthStatus, Me, api, errorText, getJson, permissions, postJson, setUnauthorizedHandler } from './api';
+import { LoginScreen, SetupScreen, roleLabel } from './auth';
+import { AuditTab, SettingsTab, StaffTab } from './admin-tabs';
 
 // ===== Types =====
 type Zone = { id: string; name: string; color: string; sortOrder: number };
@@ -18,6 +15,7 @@ type Device = {
   positionX: number | null; positionY: number | null;
   occupancyStatus: string; activeSessionId: string | null; activeUserId: string | null; sessionEndUtc: string | null;
   isLocked?: boolean | null; pendingCommands?: number;
+  enrollment?: string; // pending (waits for approval), approved, revoked
 };
 type Session = {
   id: string; deviceId: string; deviceHostname: string | null;
@@ -32,16 +30,21 @@ type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' }
 type DemoInfo = { enabled: boolean; resetIntervalHours: number | null; lastResetUtc: string | null; nextResetUtc: string | null };
 
 // ===== Tab IDs =====
-type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'users' | 'tariffs' | 'finance';
+type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'users' | 'tariffs' | 'finance' | 'audit' | 'staff' | 'settings';
+type Need = 'any' | 'frontDesk' | 'management' | 'owner';
 
-const tabs: { id: Tab; label: string; icon: string; section?: string }[] = [
-  { id: 'dashboard', label: 'Дашборд', icon: '📊', section: 'ОСНОВНЕ' },
-  { id: 'map', label: 'Карта ПК', icon: '🗺️' },
-  { id: 'sessions', label: 'Сесії', icon: '⏱️' },
-  { id: 'devices', label: 'Пристрої', icon: '🖥️', section: 'УПРАВЛІННЯ' },
-  { id: 'users', label: 'Гравці', icon: '👥' },
-  { id: 'tariffs', label: 'Тарифи', icon: '💰' },
-  { id: 'finance', label: 'Фінанси', icon: '📈', section: 'АНАЛІТИКА' },
+// Each tab is shown only to the roles that may use it (the server checks every request again)
+const allTabs: { id: Tab; label: string; icon: string; section?: string; need: Need }[] = [
+  { id: 'dashboard', label: 'Дашборд', icon: '📊', section: 'ОСНОВНЕ', need: 'frontDesk' },
+  { id: 'map', label: 'Карта ПК', icon: '🗺️', need: 'any' },
+  { id: 'sessions', label: 'Сесії', icon: '⏱️', need: 'frontDesk' },
+  { id: 'devices', label: 'Пристрої', icon: '🖥️', section: 'УПРАВЛІННЯ', need: 'any' },
+  { id: 'users', label: 'Гравці', icon: '👥', need: 'frontDesk' },
+  { id: 'tariffs', label: 'Тарифи', icon: '💰', need: 'frontDesk' },
+  { id: 'finance', label: 'Фінанси', icon: '📈', section: 'АНАЛІТИКА', need: 'management' },
+  { id: 'audit', label: 'Журнал дій', icon: '📜', need: 'management' },
+  { id: 'staff', label: 'Персонал', icon: '🧑‍💼', section: 'АДМІНІСТРУВАННЯ', need: 'owner' },
+  { id: 'settings', label: 'Налаштування', icon: '⚙️', need: 'owner' },
 ];
 
 // ===== Helpers =====
@@ -59,11 +62,6 @@ function timeRemaining(endUtc: string | null): string {
   return h > 0 ? `${h}г ${m % 60}хв` : `${m}хв`;
 }
 
-async function errorText(res: Response): Promise<string> {
-  const text = await res.text();
-  try { return JSON.parse(text).error ?? text; } catch { return text || `HTTP ${res.status}`; }
-}
-
 function timeAgo(iso: string | null): string {
   if (!iso) return 'Ніколи';
   const diff = Date.now() - new Date(iso).getTime();
@@ -75,9 +73,47 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(h / 24)}д тому`;
 }
 
+// ===== Auth gate: setup screen, login page or the admin UI =====
+export default function Page() {
+  const [status, setStatus] = useState<AuthStatus | null>(null);
+  const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = still loading
+
+  const refresh = useCallback(async () => {
+    const [st, who] = await Promise.all([getJson<AuthStatus>('/api/auth/status'), getJson<Me>('/api/auth/me')]);
+    setStatus(st);
+    setMe(who);
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    // The cookie expired or the account changed: back to the login page
+    setUnauthorizedHandler(() => setMe(null));
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  const logout = async () => {
+    await postJson('/api/auth/logout').catch(() => undefined);
+    setMe(null);
+    refresh();
+  };
+
+  if (me === undefined) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-muted)' }}>
+        <div style={{ fontSize: 14 }}>Завантаження...</div>
+      </div>
+    );
+  }
+  if (!me && status?.setupRequired) return <SetupScreen onDone={setMe} />;
+  if (!me) return <LoginScreen status={status} onLogin={setMe} />;
+  return <AdminPage key={me.id + me.role} me={me} onLogout={logout} />;
+}
+
 // ===== Main =====
-export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
+  const can = permissions(me.role);
+  const tabs = allTabs.filter(t => t.need === 'any' || can[t.need]);
+  const [activeTab, setActiveTab] = useState<Tab>(can.frontDesk ? 'dashboard' : 'map');
   const [devices, setDevices] = useState<Device[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [tariffs, setTariffs] = useState<Tariff[]>([]);
@@ -95,6 +131,7 @@ export default function AdminPage() {
   const [zoneModal, setZoneModal] = useState(false);
   const [tariffModal, setTariffModal] = useState(false);
   const [topUpModal, setTopUpModal] = useState<{ userId: string; username: string } | null>(null);
+  const [playerModal, setPlayerModal] = useState(false);
   const [pcPopover, setPcPopover] = useState<string | null>(null);
 
   const toast = useCallback((message: string, type: Toast['type'] = 'info') => {
@@ -103,30 +140,29 @@ export default function AdminPage() {
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
   }, []);
 
+  // Only what the role may read (Tech: PCs and zones; Cashier: no revenue)
   const fetchAll = useCallback(async () => {
-    try {
-      const [dRes, zRes, tRes, uRes, sRes, rRes] = await Promise.all([
-        fetch(`${API}/api/devices`),
-        fetch(`${API}/api/zones`),
-        fetch(`${API}/api/tariffs`),
-        fetch(`${API}/api/users`),
-        fetch(`${API}/api/sessions`),
-        fetch(`${API}/api/sessions/revenue`),
-      ]);
-      setDevices(await dRes.json());
-      setZones(await zRes.json());
-      setTariffs(await tRes.json());
-      setUsers(await uRes.json());
-      setSessions(await sRes.json());
-      setRevenue(await rRes.json());
-    } catch { /* silent */ }
+    const [d, z, t, u, s, r] = await Promise.all([
+      getJson<Device[]>('/api/devices'),
+      getJson<Zone[]>('/api/zones'),
+      can.frontDesk ? getJson<Tariff[]>('/api/tariffs') : Promise.resolve(null),
+      can.frontDesk ? getJson<User[]>('/api/users') : Promise.resolve(null),
+      can.frontDesk ? getJson<Session[]>('/api/sessions') : Promise.resolve(null),
+      can.management ? getJson<Revenue>('/api/sessions/revenue') : Promise.resolve(null),
+    ]);
+    if (d) setDevices(d);
+    if (z) setZones(z);
+    if (t) setTariffs(t);
+    if (u) setUsers(u);
+    if (s) setSessions(s);
+    if (r) setRevenue(r);
     setLoading(false);
-  }, []);
+  }, [can.frontDesk, can.management]);
 
   // The tab and modal components below are declared inside this component, so every
   // re-render remounts them and resets their inputs. Auto-refresh therefore pauses
   // while a modal is open.
-  const modalOpen = !!(sessionModal || zoneModal || tariffModal || topUpModal);
+  const modalOpen = !!(sessionModal || zoneModal || tariffModal || topUpModal || playerModal);
   const modalOpenRef = useRef(false);
   useEffect(() => { modalOpenRef.current = modalOpen; }, [modalOpen]);
 
@@ -137,15 +173,12 @@ export default function AdminPage() {
   }, [fetchAll]);
 
   useEffect(() => {
-    fetch(`${API}/api/demo`).then(r => (r.ok ? r.json() : null)).then(setDemo).catch(() => { /* older server */ });
+    getJson<DemoInfo>('/api/demo').then(setDemo);
   }, []);
 
   // ===== API Actions =====
   const sendCommand = async (deviceId: string, type: string, payload?: object) => {
-    const res = await fetch(`${API}/api/devices/${deviceId}/commands`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, payload: payload || null }),
-    });
+    const res = await postJson(`/api/devices/${deviceId}/commands`, { type, payload: payload || null });
     if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast(`Команду "${type}" надіслано`, 'success');
     fetchAll();
@@ -158,77 +191,103 @@ export default function AdminPage() {
   };
 
   const extendSession = async (sessionId: string, minutes: number) => {
-    const res = await fetch(`${API}/api/sessions/${sessionId}/extend`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ minutes }),
-    });
+    const res = await postJson(`/api/sessions/${sessionId}/extend`, { minutes });
     if (res.ok) { toast(`Сесію продовжено на ${minutes} хв ✓`, 'success'); fetchAll(); }
     else toast(`Помилка: ${await errorText(res)}`, 'error');
   };
 
   const startSession = async (deviceId: string, tariffId: string, userId: string | null, duration: number | null) => {
-    const res = await fetch(`${API}/api/sessions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId, tariffId, userId, durationMinutes: duration }),
-    });
+    const res = await postJson('/api/sessions', { deviceId, tariffId, userId, durationMinutes: duration });
     if (res.ok) { toast('Сесію розпочато ✓', 'success'); fetchAll(); }
-    else { const err = await res.text(); toast(`Помилка: ${err}`, 'error'); }
+    else toast(`Помилка: ${await errorText(res)}`, 'error');
   };
 
   const endSession = async (sessionId: string) => {
-    const res = await fetch(`${API}/api/sessions/${sessionId}/end`, { method: 'POST' });
-    if (res.ok) { toast('Сесію завершено ✓', 'success'); fetchAll(); }
-    else toast('Не вдалося завершити сесію', 'error');
+    const res = await postJson(`/api/sessions/${sessionId}/end`);
+    if (res.ok) {
+      const ended = await res.json();
+      toast(ended.amountDue > 0 ? `Сесію завершено. До сплати на касі: ${fmt(ended.amountDue)} ₴` : 'Сесію завершено ✓', ended.amountDue > 0 ? 'info' : 'success');
+      fetchAll();
+    }
+    else toast(`Не вдалося завершити сесію: ${await errorText(res)}`, 'error');
   };
 
   const createZone = async (name: string, color: string) => {
-    await fetch(`${API}/api/zones`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, color, sortOrder: zones.length }),
-    });
+    const res = await postJson('/api/zones', { name, color, sortOrder: zones.length });
+    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast(`Зону "${name}" створено ✓`, 'success');
     fetchAll();
   };
 
   const deleteZone = async (id: string) => {
-    const res = await fetch(`${API}/api/zones/${id}`, { method: 'DELETE' });
+    const res = await api(`/api/zones/${id}`, { method: 'DELETE' });
     if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast('Зону видалено', 'info');
     fetchAll();
   };
 
   const createTariff = async (name: string, pricePerHour: number, zoneId: string | null) => {
-    await fetch(`${API}/api/tariffs`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, pricePerHour, isDefault: tariffs.length === 0, zoneId }),
-    });
+    const res = await postJson('/api/tariffs', { name, pricePerHour, isDefault: tariffs.length === 0, zoneId });
+    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast(`Тариф "${name}" створено ✓`, 'success');
     fetchAll();
   };
 
   const deleteTariff = async (id: string) => {
-    const res = await fetch(`${API}/api/tariffs/${id}`, { method: 'DELETE' });
+    const res = await api(`/api/tariffs/${id}`, { method: 'DELETE' });
     if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast('Тариф видалено', 'info');
     fetchAll();
   };
 
   const assignZone = async (deviceId: string, zoneId: string | null) => {
-    await fetch(`${API}/api/devices/${deviceId}/zone`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zoneId }),
-    });
+    const res = await postJson(`/api/devices/${deviceId}/zone`, { zoneId }, 'PUT');
+    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast('Зону призначено ✓', 'success');
     fetchAll();
   };
 
+  // Approval of PCs that registered without the enrollment token
+  const deviceAction = async (deviceId: string, action: 'approve' | 'reject' | 'revoke', hostname: string) => {
+    if (action !== 'approve' && !window.confirm(action === 'revoke'
+      ? `Відкликати ${hostname}? Ключ ПК перестане працювати (історія залишиться).`
+      : `Відхилити ${hostname}?`)) return;
+    const res = await postJson(`/api/devices/${deviceId}/${action}`);
+    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    toast(action === 'approve' ? `${hostname} схвалено ✓` : action === 'reject' ? `${hostname} відхилено` : `${hostname} відкликано`, 'success');
+    fetchAll();
+  };
+
+  const createPlayer = async (username: string, displayName: string, password: string) => {
+    const res = await postJson('/api/users/register', { username, displayName, password });
+    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    toast(`Гравця @${username} створено ✓`, 'success');
+    fetchAll();
+  };
+
+  const setPlayerPin = async (userId: string, username: string) => {
+    const password = window.prompt(`Новий пароль або PIN для @${username} (мін. 4 символи):`);
+    if (!password) return;
+    const res = await postJson(`/api/users/${userId}/password`, { password });
+    toast(res.ok ? 'Пароль гравця змінено ✓' : `Помилка: ${await errorText(res)}`, res.ok ? 'success' : 'error');
+  };
+
+  const adjustBalance = async (userId: string, username: string) => {
+    const amountText = window.prompt(`Коригування балансу @${username} (₴, напр. -50 або 100):`);
+    if (!amountText) return;
+    const amount = parseFloat(amountText.replace(',', '.'));
+    if (!amount) { toast('Невірна сума', 'error'); return; }
+    const reason = window.prompt('Причина (обов\'язково, записується в журнал дій):');
+    if (!reason || reason.trim().length < 3) { toast('Потрібна причина', 'error'); return; }
+    const res = await postJson(`/api/users/${userId}/adjust`, { amount, reason });
+    toast(res.ok ? 'Баланс скориговано ✓' : `Помилка: ${await errorText(res)}`, res.ok ? 'success' : 'error');
+    if (res.ok) fetchAll();
+  };
+
   const topUpUser = async (userId: string, amount: number) => {
-    const res = await fetch(`${API}/api/users/${userId}/topup`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, description: null }),
-    });
+    const res = await postJson(`/api/users/${userId}/topup`, { amount, description: null });
     if (res.ok) { toast(`Баланс поповнено на ${amount} ₴ ✓`, 'success'); fetchAll(); }
-    else toast('Помилка поповнення', 'error');
+    else toast(`Помилка поповнення: ${await errorText(res)}`, 'error');
   };
 
   // ===== Computed =====
@@ -247,6 +306,9 @@ export default function AdminPage() {
       case 'users': return <UsersTab />;
       case 'tariffs': return <TariffsTab />;
       case 'finance': return <FinanceTab />;
+      case 'audit': return <AuditTab />;
+      case 'staff': return <StaffTab me={me} toast={toast} />;
+      case 'settings': return <SettingsTab toast={toast} />;
     }
   };
 
@@ -406,17 +468,17 @@ export default function AdminPage() {
 
                 {pcPopover === d.id && (
                   <div className="popover" onClick={e => e.stopPropagation()}>
-                    {d.occupancyStatus === 'free' && (
+                    {can.frontDesk && d.occupancyStatus === 'free' && d.enrollment !== 'pending' && (
                       <button className="popover-item" onClick={() => { setPcPopover(null); setSessionModal({ deviceId: d.id, hostname: d.hostname }); }}>
                         🎮 Розпочати сесію
                       </button>
                     )}
-                    {d.activeSessionId && d.sessionEndUtc && (
+                    {can.frontDesk && d.activeSessionId && d.sessionEndUtc && (
                       <button className="popover-item" onClick={() => { setPcPopover(null); extendSession(d.activeSessionId!, 30); }}>
                         ➕ Продовжити +30 хв
                       </button>
                     )}
-                    {d.activeSessionId && (
+                    {can.frontDesk && d.activeSessionId && (
                       <button className="popover-item" onClick={() => { setPcPopover(null); endSession(d.activeSessionId!); }}>
                         ⏹️ Завершити сесію
                       </button>
@@ -455,7 +517,7 @@ export default function AdminPage() {
           <div className="table-wrapper">
             <table className="data-table">
               <thead><tr>
-                <th>Ім&apos;я</th><th>Статус</th><th>Зона</th><th>IP</th><th>ОС</th><th>Останній зв&apos;язок</th><th>Дії</th>
+                <th>Ім&apos;я</th><th>Статус</th><th>Підключення</th><th>Зона</th><th>IP</th><th>ОС</th><th>Останній зв&apos;язок</th><th>Дії</th>
               </tr></thead>
               <tbody>
                 {devices.map(d => (
@@ -467,7 +529,12 @@ export default function AdminPage() {
                       </span>
                     </td>
                     <td>
-                      <select className="form-select" style={{ width: 140, padding: '4px 8px', fontSize: 12 }}
+                      <span className={`badge ${d.enrollment === 'pending' ? 'badge-amber' : d.enrollment === 'revoked' ? 'badge-red' : 'badge-green'}`}>
+                        {d.enrollment === 'pending' ? 'Чекає схвалення' : d.enrollment === 'revoked' ? 'Відкликано' : 'Схвалено'}
+                      </span>
+                    </td>
+                    <td>
+                      <select className="form-select" style={{ width: 140, padding: '4px 8px', fontSize: 12 }} disabled={!can.deviceAdmin}
                         value={d.zoneId || ''} onChange={e => assignZone(d.id, e.target.value || null)}>
                         <option value="">Без зони</option>
                         {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
@@ -478,9 +545,15 @@ export default function AdminPage() {
                     <td>{timeAgo(d.lastSeenUtc)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'restart')} title="Перезавантажити">🔄</button>
-                        <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'lock')} title="Заблокувати">🔒</button>
-                        <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'logoff')} title="Вийти">🚪</button>
+                        {d.enrollment === 'pending' ? (can.deviceAdmin && <>
+                          <button className="btn btn-success btn-sm" onClick={() => deviceAction(d.id, 'approve', d.hostname)}>Схвалити</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => deviceAction(d.id, 'reject', d.hostname)}>Відхилити</button>
+                        </>) : d.enrollment === 'revoked' ? null : <>
+                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'restart')} title="Перезавантажити">🔄</button>
+                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'lock')} title="Заблокувати">🔒</button>
+                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'logoff')} title="Вийти">🚪</button>
+                          {can.deviceAdmin && <button className="btn btn-danger btn-sm" onClick={() => deviceAction(d.id, 'revoke', d.hostname)} title="Відкликати ключ ПК">⛔</button>}
+                        </>}
                       </div>
                     </td>
                   </tr>
@@ -555,7 +628,10 @@ export default function AdminPage() {
       <>
         <div className="page-header">
           <span className="page-title">Гравці</span>
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{users.length} зареєстровано</span>
+          <span style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{users.length} зареєстровано</span>
+            <button className="btn btn-primary btn-sm" onClick={() => setPlayerModal(true)}>+ Новий гравець</button>
+          </span>
         </div>
 
         {users.length === 0 ? (
@@ -579,9 +655,13 @@ export default function AdminPage() {
                     <td>{u.bonusPoints} 🏆</td>
                     <td>{fmtDate(u.createdUtc)}</td>
                     <td>
-                      <button className="btn btn-success btn-sm" onClick={() => setTopUpModal({ userId: u.id, username: u.username })}>
-                        💳 Поповнити
-                      </button>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn btn-success btn-sm" onClick={() => setTopUpModal({ userId: u.id, username: u.username })}>
+                          💳 Поповнити
+                        </button>
+                        <button className="btn btn-sm" onClick={() => setPlayerPin(u.id, u.username)} title="Пароль / PIN">🔑</button>
+                        {can.management && <button className="btn btn-sm" onClick={() => adjustBalance(u.id, u.username)} title="Коригування балансу (з причиною)">±</button>}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -601,7 +681,7 @@ export default function AdminPage() {
         <div className="section-card">
           <div className="section-card-header">
             <span className="section-card-title">🗺️ Зони</span>
-            <button className="btn btn-primary btn-sm" onClick={() => setZoneModal(true)}>+ Додати зону</button>
+            {can.management && <button className="btn btn-primary btn-sm" onClick={() => setZoneModal(true)}>+ Додати зону</button>}
           </div>
           {zones.length === 0 ? (
             <div className="empty-state" style={{ padding: 30 }}>
@@ -615,7 +695,7 @@ export default function AdminPage() {
                   <div key={z.id} className="stat-card" style={{ minWidth: 160, flex: '1 1 160px', borderLeftColor: z.color, borderLeftWidth: 3 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 600, fontSize: 14 }}>{z.name}</span>
-                      <button className="btn btn-sm btn-danger" onClick={() => deleteZone(z.id)} style={{ padding: '2px 6px', fontSize: 11 }}>✕</button>
+                      {can.management && <button className="btn btn-sm btn-danger" onClick={() => deleteZone(z.id)} style={{ padding: '2px 6px', fontSize: 11 }}>✕</button>}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{count} ПК</div>
                   </div>
@@ -629,7 +709,7 @@ export default function AdminPage() {
         <div className="section-card">
           <div className="section-card-header">
             <span className="section-card-title">💰 Тарифи</span>
-            <button className="btn btn-primary btn-sm" onClick={() => setTariffModal(true)}>+ Додати тариф</button>
+            {can.management && <button className="btn btn-primary btn-sm" onClick={() => setTariffModal(true)}>+ Додати тариф</button>}
           </div>
           {tariffs.length === 0 ? (
             <div className="empty-state" style={{ padding: 30 }}>
@@ -646,7 +726,7 @@ export default function AdminPage() {
                       <td style={{ fontWeight: 600, color: 'var(--green)' }}>{fmt(t.pricePerHour)} ₴/год</td>
                       <td>{t.zoneName || 'Всі зони'}</td>
                       <td>{t.isDefault ? <span className="badge badge-green">Так</span> : '—'}</td>
-                      <td><button className="btn btn-sm btn-danger" onClick={() => deleteTariff(t.id)}>✕</button></td>
+                      <td>{can.management && <button className="btn btn-sm btn-danger" onClick={() => deleteTariff(t.id)}>✕</button>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -948,6 +1028,40 @@ export default function AdminPage() {
     );
   }
 
+  function PlayerModal() {
+    if (!playerModal) return null;
+    const [username, setUsername] = useState('');
+    const [displayName, setDisplayName] = useState('');
+    const [password, setPassword] = useState('');
+
+    return (
+      <div className="modal-overlay" onClick={() => setPlayerModal(false)}>
+        <div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal-title">👤 Новий гравець</div>
+          <div className="form-group">
+            <label className="form-label">Логін</label>
+            <input className="form-input" value={username} onChange={e => setUsername(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Ім&apos;я</label>
+            <input className="form-input" value={displayName} onChange={e => setDisplayName(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Пароль або PIN (мін. 4) — для входу на екрані блокування</label>
+            <input className="form-input" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} />
+          </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setPlayerModal(false)}>Скасувати</button>
+            <button className="btn btn-primary" disabled={!username.trim() || password.length < 4}
+              onClick={() => { createPlayer(username.trim(), displayName.trim(), password); setPlayerModal(false); }}>
+              Створити
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ===== Main Layout =====
   if (loading) {
     return (
@@ -1008,6 +1122,8 @@ export default function AdminPage() {
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {onlineDevices.length}/{devices.length} ПК онлайн
             </span>
+            <span className="user-chip" title={roleLabel(me.role)}>👤 {me.displayName} · {roleLabel(me.role)}</span>
+            <button className="btn btn-sm" onClick={onLogout}>Вийти</button>
           </div>
         </div>
         <div className="content-area">
@@ -1020,6 +1136,7 @@ export default function AdminPage() {
       <ZoneModal />
       <TariffModal />
       <TopUpModal />
+      <PlayerModal />
 
       {/* Toasts */}
       <div className="toast-container">
