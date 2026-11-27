@@ -1,19 +1,31 @@
 # Client (Gaming PC) Installer Script for Windows
-# Run as Administrator
-# Usage: .\install-client.ps1 -ServerUrl "http://server:5081" [-EnrollmentToken "<token>"] [-KioskMode]
+# Run as Administrator, or as SYSTEM (RMM tools, Intune, a VM guest agent): no step needs a console.
+# Usage: .\install-client.ps1 -ServerUrl "http://server:5081" [-EnrollmentToken "<token>"] [-KioskMode] [-AdminPassword <SecureString>]
 #
 # -EnrollmentToken: the server's CMS_ENROLLMENT_TOKEN / Devices:EnrollmentToken. With it the PC is
 #   approved at once; without it the PC waits as "pending" until staff approve it in the admin UI.
 #   The token is used only with an explicit -ServerUrl (never sent to a server found by discovery),
 #   is stored in C:\ProgramData\ClubAgent\private (SYSTEM, Administrators, agent only) and is
 #   deleted by the agent after the first successful registration.
+# -KioskMode: the player account ClubUser signs in automatically and gets the lock screen as its shell.
+#   - Its password is random (32 characters) and new on every run. The installer never prints it and never
+#     writes it to a file. Windows keeps it for the automatic sign-in as the LSA secret "DefaultPassword"
+#     (not as the registry value DefaultPassword, which local users can read). To reset it, run the
+#     installer again with the same options.
+#   - The shell, "Task Manager off" and the other lockdown policies go into the registry hive of ClubUser
+#     only. ClubAdmin and the other administrators keep explorer.exe and Task Manager.
+# -AdminPassword: the password of the recovery account ClubAdmin (Administrators) when the installer must
+#   create it. Without it the installer asks in an interactive console. In a run without a console (SYSTEM,
+#   -NonInteractive) it creates no ClubAdmin and prints a warning. From PowerShell, for example:
+#     .\install-client.ps1 -ServerUrl "http://server:5081" -KioskMode -AdminPassword (Read-Host -AsSecureString)
 
 param(
     [string]$ServerUrl = "",  # Empty = auto-discovery
     [string]$EnrollmentToken = "",
     [string]$AgentPath = "C:\ClubAgent",
     [string]$LauncherPath = "C:\ClubLauncher",
-    [switch]$KioskMode = $false
+    [switch]$KioskMode = $false,
+    [System.Security.SecureString]$AdminPassword = $null
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,6 +34,254 @@ function Test-IsAdmin {
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Stops the install with a clear message and exit code 1 (RMM tools and Intune report the exit code).
+function Stop-Install([string]$Message) {
+    Write-Host ""
+    Write-Host "ERROR: $Message" -ForegroundColor Red
+    exit 1
+}
+
+# False for SYSTEM, a service, -NonInteractive or redirected input: then nobody can answer Read-Host.
+function Test-InteractiveSession {
+    if (-not [Environment]::UserInteractive) { return $false }
+    if ([Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) { return $false }
+    foreach ($arg in [Environment]::GetCommandLineArgs()) {
+        if ($arg -like '-NonI*') { return $false }
+    }
+    try { if ([Console]::IsInputRedirected) { return $false } } catch { }
+    return $true
+}
+
+# reg.exe with its exit code and text. Windows PowerShell 5.1 turns the error text of a native program into an
+# exception when $ErrorActionPreference is 'Stop'; here the exit code decides.
+function Invoke-Reg([string[]]$Arguments) {
+    $ErrorActionPreference = 'Continue'
+    $text = (& reg.exe @Arguments 2>&1 | Out-String).Trim()
+    return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Text = $text }
+}
+
+# userenv!CreateProfile (the profile of ClubUser, also as SYSTEM) and the LSA secret of the automatic sign-in.
+# C# 5 only: Windows PowerShell 5.1 compiles this with the C# compiler of .NET Framework.
+$kioskNativeSource = @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security;
+using System.Text;
+
+namespace ClubInstall
+{
+    public static class KioskNative
+    {
+        // HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS): the profile exists
+        public const int ProfileExists = unchecked((int)0x800700B7);
+
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+        public static extern int CreateProfile(string pszUserSid, string pszUserName, StringBuilder pszProfilePath, uint cchProfilePath);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct LsaUnicodeString
+        {
+            public ushort Length;
+            public ushort MaximumLength;
+            public IntPtr Buffer;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct LsaObjectAttributes
+        {
+            public int Length;
+            public IntPtr RootDirectory;
+            public IntPtr ObjectName;
+            public uint Attributes;
+            public IntPtr SecurityDescriptor;
+            public IntPtr SecurityQualityOfService;
+        }
+
+        [DllImport("advapi32.dll")]
+        private static extern uint LsaOpenPolicy(IntPtr systemName, ref LsaObjectAttributes objectAttributes, uint desiredAccess, out IntPtr policyHandle);
+
+        [DllImport("advapi32.dll")]
+        private static extern uint LsaStorePrivateData(IntPtr policyHandle, ref LsaUnicodeString keyName, IntPtr privateData);
+
+        [DllImport("advapi32.dll")]
+        private static extern uint LsaClose(IntPtr policyHandle);
+
+        [DllImport("advapi32.dll")]
+        private static extern int LsaNtStatusToWinError(uint status);
+
+        private const uint PolicyCreateSecret = 0x00000020;
+        private const uint StatusObjectNameNotFound = 0xC0000034;
+        private const string SecretName = "DefaultPassword";
+
+        // Stores the password as the LSA secret "DefaultPassword": Winlogon uses it for the automatic sign-in.
+        // null deletes the secret. The password is in unmanaged memory only for the call and is zeroed after it.
+        public static void SetAutoLogonPassword(SecureString password)
+        {
+            LsaObjectAttributes attributes = new LsaObjectAttributes();
+            IntPtr policy;
+            uint status = LsaOpenPolicy(IntPtr.Zero, ref attributes, PolicyCreateSecret, out policy);
+            if (status != 0) throw new Win32Exception(LsaNtStatusToWinError(status));
+            IntPtr name = Marshal.StringToHGlobalUni(SecretName);
+            IntPtr secret = IntPtr.Zero;
+            IntPtr data = IntPtr.Zero;
+            try
+            {
+                LsaUnicodeString key = new LsaUnicodeString();
+                key.Buffer = name;
+                key.Length = (ushort)(SecretName.Length * 2);
+                key.MaximumLength = (ushort)(key.Length + 2);
+                if (password != null)
+                {
+                    secret = Marshal.SecureStringToGlobalAllocUnicode(password);
+                    LsaUnicodeString value = new LsaUnicodeString();
+                    value.Buffer = secret;
+                    value.Length = (ushort)(password.Length * 2);
+                    value.MaximumLength = (ushort)(value.Length + 2);
+                    data = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(LsaUnicodeString)));
+                    Marshal.StructureToPtr(value, data, false);
+                }
+                status = LsaStorePrivateData(policy, ref key, data);
+                if (status != 0 && !(password == null && status == StatusObjectNameNotFound))
+                    throw new Win32Exception(LsaNtStatusToWinError(status));
+            }
+            finally
+            {
+                if (data != IntPtr.Zero) Marshal.FreeHGlobal(data);
+                if (secret != IntPtr.Zero) Marshal.ZeroFreeGlobalAllocUnicode(secret);
+                Marshal.FreeHGlobal(name);
+                LsaClose(policy);
+            }
+        }
+    }
+}
+'@
+
+# A new random password for ClubUser: 32 characters from a cryptographic random generator, with upper-case and
+# lower-case letters, digits and symbols, so every password policy accepts it. It exists only in memory as a
+# SecureString: nobody types it, the installer never prints it and never writes it to a file.
+function New-KioskPassword {
+    $sets = @('ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '!#%+-=?@_~')
+    $all = -join $sets
+    $length = 32
+    $limit = 256 - (256 % $all.Length)   # rejection sampling: every character is equally likely
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    $byte = New-Object byte[] 1
+    $chars = New-Object char[] $length
+    try {
+        while ($true) {
+            $i = 0
+            while ($i -lt $length) {
+                $rng.GetBytes($byte)
+                if ($byte[0] -lt $limit) {
+                    $chars[$i] = $all[$byte[0] % $all.Length]
+                    $i++
+                }
+            }
+            $complete = $true
+            foreach ($set in $sets) {
+                $found = $false
+                foreach ($c in $chars) { if ($set.IndexOf($c) -ge 0) { $found = $true; break } }
+                if (-not $found) { $complete = $false }
+            }
+            if ($complete) { break }
+        }
+        $password = New-Object Security.SecureString
+        foreach ($c in $chars) { $password.AppendChar($c) }
+        $password.MakeReadOnly()
+        return $password
+    } finally {
+        [Array]::Clear($chars, 0, $chars.Length)
+        $rng.Dispose()
+    }
+}
+
+# The profile folder of a user (ProfileList in the registry); $null when Windows has no profile for the SID.
+function Get-ProfilePath([string]$Sid) {
+    $key = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$Sid"
+    if (!(Test-Path $key)) { return $null }
+    $path = (Get-ItemProperty -Path $key -Name 'ProfileImagePath' -ErrorAction SilentlyContinue).ProfileImagePath
+    if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+    return [Environment]::ExpandEnvironmentVariables($path)
+}
+
+# The profile of the kiosk user (with NTUSER.DAT) must exist before its shell and policies go into its hive.
+# userenv!CreateProfile works also as SYSTEM. A sign-in with Start-Process -Credential (the old way) gives
+# "Access is denied" as SYSTEM, so it is only the fallback. Returns the profile folder, or $null.
+function New-KioskProfile([string]$UserName, [string]$Sid, [Security.SecureString]$Password) {
+    $buffer = New-Object System.Text.StringBuilder 260
+    $hr = [ClubInstall.KioskNative]::CreateProfile($Sid, $UserName, $buffer, [uint32]$buffer.Capacity)
+    if ($hr -eq 0) {
+        Write-Host "   Profile of '$UserName' created: $($buffer.ToString())" -ForegroundColor Gray
+    } elseif ($hr -eq [ClubInstall.KioskNative]::ProfileExists) {
+        Write-Host "   Profile of '$UserName' exists" -ForegroundColor Gray
+    } else {
+        Write-Warning ("CreateProfile failed (HRESULT 0x{0:X8}); trying a sign-in of '{1}' with Start-Process" -f $hr, $UserName)
+        try {
+            $credential = New-Object System.Management.Automation.PSCredential($UserName, $Password)
+            Start-Process -FilePath "cmd.exe" -ArgumentList "/c exit 0" -Credential $credential -LoadUserProfile -Wait -NoNewWindow
+            Start-Sleep -Seconds 3
+        } catch {
+            Write-Warning "Start-Process as '$UserName' failed: $($_.Exception.Message)"
+        }
+    }
+    $path = Get-ProfilePath $Sid
+    if ($path -and (Test-Path -LiteralPath (Join-Path $path 'NTUSER.DAT'))) { return $path }
+    return $null
+}
+
+# The registry hive of the kiosk user: HKU\<SID> when the user is signed in (Windows has it loaded), else its
+# NTUSER.DAT loaded at HKU\ClubUserHive. $null when it cannot be loaded.
+$kioskHiveName = 'ClubUserHive'
+function Mount-KioskHive([string]$Sid, [string]$ProfilePath) {
+    if (Test-Path "Registry::HKEY_USERS\$Sid") {
+        return [pscustomobject]@{ Root = "Registry::HKEY_USERS\$Sid"; Loaded = $false }
+    }
+    if (Test-Path "Registry::HKEY_USERS\$kioskHiveName") {
+        Invoke-Reg @('unload', "HKU\$kioskHiveName") | Out-Null   # left loaded by an interrupted run
+    }
+    $result = Invoke-Reg @('load', "HKU\$kioskHiveName", (Join-Path $ProfilePath 'NTUSER.DAT'))
+    if ($result.ExitCode -ne 0) {
+        Write-Host "   reg load: $($result.Text)" -ForegroundColor Red
+        return $null
+    }
+    return [pscustomobject]@{ Root = "Registry::HKEY_USERS\$kioskHiveName"; Loaded = $true }
+}
+
+# Unloads a hive that Mount-KioskHive loaded. A hive that stays loaded blocks the next sign-in of the user.
+function Dismount-KioskHive($Hive) {
+    if ($null -eq $Hive -or -not $Hive.Loaded) { return }
+    for ($i = 0; $i -lt 5; $i++) {
+        # The registry provider keeps key handles open until the garbage collector closes them
+        [gc]::Collect()
+        [gc]::WaitForPendingFinalizers()
+        if ((Invoke-Reg @('unload', "HKU\$kioskHiveName")).ExitCode -eq 0) { return }
+        Start-Sleep -Seconds 1
+    }
+    Write-Warning "Could not unload HKU\$kioskHiveName. Restart the PC before ClubUser signs in."
+}
+
+# The shell and the lockdown policies of the kiosk user, in its own hive only (never machine-wide).
+function Set-KioskUserPolicies([string]$Root, [string]$LauncherExe) {
+    $winlogon = "$Root\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    $system = "$Root\Software\Microsoft\Windows\CurrentVersion\Policies\System"
+    $explorer = "$Root\Software\Policies\Microsoft\Windows\Explorer"
+    foreach ($key in @($winlogon, $system, $explorer)) {
+        if (!(Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+    }
+    New-ItemProperty -Path $winlogon -Name 'Shell' -Value "`"$LauncherExe`"" -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $system -Name 'DisableTaskMgr' -Value 1 -PropertyType DWord -Force | Out-Null
+    New-ItemProperty -Path $explorer -Name 'DisableContextMenusInStart' -Value 1 -PropertyType DWord -Force | Out-Null
+}
+
+# Removes a machine-wide value that an older installer wrote (it applied to every account, also ClubAdmin).
+function Remove-MachineValue([string]$Path, [string]$Name, [string]$What) {
+    if ($null -ne (Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue)) {
+        Remove-ItemProperty -Path $Path -Name $Name
+        Write-Host "   Removed the machine-wide $What of an older install" -ForegroundColor Gray
+    }
 }
 
 if (-not (Test-IsAdmin)) {
@@ -38,7 +298,7 @@ Write-Host ""
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Step 1: Create directories
-Write-Host "[1/6] Creating installation directories..." -ForegroundColor Yellow
+Write-Host "[1/8] Creating installation directories..." -ForegroundColor Yellow
 foreach ($path in @($AgentPath, $LauncherPath)) {
     if (!(Test-Path $path)) {
         New-Item -ItemType Directory -Path $path -Force | Out-Null
@@ -46,7 +306,7 @@ foreach ($path in @($AgentPath, $LauncherPath)) {
 }
 
 # Step 2: Copy agent files
-Write-Host "[2/6] Installing Agent Service..." -ForegroundColor Yellow
+Write-Host "[2/8] Installing Agent Service..." -ForegroundColor Yellow
 $agentFiles = Join-Path $scriptDir "agent"
 
 if (Test-Path $agentFiles) {
@@ -68,7 +328,7 @@ if (Test-Path $agentFiles) {
 }
 
 # Step 3: Configure agent
-Write-Host "[3/6] Configuring Agent..." -ForegroundColor Yellow
+Write-Host "[3/8] Configuring Agent..." -ForegroundColor Yellow
 $agentConfig = Join-Path $AgentPath "appsettings.json"
 
 # The shipped appsettings.json has the session teardown defaults ("Teardown": processes to close at the
@@ -138,7 +398,7 @@ if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
 }
 
 # Step 4: Copy launcher files
-Write-Host "[4/6] Installing Launcher..." -ForegroundColor Yellow
+Write-Host "[4/8] Installing Launcher..." -ForegroundColor Yellow
 $launcherFiles = Join-Path $scriptDir "launcher"
 
 if (Test-Path $launcherFiles) {
@@ -156,7 +416,7 @@ foreach ($path in @($AgentPath, $LauncherPath)) {
 }
 
 # Step 5: Install Agent Windows Service
-Write-Host "[5/6] Installing Agent Windows Service..." -ForegroundColor Yellow
+Write-Host "[5/8] Installing Agent Windows Service..." -ForegroundColor Yellow
 $serviceName = "ClubAgent"
 $exePath = Join-Path $AgentPath "Cms.Agent.Service.exe"
 
@@ -188,131 +448,125 @@ if (Test-Path $launcherExe) {
 }
 
 # Step 7: Kiosk Mode setup (if requested)
+$adminUser = "ClubAdmin"
+$adminReady = $false
 if ($KioskMode) {
-    Write-Host "[7/8] Setting up Kiosk Mode..." -ForegroundColor Yellow
-    
+    Write-Host "[7/8] Setting up the kiosk account..." -ForegroundColor Yellow
+
     $kioskUser = "ClubUser"
-    $kioskPassword = "ClubKiosk2024!" # Internal only, user never types this
-    
-    # 7a: Ensure admin recovery account exists
-    $adminUser = "ClubAdmin"
-    $existingAdmin = Get-LocalUser -Name $adminUser -ErrorAction SilentlyContinue
-    if (-not $existingAdmin) {
-        Write-Host "   Creating '$adminUser' recovery account..." -ForegroundColor Cyan
-        $adminPass = Read-Host "   Enter password for $adminUser (staff recovery account)" -AsSecureString
-        New-LocalUser -Name $adminUser `
-            -Password $adminPass `
-            -FullName "Club Administrator" `
-            -Description "Staff recovery account for kiosk PCs" `
-            -PasswordNeverExpires | Out-Null
-        Add-LocalGroupMember -Group "Administrators" -Member $adminUser -ErrorAction SilentlyContinue
-        Write-Host "   Admin '$adminUser' created (Administrators group)" -ForegroundColor Green
-        Write-Host "   Use Ctrl+Alt+Del > Switch User > ClubAdmin to escape kiosk" -ForegroundColor Green
-    } else {
-        Write-Host "   Admin '$adminUser' already exists" -ForegroundColor Gray
+    $winlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    if (-not ('ClubInstall.KioskNative' -as [type])) {
+        Add-Type -TypeDefinition $kioskNativeSource -IgnoreWarnings
     }
-    
-    # 7b: Create restricted ClubUser account
+
+    # 7a: Recovery account ClubAdmin (Administrators). Groups by SID, so this works on every Windows language.
+    if (Get-LocalUser -Name $adminUser -ErrorAction SilentlyContinue) {
+        Write-Host "   Admin '$adminUser' already exists" -ForegroundColor Gray
+        $adminReady = $true
+    } else {
+        $adminPass = $AdminPassword
+        if ($null -eq $adminPass -and (Test-InteractiveSession)) {
+            Write-Host "   Creating '$adminUser' recovery account..." -ForegroundColor Cyan
+            $adminPass = Read-Host "   Enter password for $adminUser (staff recovery account)" -AsSecureString
+        }
+        if ($null -eq $adminPass -or $adminPass.Length -eq 0) {
+            Write-Warning ("No '$adminUser' account was created: no -AdminPassword and no interactive console. " +
+                "Run the installer again with -AdminPassword, or create a local administrator for the staff.")
+        } else {
+            try {
+                New-LocalUser -Name $adminUser `
+                    -Password $adminPass `
+                    -FullName "Club Administrator" `
+                    -Description "Staff recovery account for kiosk PCs" `
+                    -PasswordNeverExpires | Out-Null
+                Add-LocalGroupMember -SID 'S-1-5-32-544' -Member $adminUser
+            } catch {
+                Stop-Install "Could not create the account '$adminUser': $($_.Exception.Message)"
+            }
+            $adminReady = $true
+            Write-Host "   Admin '$adminUser' created (Administrators group)" -ForegroundColor Green
+        }
+    }
+
+    # 7b: The restricted account ClubUser with a new random password (a re-run rotates it)
     Write-Host "   Creating '$kioskUser' account..." -ForegroundColor Gray
+    $kioskPassword = New-KioskPassword
     try {
-        $existingUser = Get-LocalUser -Name $kioskUser -ErrorAction SilentlyContinue
-        if ($existingUser) {
-            Write-Host "   User '$kioskUser' already exists, updating..." -ForegroundColor Gray
-            Set-LocalUser -Name $kioskUser -Password (ConvertTo-SecureString $kioskPassword -AsPlainText -Force) -PasswordNeverExpires $true
+        if (Get-LocalUser -Name $kioskUser -ErrorAction SilentlyContinue) {
+            Write-Host "   User '$kioskUser' already exists, setting a new password..." -ForegroundColor Gray
+            Set-LocalUser -Name $kioskUser -Password $kioskPassword -PasswordNeverExpires $true
         } else {
             New-LocalUser -Name $kioskUser `
-                -Password (ConvertTo-SecureString $kioskPassword -AsPlainText -Force) `
+                -Password $kioskPassword `
                 -FullName "Club Gaming Station" `
                 -Description "Restricted kiosk account for PC Club" `
                 -PasswordNeverExpires `
                 -UserMayNotChangePassword | Out-Null
         }
-        
-        # Add to Users group (standard, not admin)
-        try { Add-LocalGroupMember -Group "Users" -Member $kioskUser -ErrorAction SilentlyContinue } catch {}
-        
-        # Remove from any admin groups
-        try { Remove-LocalGroupMember -Group "Administrators" -Member $kioskUser -ErrorAction SilentlyContinue } catch {}
-        
-        Write-Host "   Account '$kioskUser' ready (restricted, non-admin)" -ForegroundColor Gray
+        $kioskSid = (Get-LocalUser -Name $kioskUser).SID.Value
     } catch {
-        Write-Error "Failed to create kiosk user: $_"
-        exit 1
+        Stop-Install "Could not create the account '$kioskUser': $($_.Exception.Message)"
     }
-    
-    # 7b: Set auto-login for ClubUser
-    Write-Host "   Configuring auto-login..." -ForegroundColor Gray
-    $winlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    # Users (may sign in), never Administrators
+    Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $kioskUser -ErrorAction SilentlyContinue
+    Remove-LocalGroupMember -SID 'S-1-5-32-544' -Member $kioskUser -ErrorAction SilentlyContinue
+    Write-Host "   Account '$kioskUser' ready (restricted, non-admin, random password)" -ForegroundColor Gray
+
+    # 7c: The profile of ClubUser (C:\Users\ClubUser\NTUSER.DAT), also when the installer runs as SYSTEM
+    $profilePath = New-KioskProfile -UserName $kioskUser -Sid $kioskSid -Password $kioskPassword
+    if (-not $profilePath) {
+        Stop-Install ("Windows has no profile with NTUSER.DAT for '$kioskUser'. Delete the profile of '$kioskUser' " +
+            "(System Properties > Advanced > User Profiles), then run the installer again.")
+    }
+
+    # 7d: The lock screen as the shell of ClubUser, Task Manager and the Start context menus off: in the hive of
+    # ClubUser only. Never machine-wide: that would also give ClubAdmin the lock screen as its shell.
+    Write-Host "   Setting Launcher as the shell of '$kioskUser'..." -ForegroundColor Gray
+    $hive = Mount-KioskHive -Sid $kioskSid -ProfilePath $profilePath
+    if ($null -eq $hive) {
+        Stop-Install ("Could not load the registry hive of '$kioskUser' ($profilePath\NTUSER.DAT). Sign out '$kioskUser' " +
+            "or restart the PC, then run the installer again. The machine-wide shell was not changed.")
+    }
+    $policyError = $null
+    try {
+        Set-KioskUserPolicies -Root $hive.Root -LauncherExe $launcherExe
+    } catch {
+        $policyError = $_.Exception.Message
+    } finally {
+        Dismount-KioskHive $hive
+    }
+    if ($policyError) { Stop-Install "Could not write the shell and the policies of '$kioskUser': $policyError" }
+    Write-Host "   Shell set to Launcher ('$kioskUser' only)" -ForegroundColor Gray
+    Write-Host "   Task Manager and the Start context menus disabled ('$kioskUser' only)" -ForegroundColor Gray
+
+    # 7e: Undo the machine-wide settings of older installers (they also locked out ClubAdmin)
+    $machineShell = (Get-ItemProperty -Path $winlogonPath -Name 'Shell' -ErrorAction SilentlyContinue).Shell
+    if ($machineShell -and $machineShell -match 'Cms\.Launcher') {
+        Set-ItemProperty -Path $winlogonPath -Name 'Shell' -Value 'explorer.exe'
+        Write-Host "   Machine-wide shell of an older install restored to explorer.exe" -ForegroundColor Gray
+    }
+    Remove-MachineValue -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name 'DisableTaskMgr' -What 'DisableTaskMgr'
+    Remove-MachineValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" -Name 'DisableContextMenusInStart' -What 'DisableContextMenusInStart'
+
+    # Step 8: Automatic sign-in of ClubUser. The password goes to the LSA secret "DefaultPassword" (only SYSTEM
+    # can read it), never to the registry value DefaultPassword (local users can read the Winlogon key).
+    Write-Host "[8/8] Configuring auto-login..." -ForegroundColor Yellow
+    try {
+        [ClubInstall.KioskNative]::SetAutoLogonPassword($kioskPassword)
+    } catch {
+        Stop-Install ("Could not store the auto-login password of '$kioskUser' as an LSA secret: $($_.Exception.Message). " +
+            "Run the installer again.")
+    } finally {
+        $kioskPassword.Dispose()
+    }
+    Remove-ItemProperty -Path $winlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
     Set-ItemProperty -Path $winlogonPath -Name "DefaultUserName" -Value $kioskUser
-    Set-ItemProperty -Path $winlogonPath -Name "DefaultPassword" -Value $kioskPassword
+    Set-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -Value $env:COMPUTERNAME
     Set-ItemProperty -Path $winlogonPath -Name "AutoAdminLogon" -Value "1"
     Set-ItemProperty -Path $winlogonPath -Name "ForceAutoLogon" -Value "1"
-    Write-Host "   Auto-login enabled for '$kioskUser'" -ForegroundColor Gray
-    
-    # 7c: Set Launcher as shell for ClubUser (per-user, not system-wide)
-    Write-Host "   Setting Launcher as shell..." -ForegroundColor Gray
-    
-    # Load ClubUser's registry hive
-    $profilePath = "C:\Users\$kioskUser"
-    if (!(Test-Path $profilePath)) {
-        # Force profile creation by loading user profile
-        $securePass = ConvertTo-SecureString $kioskPassword -AsPlainText -Force
-        $cred = New-Object System.Management.Automation.PSCredential($kioskUser, $securePass)
-        Start-Process -FilePath "cmd.exe" -ArgumentList "/c echo profile_created" -Credential $cred -Wait -NoNewWindow -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 3
-    }
-    
-    $ntUserDat = Join-Path $profilePath "NTUSER.DAT"
-    if (Test-Path $ntUserDat) {
-        # Load the user's registry hive
-        $regLoad = reg load "HKU\ClubUserHive" $ntUserDat 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            # Set shell replacement for this user only
-            $userShellPath = "HKU:\ClubUserHive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
-            if (!(Test-Path "Registry::HKEY_USERS\ClubUserHive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon")) {
-                New-Item -Path "Registry::HKEY_USERS\ClubUserHive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Force | Out-Null
-            }
-            Set-ItemProperty -Path "Registry::HKEY_USERS\ClubUserHive\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "Shell" -Value "`"$launcherExe`""
-            
-            # Unload the hive
-            [gc]::Collect()
-            Start-Sleep -Seconds 1
-            reg unload "HKU\ClubUserHive" 2>&1 | Out-Null
-            
-            Write-Host "   Shell set to Launcher (per-user)" -ForegroundColor Gray
-        } else {
-            # Fallback: set system-wide but only if user hive not accessible
-            Write-Host "   Could not load user hive, setting system-wide shell..." -ForegroundColor Yellow
-            Set-ItemProperty -Path $winlogonPath -Name "Shell" -Value "`"$launcherExe`""
-            Write-Host "   Shell set to Launcher (system-wide)" -ForegroundColor Yellow
-        }
-    } else {
-        # Profile doesn't exist yet — set system-wide shell for Winlogon
-        Write-Host "   User profile not found, setting system-wide shell..." -ForegroundColor Yellow
-        Set-ItemProperty -Path $winlogonPath -Name "Shell" -Value "`"$launcherExe`""
-        Write-Host "   Shell set to Launcher (system-wide)" -ForegroundColor Yellow
-    }
-    
-    # 7d: Group Policy lockdown
-    Write-Host "[8/8] Applying security policies..." -ForegroundColor Yellow
-    
-    # Disable Task Manager
-    $explorerPolicyPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
-    if (!(Test-Path $explorerPolicyPath)) { New-Item -Path $explorerPolicyPath -Force | Out-Null }
-    Set-ItemProperty -Path $explorerPolicyPath -Name "DisableTaskMgr" -Value 1 -Type DWord
-    Write-Host "   Task Manager disabled" -ForegroundColor Gray
-    
-    # Disable right-click on desktop / context menu
-    $shellPolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer"
-    if (!(Test-Path $shellPolicyPath)) { New-Item -Path $shellPolicyPath -Force | Out-Null }
-    Set-ItemProperty -Path $shellPolicyPath -Name "DisableContextMenusInStart" -Value 1 -Type DWord
-    Write-Host "   Context menus restricted" -ForegroundColor Gray
-    
-    # Disable Windows key (via keyboard filter or registry)
-    $keyboardPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Keyboard Layout"
-    # Note: Full keyboard filtering requires Embedded Shell Launcher or keyboard filter feature
-    Write-Host "   Keyboard hooks will be managed by Launcher" -ForegroundColor Gray
-    
+    Write-Host "   Auto-login enabled for '$kioskUser' (password in LSA, not in the registry)" -ForegroundColor Gray
+
+    # Keyboard hooks (Alt+Tab, Alt+F4, Windows key) are managed by the Launcher.
     # Write kiosk config marker for Launcher to detect.
     # No PIN here: the staff PIN is set by the owner in the admin UI (Settings); the agent receives
     # only its hash from the server and the launcher verifies it locally (also offline).
@@ -326,10 +580,10 @@ if ($KioskMode) {
         InstalledUtc = (Get-Date).ToUniversalTime().ToString("o")
     } | ConvertTo-Json | Set-Content -Path $kioskConfig
     Write-Host "   Kiosk config written to $kioskConfig" -ForegroundColor Gray
-    
+
 } else {
     Write-Host "[7/8] Kiosk mode: Skipped (use -KioskMode to enable)" -ForegroundColor Gray
-    Write-Host "[8/8] Security policies: Skipped" -ForegroundColor Gray
+    Write-Host "[8/8] Auto-login: Skipped" -ForegroundColor Gray
 }
 
 Write-Host ""
@@ -339,15 +593,20 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Agent Service: Running (ClubAgent)" -ForegroundColor Cyan
 Write-Host "Launcher: Installed at $LauncherPath" -ForegroundColor Cyan
+Write-Host "The PC stays locked until a session starts or staff unlock it in the admin UI." -ForegroundColor Cyan
 
 if ($KioskMode) {
     Write-Host ""
     Write-Host "KIOSK MODE ENABLED:" -ForegroundColor Magenta
-    Write-Host "  - User: ClubUser (auto-login on boot)" -ForegroundColor White
-    Write-Host "  - Shell: Cms.Launcher.exe (replaces explorer)" -ForegroundColor White
+    Write-Host "  - User: ClubUser (auto-login on boot; random password, new on every install run)" -ForegroundColor White
+    Write-Host "  - Shell: Cms.Launcher.exe (replaces explorer for ClubUser only)" -ForegroundColor White
     Write-Host "  - Staff unlock: Ctrl+Shift+U + the staff PIN (set it in the admin UI, Settings)" -ForegroundColor White
     Write-Host "  - The lock screen stays locked when the agent stops (fail closed)" -ForegroundColor White
-    Write-Host "  - Switch to admin: Ctrl+Alt+Del > Switch User" -ForegroundColor White
+    if ($adminReady) {
+        Write-Host "  - Switch to admin: Ctrl+Alt+Del > Switch User > $adminUser" -ForegroundColor White
+    } else {
+        Write-Host "  - No $adminUser account: create a local administrator before you need to leave the kiosk" -ForegroundColor Yellow
+    }
     Write-Host ""
     Write-Host "To undo kiosk mode, run: uninstall-kiosk.ps1" -ForegroundColor Yellow
 }
