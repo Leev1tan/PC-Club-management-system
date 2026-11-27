@@ -87,6 +87,11 @@ public class DevicesController : ControllerBase
             .GroupBy(s => s.DeviceId)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.StartUtc).First());
 
+        var packageIds = activeSessions.Values.Where(s => s.PackageId.HasValue).Select(s => s.PackageId!.Value).Distinct().ToList();
+        var packageNames = await _db.Packages.AsNoTracking().Where(p => packageIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Name);
+        var tariffIds = activeSessions.Values.Where(s => s.TariffId.HasValue).Select(s => s.TariffId!.Value).Distinct().ToList();
+        var tariffNames = await _db.Tariffs.AsNoTracking().Where(t => tariffIds.Contains(t.Id)).ToDictionaryAsync(t => t.Id, t => t.Name);
+
         // Commands queued for a device but not yet acknowledged by its agent
         var pendingCommands = await _db.Commands.AsNoTracking()
             .Where(c => c.Status == "pending" || c.Status == "delivered")
@@ -112,7 +117,15 @@ public class DevicesController : ControllerBase
                 _runtime?.IsLocked(d.Id),
                 pendingCommands.TryGetValue(d.Id, out var pending) ? pending : 0,
                 d.Status
-            );
+            )
+            {
+                SessionPausedUtc = session?.PausedUtc,
+                SessionCutoffUtc = session?.CutoffUtc,
+                SessionLabel = session == null ? null
+                    : session.PackageId.HasValue && packageNames.TryGetValue(session.PackageId.Value, out var package) ? package
+                    : session.TariffId.HasValue && tariffNames.TryGetValue(session.TariffId.Value, out var tariff) ? tariff : null,
+                SessionIsPackage = session?.PackageId != null
+            };
         }));
     }
 
@@ -269,7 +282,15 @@ public record DeviceDetailView(
     bool? IsLocked = null,  // last lock state confirmed by the agent; null = unknown
     int PendingCommands = 0, // queued commands not yet acknowledged by the agent
     string Enrollment = "approved" // pending (waits for approval), approved, revoked
-);
+)
+{
+    /// <summary>Set while the active session is paused (remaining = SessionEndUtc - SessionPausedUtc).</summary>
+    public DateTimeOffset? SessionPausedUtc { get; init; }
+    public DateTimeOffset? SessionCutoffUtc { get; init; }
+    /// <summary>Package or tariff name of the active session.</summary>
+    public string? SessionLabel { get; init; }
+    public bool SessionIsPackage { get; init; }
+}
 public record EnqueueCommandRequest(string Type, object? Payload);
 public record CommandView(Guid Id, string Type, object? Payload);
 public record AckCommandRequest(string Status, string? Result);

@@ -1,10 +1,13 @@
-using Cms.Server.Controllers;
+using Cms.Server.Billing;
 using Cms.Server.Data;
 using Cms.Server.Repositories;
-using Microsoft.EntityFrameworkCore;
 
 namespace Cms.Server;
 
+/// <summary>
+/// Every 5 s: ends prepaid and package sessions whose time ran out and locks their PCs. A paused
+/// session waits (its time stands still) unless its package cut-off (night pack 08:00) has passed.
+/// </summary>
 public sealed class SessionExpiryService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -38,34 +41,10 @@ public sealed class SessionExpiryService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CmsDbContext>();
         var devices = scope.ServiceProvider.GetRequiredService<IDeviceRepository>();
+        var clock = scope.ServiceProvider.GetRequiredService<ClubClock>();
 
-        var now = DateTimeOffset.UtcNow;
-        var active = await db.Sessions
-            .Where(s => s.Status == "active" && s.IsPrepaid && s.EndUtc.HasValue)
-            .ToListAsync(ct);
-
-        var expired = active.Where(s => s.EndUtc!.Value <= now).ToList();
-        if (expired.Count == 0) return;
-
-        var closed = 0;
-        foreach (var session in expired)
-        {
-            session.Status = "ended";
-            try
-            {
-                await db.SaveChangesAsync(ct); // one by one: a session that staff changed right now is skipped
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                db.Entry(session).State = EntityState.Detached;
-                continue; // changed by staff at the same moment (for example extended); checked again in 5 s
-            }
-            closed++;
-            devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest("session_set", new { endUtc = now }));
-            devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest("lock", null));
-        }
-        if (closed == 0) return;
-
-        _logger.LogInformation("Closed {Count} expired prepaid session(s)", closed);
+        var closed = await new SessionService(db, devices, clock).CloseExpiredAsync(ct);
+        if (closed > 0)
+            _logger.LogInformation("Closed {Count} expired prepaid session(s)", closed);
     }
 }
