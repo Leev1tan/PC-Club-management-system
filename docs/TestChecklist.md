@@ -227,6 +227,24 @@ On GitHub: Actions → Release → Run workflow (branch main). On a clean Window
 - [ ] Stop the server (not the agent): the lock screen keeps the last club language
 - [ ] Every text on every screen is in one language (no Ukrainian word on the English screen and back)
 
+### Test 15: Game Catalog and Game Grid (phase 6)
+Prepare (Owner or Manager → Ігри / Games): three entries for the PC's zone: a program (for example Notepad,
+`C:\Windows\System32\notepad.exe`, process `notepad`), a Steam game the PC has installed (AppID, process name),
+and an Epic or Battle.net link; one more entry only for another zone and one inactive entry.
+- [ ] Within 30 s `C:\ProgramData\ClubAgent\games.json` lists only the active entries of this PC's zone
+- [ ] Start a session: the session screen shows the grid with the tiles (initials on their colours), the category
+      chips and the search box; the entry of the other zone and the inactive one are not there
+- [ ] Type part of a name: the grid filters at once; a category chip filters; "All" shows everything again
+- [ ] Click the program tile: it starts; the top bar shows "Now: …"; within 10 s the PC map shows 🎮 and the name
+- [ ] Close the program: within 15 s the map shows no game
+- [ ] Steam tile: Steam opens the game (`steam://rungameid/…`); the map shows the game while its process runs
+- [ ] Epic / Battle.net tile: the launcher opens the game
+- [ ] Change the path of the program entry in the admin UI to a wrong path: the tile shows an error message,
+      nothing else starts; the audit log has `game.updated` with the old and new path
+- [ ] End the session: the PC locks; the map shows no game; Analytics → Top games lists the games with hours
+- [ ] Stop the server: the grid still works with the last catalog (games.json stays)
+- [ ] With the PC locked, clicking is not possible (the lock screen covers the grid)
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

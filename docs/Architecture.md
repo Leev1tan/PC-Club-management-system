@@ -40,7 +40,7 @@ graph TB
 | [Cms.Agent.Service](../Cms.Agent.Service) | .NET Worker Service | Windows background service running on each PC |
 | [Cms.Launcher](../Cms.Launcher) | WPF Application | Kiosk UI with lock screen overlay |
 | [Cms.Shared](../Cms.Shared) | Class Library | Shared contracts: lock decision, staff PIN hash, agent files, client settings |
-| [Cms.Client](../Cms.Client) | Class Library (net8.0) | Logic of the agent and the lock screen that is tested on Linux: launcher texts (UA / EN), and more in later parts |
+| [Cms.Client](../Cms.Client) | Class Library (net8.0) | Logic of the agent and the lock screen that is tested on Linux: launcher texts (UA / EN), game grid, game start plan, game tracker, process list interface |
 | [admin-ui](../admin-ui) | Next.js | Web dashboard for administrators |
 
 ---
@@ -102,7 +102,11 @@ POST /api/devices/{id}/commands/{cmdId}/ack → Acknowledge command             
 GET  /api/devices                → List all devices                               [all staff]
 POST /api/devices/{id}/commands  → Enqueue lock/unlock/restart/logoff/message     [all staff]
 POST /api/devices/{id}/approve | reject | revoke, PUT .../zone                    [Owner, Manager, Tech]
-POST /api/devices/{id}/events    → Agent: emergency staff PIN unlock noted by the lock screen  [X-Device-Key, approved]
+POST /api/devices/{id}/events    → Agent: emergency staff PIN unlock noted by the lock screen; game_started /
+                                   game_stopped of a catalog entry (current game, top games)     [X-Device-Key, approved]
+GET  /api/devices/{id}/games     → Agent: active catalog entries of the PC's zone; ETag, 304 with If-None-Match  [X-Device-Key, approved]
+GET  /api/games[/{id}]           → Game catalog with zones, initials, colour and the number of plays  [all staff]
+POST/PUT/DELETE /api/games       → Catalog entries (delete only without plays), audited game.*  [Owner, Manager]
 
 POST /api/sessions               → Start: tariff (prepaid minutes or open-ended) or packageId;   [Owner, Manager, Cashier]
                                    paymentMethod balance | cash | card, useBonus; free + reason [Owner, Manager]
@@ -178,6 +182,7 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 ├── agent_heartbeat.txt  # Agent liveness marker (the launcher locks when it is older than 15 s)
 ├── staff-pin.json       # PBKDF2 hash of the staff PIN (from the server)
 ├── client-settings.json # club settings for the lock screen: language (uk, en), currency (from the heartbeat)
+├── games.json           # game catalog of this PC's zone with its ETag (fetched every 30 s with If-None-Match)
 ├── inbox\               # players: create files only (no read, change, delete)
 │   └── event-*.json     # note of an emergency PIN unlock (launcher); the agent sends it, then deletes it
 └── private\             # SYSTEM, Administrators, agent only
@@ -207,6 +212,17 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 member, so a text missing in one language does not compile). The language and the currency come from
 `client-settings.json`; without it the lock screen is Ukrainian with ₴. The UA / EN button on the lock screen
 switches the language until the PC locks again.
+
+**Game grid** (`MainWindow.Games.cs`, logic in `Cms.Client`): during a session the session screen shows the
+catalog of the PC's zone from `games.json` with search and category chips; a tile is the initials on the entry
+colour (no logos). A tile starts the entry only when it passes `Cms.Shared.GameLaunchRules` again: an `.exe`
+with an absolute Windows path (no `..`, quotes, wildcards or stream names; `%VARIABLES%` expanded in the
+player's session), `steam://rungameid/<AppID>`, or a link with an allowed launcher scheme (steam,
+com.epicgames.launcher, uplay, battlenet, origin2, eadesktop, goggalaxy, riotclient, roblox-player; never
+http, file or Windows shell schemes). `GameTracker` follows the started process or the configured process name
+in the player's session and writes `game_started` / `game_stopped` notes into the agent inbox; the server keeps
+one open play per PC (table `GamePlays`), closes it when the session ends, and the PC map and the analytics
+("top games": hours inside the period per game) read it.
 
 **State Polling**:
 - Reads `state.json` every 2 seconds
