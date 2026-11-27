@@ -530,6 +530,18 @@ erDiagram
 - Lock screen: `ClientSessionInfo.Event` and `ClientReservationInfo.IsEvent/EndUtc`; texts and logic in
   `Cms.Client/EventNotice`.
 
+## Loyalty tiers (phase 8)
+
+- Setting `loyalty.tiers` (JSON: period in days, tiers with name, from spend, bonus on top-ups %, discount on PC time %);
+  `Billing/Loyalty` loads, validates and saves it; `PUT /api/loyalty` is Owner only.
+- Spend = real money of the ledger rows of the period (`Loyalty.Spend`: PC time, packages, bar minus bar refunds paid
+  from the real balance or at the desk, debt paid, kept deposits and entry fees). PostgreSQL filters the dates in SQL,
+  SQLite in memory.
+- Top-up: a second `bonus_accrual` row with the tier bonus; a refund reverses cashback + tier bonus of the amount.
+- Discount: `SessionEntity.DiscountPercent` (migration `LoyaltyTiers`) is set at the start from the tier of the player
+  and applies to the start price, extensions, the post-paid quote at the end, the transfer surcharge and the projection
+  of a session from the balance (`Loyalty.Apply`). The ledger rows hold the discounted price.
+
 ## Communication Flow
 
 ### Device Registration
