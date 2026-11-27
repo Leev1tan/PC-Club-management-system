@@ -49,7 +49,7 @@ public static partial class DemoSeeder
             EventRows.Add(e);
             EventRows.AddRange(pcs.Select(p => new EventDeviceEntity { EventId = id, DeviceId = p.Device.Id }));
             Audit(created, Manager, AuditActions.EventCreated, "event", () => "1",
-                $"Event #1: 8 PC(s) (chosen PCs), {Fmt(start, "dd.MM HH:mm")}-{Fmt(end, "HH:mm")}, PC time free, entry fee {fee} ₴, teams of 2",
+                $"Event #1: 8 PC(s) (chosen PCs), {Fmt(start, "dd.MM HH:mm")}-{Fmt(end, "HH:mm")}, PC time free, entry fee {MoneyText.Of(fee)} ₴, teams of 2",
                 new { id, pcs = pcs.Select(p => p.Device.Hostname), startUtc = start, minutes = 240, priceMode = "free", price = 0m, entryFee = fee, teamSize = 2 });
 
             var teams = new List<EventTeamEntity>();
@@ -82,17 +82,17 @@ public static partial class DemoSeeder
                     {
                         if (_wallets[user.Id].Balance < fee) TopUp(user, 200m, PaymentMethods.Cash, holdAt.AddMilliseconds(-10));
                         Post(user, holdAt, LedgerTypes.EventFeeHold, PaymentMethods.Balance, fee, -fee, 0m, 0m,
-                            $"Внесок за участь: подія №1 ({Fmt(start, "dd.MM HH:mm")}) — {fee} ₴", eventId: id, deviceId: pc.Device.Id);
+                            $"Внесок за участь: подія №1 ({Fmt(start, "dd.MM HH:mm")}) — {MoneyText.Of(fee)} ₴", eventId: id, deviceId: pc.Device.Id);
                     }));
                     _playerEvents.Add((end, 1, () => Post(user, end, LedgerTypes.EventFeeKept, PaymentMethods.Balance, fee, 0m, 0m, 0m,
-                        $"Внесок за участь у події №1 — подія відбулася, {fee} ₴", actor: null, eventId: id, deviceId: pc.Device.Id)));
+                        $"Внесок за участь у події №1 — подія відбулася, {MoneyText.Of(fee)} ₴", actor: null, eventId: id, deviceId: pc.Device.Id)));
                     var value = TariffCalculator.QuoteFixed(pc.Pricing, start, 240, _zone).Total;
                     Audit(start, null, AuditActions.SessionFreeTime, "session", () => session.Id.ToString(),
-                        $"Free time on {pc.Device.Hostname}: event #1 until {Fmt(end, "HH:mm")}, worth {value} ₴: event #1",
+                        $"Free time on {pc.Device.Hostname}: event #1 until {Fmt(end, "HH:mm")}, worth {MoneyText.Of(value)} ₴: event #1",
                         new { pc.Device.Hostname, minutes = 240, value, reason = "event #1", player = user.Username });
                 }
                 Audit(at, Cashier, AuditActions.EventTeamRegistered, "event", () => "1",
-                    $"Event #1: team #{team.Id} registered: @{players[2 * t].Username}, @{players[2 * t + 1].Username} on {pcs[2 * t].Device.Hostname}, {pcs[2 * t + 1].Device.Hostname}, entry fee {fee} ₴ x 2 held",
+                    $"Event #1: team #{team.Id} registered: @{players[2 * t].Username}, @{players[2 * t + 1].Username} on {pcs[2 * t].Device.Hostname}, {pcs[2 * t + 1].Device.Hostname}, entry fee {MoneyText.Of(fee)} ₴ x 2 held",
                     new { eventId = id, team = team.Id, players = new[] { players[2 * t].Username, players[2 * t + 1].Username }, fee });
             }
 
@@ -120,7 +120,7 @@ public static partial class DemoSeeder
                 new { eventId = id, teams = teams.Select(t => t.Id), shuffle = false, rounds = 2 });
             Audit(start, null, AuditActions.EventStarted, "event", () => "1", $"Event #1 started: 8 PC(s) unlocked until {Fmt(end, "HH:mm")}",
                 new { id, endUtc = end, started = pcs.Select(p => p.Device.Hostname) });
-            Audit(end, null, AuditActions.EventFinished, "event", () => "1", $"Event #1 finished at its end, entry fees {fee * 8} ₴ kept",
+            Audit(end, null, AuditActions.EventFinished, "event", () => "1", $"Event #1 finished at its end, entry fees {MoneyText.Of(fee * 8)} ₴ kept",
                 new { id, early = false, kept = fee * 8, winnerTeam = 1 });
         }
 

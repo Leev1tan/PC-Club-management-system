@@ -54,7 +54,7 @@ public class LoyaltyController : ControllerBase
         await Loyalty.SaveAsync(_db, after, User.Identity?.Name, _clock.UtcNow);
         var cur = await _db.CurrencySymbolAsync();
         string Text(LoyaltySettings s) => s.Enabled
-            ? $"{s.PeriodDays} days: " + string.Join(", ", s.Tiers.Select(t => $"{t.Name} from {t.MinSpend} {cur} (+{t.TopUpBonusPercent}% bonus, -{t.PcDiscountPercent}% PC time)"))
+            ? $"{s.PeriodDays} days: " + string.Join(", ", s.Tiers.Select(t => $"{t.Name} from {MoneyText.Of(t.MinSpend)} {cur} (+{t.TopUpBonusPercent}% bonus, -{t.PcDiscountPercent}% PC time)"))
             : "off";
         await _audit.WriteAsync(AuditActions.LoyaltySettingsChanged, "settings", ClubSettingKeys.Loyalty,
             $"Loyalty tiers: {Text(after)}", new { before, after });

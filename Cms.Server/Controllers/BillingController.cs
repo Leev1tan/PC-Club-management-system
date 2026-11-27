@@ -42,7 +42,7 @@ public class BillingController : ControllerBase
         var after = BonusRules.Normalize(req.BonusTopUpRules!);
         await BonusRules.SaveAsync(_db, after, User.Identity?.Name, _clock.UtcNow);
         var cur = await _db.CurrencySymbolAsync();
-        string Text(IEnumerable<BonusTier> tiers) => string.Join(", ", tiers.Select(t => $"from {t.MinAmount} {cur}: {t.Percent}%"));
+        string Text(IEnumerable<BonusTier> tiers) => string.Join(", ", tiers.Select(t => $"from {MoneyText.Of(t.MinAmount)} {cur}: {t.Percent}%"));
         await _audit.WriteAsync(AuditActions.BillingSettingsChanged, "settings", ClubSettingKeys.BonusTopUpRules,
             $"Cashback on top-ups: {(after.Count == 0 ? "off" : Text(after))}", new { before, after });
         return await Get();

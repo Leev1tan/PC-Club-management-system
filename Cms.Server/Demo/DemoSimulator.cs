@@ -474,7 +474,7 @@ public sealed class DemoSimulator
             db.ChangeTracker.Clear();
         }
         if (result.Ok)
-            _logger.LogInformation("Demo: bar receipt #{Id}, {Total} ₴ ({Method})", result.Value!.Id, result.Value.Total, result.Value.Method);
+            _logger.LogInformation("Demo: bar receipt #{Id}, {MoneyText.Of(Total)} ₴ ({Method})", result.Value!.Id, result.Value.Total, result.Value.Method);
     }
 
     /// <summary>

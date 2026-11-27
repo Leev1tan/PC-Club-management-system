@@ -346,12 +346,12 @@ public sealed class ReservationService
             {
                 UserId = user.Id, Type = LedgerTypes.DepositHold, Method = PaymentMethods.Balance, Amount = deposit, BalanceDelta = -deposit,
                 ReservationId = r.Id, DeviceId = r.DeviceId,
-                Description = $"Депозит броні №{r.Id} ({Where(target.Value)}, {Local(r.StartUtc, "dd.MM HH:mm")}) — {deposit} {cur}"
+                Description = $"Депозит броні №{r.Id} ({Where(target.Value)}, {Local(r.StartUtc, "dd.MM HH:mm")}) — {MoneyText.Of(deposit)} {cur}"
             }, _actor, now);
         }
         await AuditAsync(AuditActions.ReservationCreated, r.Id,
             $"Reservation #{r.Id}: {Where(target.Value)}, {Local(r.StartUtc, "dd.MM HH:mm")}-{Local(r.EndUtc)} for {Who(user, r.Source)}" +
-            (deposit > 0 ? $", deposit {deposit} {cur} held" : ""),
+            (deposit > 0 ? $", deposit {MoneyText.Of(deposit)} {cur} held" : ""),
             new { id = r.Id, device = target.Value.Pc?.Hostname, zone = target.Value.Zone?.Name, startUtc = r.StartUtc, minutes = r.DurationMinutes, player = user?.Username, deposit });
         await tx.CommitAsync();
         return BillingResult<ReservationEntity>.Success(r);
@@ -601,13 +601,13 @@ public sealed class ReservationService
         var r = await _db.Reservations.FirstOrDefaultAsync(x => x.Id == id);
         if (r == null) return ReservationErrors.NotFoundError;
         if (r.Status is not (ReservationStatuses.Confirmed or ReservationStatuses.Requested)) return ReservationErrors.NotOpen.With(r.Status);
-        var returned = await ReleaseDepositAsync(r, DepositStatuses.Returned, $"Депозит броні №{r.Id} повернуто на баланс: бронь скасовано — {r.Deposit} {cur}", now);
+        var returned = await ReleaseDepositAsync(r, DepositStatuses.Returned, $"Депозит броні №{r.Id} повернуто на баланс: бронь скасовано — {MoneyText.Of(r.Deposit)} {cur}", now);
         r.Status = ReservationStatuses.Cancelled;
         r.CancelReason = why;
         r.UpdatedUtc = now;
         await _db.SaveChangesAsync();
         await AuditAsync(AuditActions.ReservationCancelled, r.Id,
-            $"Reservation #{r.Id} cancelled" + (returned > 0 ? $", deposit {returned} {cur} returned to the balance" : "") + (why != null ? $": {why}" : ""),
+            $"Reservation #{r.Id} cancelled" + (returned > 0 ? $", deposit {MoneyText.Of(returned)} {cur} returned to the balance" : "") + (why != null ? $": {why}" : ""),
             new { id = r.Id, deposit = returned, reason = why });
         await tx.CommitAsync();
         return BillingResult<ReservationEntity>.Success(r);
@@ -661,7 +661,7 @@ public sealed class ReservationService
             pc = chosen.Value;
         }
 
-        var applied = await ReleaseDepositAsync(r, DepositStatuses.Applied, $"Депозит броні №{r.Id} зараховано на сесію (вхід за бронню) — {r.Deposit} {cur}", now);
+        var applied = await ReleaseDepositAsync(r, DepositStatuses.Applied, $"Депозит броні №{r.Id} зараховано на сесію (вхід за бронню) — {MoneyText.Of(r.Deposit)} {cur}", now);
         var mode = (req.Mode ?? "minutes").Trim().ToLowerInvariant();
         var start = mode switch
         {
@@ -680,7 +680,7 @@ public sealed class ReservationService
         await _db.SaveChangesAsync();
         var host = await HostAsync(pc);
         await AuditAsync(AuditActions.ReservationCheckedIn, r.Id,
-            $"Reservation #{r.Id} checked in on {host}" + (applied > 0 ? $", deposit {applied} {cur} applied to the session" : ""),
+            $"Reservation #{r.Id} checked in on {host}" + (applied > 0 ? $", deposit {MoneyText.Of(applied)} {cur} applied to the session" : ""),
             new { id = r.Id, device = host, sessionId = r.SessionId, deposit = applied, mode, minutesLate = (int)Math.Round((now - r.StartUtc).TotalMinutes) });
         await tx.CommitAsync();
         return BillingResult<(ReservationEntity, SessionEntity)>.Success((r, started.Value));
@@ -757,14 +757,14 @@ public sealed class ReservationService
                 {
                     UserId = r.UserId, Type = LedgerTypes.DepositKept, Method = PaymentMethods.Balance, Amount = r.Deposit,
                     ReservationId = r.Id, DeviceId = r.DeviceId ?? r.AssignedDeviceId,
-                    Description = $"Депозит броні №{r.Id} утримано: гравець не прийшов — {r.Deposit} {cur}"
+                    Description = $"Депозит броні №{r.Id} утримано: гравець не прийшов — {MoneyText.Of(r.Deposit)} {cur}"
                 }, _actor, now, ct);
                 r.DepositStatus = DepositStatuses.Kept;
                 kept = r.Deposit;
             }
             else
             {
-                returned = await ReleaseDepositAsync(r, DepositStatuses.Returned, $"Депозит броні №{r.Id} повернуто на баланс: гравець не прийшов — {r.Deposit} {cur}", now);
+                returned = await ReleaseDepositAsync(r, DepositStatuses.Returned, $"Депозит броні №{r.Id} повернуто на баланс: гравець не прийшов — {MoneyText.Of(r.Deposit)} {cur}", now);
             }
         }
         r.Status = ReservationStatuses.NoShow;
@@ -772,7 +772,7 @@ public sealed class ReservationService
         await _db.SaveChangesAsync(ct);
         await AuditAsync(AuditActions.ReservationNoShow, r.Id,
             $"Reservation #{r.Id} cancelled automatically: no check-in {settings.GraceMinutes} min after the start ({Local(r.StartUtc, "dd.MM HH:mm")})" +
-            (kept > 0 ? $", deposit {kept} {cur} kept" : returned > 0 ? $", deposit {returned} {cur} returned to the balance" : ""),
+            (kept > 0 ? $", deposit {MoneyText.Of(kept)} {cur} kept" : returned > 0 ? $", deposit {MoneyText.Of(returned)} {cur} returned to the balance" : ""),
             new { id = r.Id, graceMinutes = settings.GraceMinutes, depositKept = kept, depositReturned = returned });
         await tx.CommitAsync(ct);
         return true;

@@ -49,7 +49,7 @@ public class TariffsController : ControllerBase
         AddRules(tariff.Id, rules ?? new());
         await _db.SaveChangesAsync();
         await _audit.WriteAsync(AuditActions.TariffCreated, "tariff", tariff.Id,
-            $"Tariff '{tariff.Name}' created: {tariff.PricePerHour} {cur}/h, {rules?.Count ?? 0} rule(s)",
+            $"Tariff '{tariff.Name}' created: {MoneyText.Of(tariff.PricePerHour)} {cur}/h, {rules?.Count ?? 0} rule(s)",
             new { tariff.Name, tariff.PricePerHour, tariff.IsDefault, tariff.ZoneId, tariff.BillingStepMinutes, tariff.MinimumCharge, rules = RulesText(rules, cur) });
         return Ok(await ViewAsync(tariff.Id));
     }
@@ -76,7 +76,7 @@ public class TariffsController : ControllerBase
         }
         await _db.SaveChangesAsync();
         await _audit.WriteAsync(AuditActions.TariffUpdated, "tariff", tariff.Id,
-            $"Tariff '{tariff.Name}' changed: {before.PricePerHour} -> {tariff.PricePerHour} {cur}/h" + (rules != null ? $", {rules.Count} rule(s)" : ""),
+            $"Tariff '{tariff.Name}' changed: {before.PricePerHour} -> {MoneyText.Of(tariff.PricePerHour)} {cur}/h" + (rules != null ? $", {rules.Count} rule(s)" : ""),
             new { before, after = new { tariff.Name, tariff.PricePerHour, tariff.IsDefault, tariff.ZoneId, tariff.BillingStepMinutes, tariff.MinimumCharge,
                                         rules = rules != null ? RulesText(rules, cur) : before.rules } });
         return Ok(await ViewAsync(id));
@@ -91,7 +91,7 @@ public class TariffsController : ControllerBase
         if (tariff == null) return NotFound();
         _db.Tariffs.Remove(tariff);
         await _db.SaveChangesAsync();
-        await _audit.WriteAsync(AuditActions.TariffDeleted, "tariff", id, $"Tariff '{tariff.Name}' deleted ({tariff.PricePerHour} {cur}/h)",
+        await _audit.WriteAsync(AuditActions.TariffDeleted, "tariff", id, $"Tariff '{tariff.Name}' deleted ({MoneyText.Of(tariff.PricePerHour)} {cur}/h)",
             new { tariff.Name, tariff.PricePerHour });
         return NoContent();
     }
@@ -152,7 +152,7 @@ public class TariffsController : ControllerBase
         TariffCalculator.MinuteText(r.StartMinute), TariffCalculator.MinuteText(r.EndMinute), r.PricePerHour);
 
     private static string RulesText(IReadOnlyList<TariffRuleRequest>? rules, string cur) => rules == null ? "" :
-        string.Join("; ", rules.Select(r => $"{r.Name}: {string.Join(",", r.Days ?? Array.Empty<int>())} {r.Start}-{r.End} {r.PricePerHour} {cur}/h"));
+        string.Join("; ", rules.Select(r => $"{r.Name}: {string.Join(",", r.Days ?? Array.Empty<int>())} {r.Start}-{r.End} {MoneyText.Of(r.PricePerHour)} {cur}/h"));
 
     private static void Apply(TariffEntity tariff, CreateTariffRequest req)
     {

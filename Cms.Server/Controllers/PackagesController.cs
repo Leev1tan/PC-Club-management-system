@@ -62,7 +62,7 @@ public class PackagesController : ControllerBase
         _db.Packages.Add(package);
         await _db.SaveChangesAsync();
         await _audit.WriteAsync(AuditActions.PackageCreated, "package", package.Id,
-            $"Package '{package.Name}' created: {package.Price} {cur}, {Describe(package)}", Details(package));
+            $"Package '{package.Name}' created: {MoneyText.Of(package.Price)} {cur}, {Describe(package)}", Details(package));
         return Ok(await ViewAsync(package.Id));
     }
 
@@ -80,7 +80,7 @@ public class PackagesController : ControllerBase
         Apply(package, req);
         await _db.SaveChangesAsync();
         await _audit.WriteAsync(AuditActions.PackageUpdated, "package", package.Id,
-            $"Package '{package.Name}' changed: {beforePrice} -> {package.Price} {cur}, {Describe(package)}" + (package.IsActive ? "" : " (not on sale)"),
+            $"Package '{package.Name}' changed: {beforePrice} -> {MoneyText.Of(package.Price)} {cur}, {Describe(package)}" + (package.IsActive ? "" : " (not on sale)"),
             new { before, after = Details(package) });
         return Ok(await ViewAsync(id));
     }
@@ -97,7 +97,7 @@ public class PackagesController : ControllerBase
             return Conflict(new { error = "The package is in use by an active session. Take it off sale instead.", code = "package_in_use" });
         _db.Packages.Remove(package);
         await _db.SaveChangesAsync();
-        await _audit.WriteAsync(AuditActions.PackageDeleted, "package", id, $"Package '{package.Name}' deleted ({package.Price} {cur})", Details(package));
+        await _audit.WriteAsync(AuditActions.PackageDeleted, "package", id, $"Package '{package.Name}' deleted ({MoneyText.Of(package.Price)} {cur})", Details(package));
         return NoContent();
     }
 

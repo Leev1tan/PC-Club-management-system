@@ -176,7 +176,7 @@ public sealed class EventService
         await _db.SaveChangesAsync();
         await AuditAsync(AuditActions.EventCreated, e.Id,
             $"Event #{e.Id}: {pcs.Count} PC(s) ({(zoneName != null ? "zone " + zoneName : "chosen PCs")}), {Span(e)}, " +
-            $"PC time {(mode == EventPriceModes.Free ? "free" : $"{price} {cur} per player")}, entry fee {(fee > 0 ? $"{fee} {cur}" : "none")}, " +
+            $"PC time {(mode == EventPriceModes.Free ? "free" : $"{MoneyText.Of(price)} {cur} per player")}, entry fee {(fee > 0 ? $"{MoneyText.Of(fee)} {cur}" : "none")}, " +
             (req.TeamSize == 1 ? "single players" : $"teams of {req.TeamSize}"),
             new { id = e.Id, pcs = pcs.Select(p => p.Hostname), zone = zoneName, startUtc = e.StartUtc, minutes = e.DurationMinutes, priceMode = mode, price, entryFee = fee, teamSize = e.TeamSize });
         await tx.CommitAsync();
@@ -279,7 +279,7 @@ public sealed class EventService
                 {
                     UserId = user.Id, Type = LedgerTypes.EventFeeHold, Method = PaymentMethods.Balance, Amount = e.EntryFee, BalanceDelta = -e.EntryFee,
                     EventId = id, DeviceId = seats[i].Id,
-                    Description = $"Внесок за участь: подія №{id} ({Local(e.StartUtc, "dd.MM HH:mm")}) — {e.EntryFee} {cur}"
+                    Description = $"Внесок за участь: подія №{id} ({Local(e.StartUtc, "dd.MM HH:mm")}) — {MoneyText.Of(e.EntryFee)} {cur}"
                 }, _actor, now);
             }
             _db.EventPlayers.Add(new EventPlayerEntity
@@ -298,7 +298,7 @@ public sealed class EventService
         }
         await AuditAsync(AuditActions.EventTeamRegistered, id,
             $"Event #{id}: team #{team.Id} registered: {string.Join(", ", users.Select(u => "@" + u.Username))} on {string.Join(", ", seats.Select(s => s.Hostname))}" +
-            (e.EntryFee > 0 ? $", entry fee {e.EntryFee} {cur} x {users.Count} held" : "") + (resetBracket.Value ? ", bracket cleared" : ""),
+            (e.EntryFee > 0 ? $", entry fee {MoneyText.Of(e.EntryFee)} {cur} x {users.Count} held" : "") + (resetBracket.Value ? ", bracket cleared" : ""),
             new { eventId = id, team = team.Id, players = users.Select(u => u.Username), pcs = seats.Select(s => s.Hostname), fee = e.EntryFee, bracketCleared = resetBracket.Value });
         await tx.CommitAsync();
         return BillingResult<EventTeamEntity>.Success(team);
@@ -328,7 +328,7 @@ public sealed class EventService
         team.Status = EventMemberStatuses.Withdrawn;
         await _db.SaveChangesAsync();
         await AuditAsync(AuditActions.EventTeamWithdrawn, id,
-            $"Event #{id}: team #{team.Id} withdrawn" + (returned > 0 ? $", entry fees {returned} {cur} returned to the balances" : "") + (reset.Value ? ", bracket cleared" : ""),
+            $"Event #{id}: team #{team.Id} withdrawn" + (returned > 0 ? $", entry fees {MoneyText.Of(returned)} {cur} returned to the balances" : "") + (reset.Value ? ", bracket cleared" : ""),
             new { eventId = id, team = team.Id, returned, bracketCleared = reset.Value });
         await tx.CommitAsync();
         return BillingResult<EventTeamEntity>.Success(team);
@@ -344,7 +344,7 @@ public sealed class EventService
             await Ledger.AppendAsync(_db, new LedgerEntryEntity
             {
                 UserId = p.UserId, Type = LedgerTypes.EventFeeRelease, Method = PaymentMethods.Balance, Amount = p.Fee, BalanceDelta = p.Fee,
-                EventId = e.Id, DeviceId = p.DeviceId, Description = $"Внесок за участь у події №{e.Id} {why} — {p.Fee} {cur}"
+                EventId = e.Id, DeviceId = p.DeviceId, Description = $"Внесок за участь у події №{e.Id} {why} — {MoneyText.Of(p.Fee)} {cur}"
             }, _actor, now);
             p.FeeStatus = EventFeeStatuses.Released;
             total += p.Fee;
@@ -500,7 +500,7 @@ public sealed class EventService
                 await Ledger.AppendAsync(_db, new LedgerEntryEntity
                 {
                     UserId = p.UserId, Type = LedgerTypes.EventFeeKept, Method = PaymentMethods.Balance, Amount = p.Fee,
-                    EventId = id, DeviceId = p.DeviceId, Description = $"Внесок за участь у події №{id} — подія відбулася, {p.Fee} {cur}"
+                    EventId = id, DeviceId = p.DeviceId, Description = $"Внесок за участь у події №{id} — подія відбулася, {MoneyText.Of(p.Fee)} {cur}"
                 }, _actor, now);
                 p.FeeStatus = EventFeeStatuses.Kept;
                 kept += p.Fee;
@@ -517,7 +517,7 @@ public sealed class EventService
                 return EventErrors.Changed;
             }
             await AuditAsync(AuditActions.EventFinished, id,
-                $"Event #{id} finished{(early ? " early by staff" : " at its end")}" + (kept > 0 ? $", entry fees {kept} {cur} kept" : ""),
+                $"Event #{id} finished{(early ? " early by staff" : " at its end")}" + (kept > 0 ? $", entry fees {MoneyText.Of(kept)} {cur} kept" : ""),
                 new { id, early, kept, winnerTeam = e.WinnerTeamId });
             await tx.CommitAsync();
         }
@@ -557,7 +557,7 @@ public sealed class EventService
                 return EventErrors.Changed;
             }
             await AuditAsync(AuditActions.EventCancelled, id,
-                $"Event #{id} cancelled" + (wasRunning ? " while running" : "") + (returned > 0 ? $", entry fees {returned} {cur} returned to the balances" : "") +
+                $"Event #{id} cancelled" + (wasRunning ? " while running" : "") + (returned > 0 ? $", entry fees {MoneyText.Of(returned)} {cur} returned to the balances" : "") +
                 (why != null ? $": {why}" : ""),
                 new { id, returned, running = wasRunning, reason = why });
             await tx.CommitAsync();

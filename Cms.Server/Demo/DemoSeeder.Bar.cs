@@ -301,7 +301,7 @@ public static partial class DemoSeeder
                 var row = new LedgerEntryEntity
                 {
                     CreatedUtc = at, Type = LedgerTypes.BarSale, Method = method, Amount = total, DeskAmount = total,
-                    Description = $"Бар: {text} — {total} ₴", ActorId = opener.Id, ActorUsername = opener.Username
+                    Description = $"Бар: {text} — {MoneyText.Of(total)} ₴", ActorId = opener.Id, ActorUsername = opener.Username
                 };
                 LedgerRows.Add(row);
                 RowSale[row] = sale;
@@ -312,7 +312,7 @@ public static partial class DemoSeeder
                 {
                     if (_wallets[player.Id].Balance < total)
                         TopUp(player, Math.Ceiling(total / 100m) * 100m + 100m, PaymentMethods.Cash, at.AddMilliseconds(-10));
-                    RowSale[Post(player, at, LedgerTypes.BarSale, PaymentMethods.Balance, total, -total, 0m, 0m, $"Бар: {text} — {total} ₴", actor: opener.Username)] = sale;
+                    RowSale[Post(player, at, LedgerTypes.BarSale, PaymentMethods.Balance, total, -total, 0m, 0m, $"Бар: {text} — {MoneyText.Of(total)} ₴", actor: opener.Username)] = sale;
                 }));
             }
             return sale;
@@ -338,11 +338,11 @@ public static partial class DemoSeeder
             var row = new LedgerEntryEntity
             {
                 CreatedUtc = at, Type = LedgerTypes.BarRefund, Method = sale.Method, Amount = sale.Total, DeskAmount = -sale.Total, Reason = reason,
-                Description = $"Повернення чека ({Pos.SaleService.ItemsText(items)}) — {sale.Total} ₴: {reason}", ActorId = Manager.Id, ActorUsername = Manager.Username
+                Description = $"Повернення чека ({Pos.SaleService.ItemsText(items)}) — {MoneyText.Of(sale.Total)} ₴: {reason}", ActorId = Manager.Id, ActorUsername = Manager.Username
             };
             LedgerRows.Add(row);
             RowSale[row] = refund;
-            Audit(at, Manager, AuditActions.SaleRefunded, "sale", () => sale.Id.ToString(), () => $"Bar receipt #{sale.Id} refunded: {sale.Total} ₴ (cash): {reason}",
+            Audit(at, Manager, AuditActions.SaleRefunded, "sale", () => sale.Id.ToString(), () => $"Bar receipt #{sale.Id} refunded: {MoneyText.Of(sale.Total)} ₴ (cash): {reason}",
                 new { total = sale.Total, method = sale.Method, reason, items = items.Select(i => $"{i.Name} x{i.Quantity}").ToList() });
         }
 
@@ -382,15 +382,15 @@ public static partial class DemoSeeder
             session.PaymentMethod = PaymentMethods.Debt;
             var opener = WindowAt(stop)?.Opener ?? Cashier;
             _playerEvents.Add((stop, 1, () => Post(ghost, stop, LedgerTypes.SessionCharge, PaymentMethods.Debt, cost, 0m, 0m, 0m,
-                $"Сесія на {pc.Device.Hostname} (145 хв) — {cost} ₴ у борг", session, actor: opener.Username, debtDelta: cost)));
+                $"Сесія на {pc.Device.Hostname} (145 хв) — {MoneyText.Of(cost)} ₴ у борг", session, actor: opener.Username, debtDelta: cost)));
             Audit(stop, opener, AuditActions.PlayerDebtRecorded, "player", () => ghost.Id.ToString(),
-                $"Debt {cost} ₴ recorded: post-paid session on {pc.Device.Hostname} not paid", new { amount = cost, device = pc.Device.Hostname });
+                $"Debt {MoneyText.Of(cost)} ₴ recorded: post-paid session on {pc.Device.Hostname} not paid", new { amount = cost, device = pc.Device.Hostname });
 
             var open = _windows[^1];
             var payAt = open.Start + (_now - open.Start) / 2;
             _playerEvents.Add((payAt, 1, () => Post(ghost, payAt, LedgerTypes.DebtPayment, PaymentMethods.Cash, 60m, 0m, 0m, 60m,
                 "Сплата боргу 60 ₴ (готівкою)", actor: Cashier.Username, debtDelta: -60m)));
-            Audit(payAt, Cashier, AuditActions.PlayerDebtPaid, "player", () => ghost.Id.ToString(), $"Debt paid: 60 ₴ (cash), {cost - 60m} ₴ left",
+            Audit(payAt, Cashier, AuditActions.PlayerDebtPaid, "player", () => ghost.Id.ToString(), $"Debt paid: 60 ₴ (cash), {MoneyText.Of(cost - 60m)} ₴ left",
                 new { amount = 60m, method = "cash", debtLeft = cost - 60m });
         }
 
@@ -409,7 +409,7 @@ public static partial class DemoSeeder
             session.PaymentMethod = PaymentMethods.Free;
             const string reason = "Переможниця турніру CS2 2×2: 2 години VIP";
             Audit(start, Manager, AuditActions.SessionFreeTime, "session", () => session.Id.ToString(),
-                $"Free time on {pc.Device.Hostname}: 120 min, worth {value} ₴: {reason}", new { pc.Device.Hostname, minutes = 120, value, reason, player = winner.Username });
+                $"Free time on {pc.Device.Hostname}: 120 min, worth {MoneyText.Of(value)} ₴: {reason}", new { pc.Device.Hostname, minutes = 120, value, reason, player = winner.Username });
         }
 
         /// <summary>Audit rows without money: a price change, an emergency PIN unlock last night.</summary>

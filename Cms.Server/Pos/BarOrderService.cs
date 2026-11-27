@@ -187,12 +187,12 @@ public sealed class BarOrderService
             await Ledger.AppendAsync(_db, new LedgerEntryEntity
             {
                 UserId = session.UserId, Type = LedgerTypes.OrderHold, Method = PaymentMethods.Balance, Amount = total, BalanceDelta = -total,
-                BarOrderId = order.Id, DeviceId = deviceId, Description = $"Замовлення бару №{order.Id} з {host}: {Items(items)} — {total} {cur} (утримано до видачі)"
+                BarOrderId = order.Id, DeviceId = deviceId, Description = $"Замовлення бару №{order.Id} з {host}: {Items(items)} — {MoneyText.Of(total)} {cur} (утримано до видачі)"
             }, _actor, now);
         }
         var player = session.UserId.HasValue ? await _db.Users.AsNoTracking().Where(u => u.Id == session.UserId).Select(u => u.Username).FirstOrDefaultAsync() : null;
         await AuditAsync(AuditActions.OrderPlaced, order.Id,
-            $"Bar order #{order.Id} from {host}: {Items(items)}, {total} {cur} " + (method == BarOrderPayments.Balance ? "paid from the balance (held)" : "to pay at the desk"),
+            $"Bar order #{order.Id} from {host}: {Items(items)}, {MoneyText.Of(total)} {cur} " + (method == BarOrderPayments.Balance ? "paid from the balance (held)" : "to pay at the desk"),
             new { id = order.Id, device = host, player, total, payment = method, items = items.Select(i => $"{i.Name} x{i.Quantity}") });
         await tx.CommitAsync();
         return BillingResult<BarOrderEntity>.Success(order);
@@ -242,7 +242,7 @@ public sealed class BarOrderService
         try { await _db.SaveChangesAsync(); }
         catch (DbUpdateConcurrencyException) { return BarOrderErrors.NotOpen; }
         if (order.Payment == BarOrderPayments.Balance)
-            await ReleaseAsync(order, $"Замовлення бару №{order.Id} видано — {order.Total} {cur} знято з утримання для чека", now);
+            await ReleaseAsync(order, $"Замовлення бару №{order.Id} видано — {MoneyText.Of(order.Total)} {cur} знято з утримання для чека", now);
         var sale = await new SaleService(_db, _clock, _audit, _actor).SellAsync(
             items.Select(i => new SaleLine(i.ProductId, i.Quantity)).ToList(), method, order.UserId,
             items.GroupBy(i => i.ProductId).ToDictionary(g => g.Key, g => g.First().UnitPrice));
@@ -251,7 +251,7 @@ public sealed class BarOrderService
         await _db.SaveChangesAsync();
         var host = await _db.Devices.AsNoTracking().Where(d => d.Id == order.DeviceId).Select(d => d.Hostname).FirstOrDefaultAsync() ?? "?";
         await AuditAsync(AuditActions.OrderDelivered, order.Id,
-            $"Bar order #{order.Id} delivered to {host}: receipt #{sale.Value.Id}, {sale.Value.Total} {cur} ({method})",
+            $"Bar order #{order.Id} delivered to {host}: receipt #{sale.Value.Id}, {MoneyText.Of(sale.Value.Total)} {cur} ({method})",
             new { id = order.Id, device = host, sale = sale.Value.Id, total = sale.Value.Total, method });
         await tx.CommitAsync();
         return BillingResult<BarOrderEntity>.Success(order);
@@ -289,12 +289,12 @@ public sealed class BarOrderService
         var refunded = 0m;
         if (order.Payment == BarOrderPayments.Balance)
         {
-            await ReleaseAsync(order, $"Замовлення бару №{order.Id} скасовано — {order.Total} {cur} повернуто на баланс", now);
+            await ReleaseAsync(order, $"Замовлення бару №{order.Id} скасовано — {MoneyText.Of(order.Total)} {cur} повернуто на баланс", now);
             refunded = order.Total;
         }
         var host = await _db.Devices.AsNoTracking().Where(d => d.Id == order.DeviceId).Select(d => d.Hostname).FirstOrDefaultAsync() ?? "?";
         await AuditAsync(AuditActions.OrderCancelled, order.Id,
-            $"Bar order #{order.Id} of {host} cancelled" + (byPlayer ? " by the player" : "") + (refunded > 0 ? $", {refunded} {cur} back to the balance" : "") + (why != null ? $": {why}" : ""),
+            $"Bar order #{order.Id} of {host} cancelled" + (byPlayer ? " by the player" : "") + (refunded > 0 ? $", {MoneyText.Of(refunded)} {cur} back to the balance" : "") + (why != null ? $": {why}" : ""),
             new { id = order.Id, device = host, refunded, reason = why, byPlayer });
         await tx.CommitAsync();
         return BillingResult<BarOrderEntity>.Success(order);

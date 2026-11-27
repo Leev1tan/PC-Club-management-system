@@ -23,8 +23,8 @@ public sealed record ClubCurrency(string Code, string Symbol, string NameUk, str
     public static ClubCurrency? Find(string? code) =>
         All.FirstOrDefault(c => string.Equals(c.Code, code?.Trim(), StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Amount and symbol, as in the stored texts: "150 ₴", "12.50 €".</summary>
-    public string Text(decimal amount) => $"{amount} {Symbol}";
+    /// <summary>Amount and symbol, as in the stored texts: "150.00 ₴", "12.50 €".</summary>
+    public string Text(decimal amount) => $"{MoneyText.Of(amount)} {Symbol}";
 
     /// <summary>The club setting club.currency; UAH when it is missing or unknown.</summary>
     public static async Task<ClubCurrency> LoadAsync(CmsDbContext db, CancellationToken ct = default)

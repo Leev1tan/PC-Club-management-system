@@ -70,7 +70,7 @@ public class ProductsController : ControllerBase
             await Stock.RecordAsync(_db, product.Id, StockMovementTypes.Restock, req.InitialStock.Value, Actor, now,
                 shiftId: await ShiftService.LockOpenShiftIdAsync(_db), reason: "Початковий залишок");
         }
-        await AuditAsync(AuditActions.ProductCreated, product.Id, $"Product '{product.Name}' created: {product.Price} {cur} ({product.Category})", Details(product));
+        await AuditAsync(AuditActions.ProductCreated, product.Id, $"Product '{product.Name}' created: {MoneyText.Of(product.Price)} {cur} ({product.Category})", Details(product));
         await tx.CommitAsync();
         return Ok(await ViewAsync(product.Id));
     }
@@ -89,7 +89,7 @@ public class ProductsController : ControllerBase
         Apply(product, req);
         await _db.SaveChangesAsync();
         if (oldPrice != product.Price)
-            await AuditAsync(AuditActions.ProductPriceChanged, id, $"Price of '{product.Name}' changed: {oldPrice} -> {product.Price} {cur}", new { before, after = Details(product) });
+            await AuditAsync(AuditActions.ProductPriceChanged, id, $"Price of '{product.Name}' changed: {oldPrice} -> {MoneyText.Of(product.Price)} {cur}", new { before, after = Details(product) });
         else
             await AuditAsync(AuditActions.ProductUpdated, id, $"Product '{product.Name}' changed", new { before, after = Details(product) });
         return Ok(await ViewAsync(id));
@@ -107,7 +107,7 @@ public class ProductsController : ControllerBase
             return PosErrors.ProductInUse.ToActionResult();
         _db.Products.Remove(product);
         await _db.SaveChangesAsync();
-        await AuditAsync(AuditActions.ProductDeleted, id, $"Product '{product.Name}' deleted ({product.Price} {cur})", Details(product));
+        await AuditAsync(AuditActions.ProductDeleted, id, $"Product '{product.Name}' deleted ({MoneyText.Of(product.Price)} {cur})", Details(product));
         return NoContent();
     }
 

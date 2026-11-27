@@ -143,14 +143,14 @@ public sealed class ShiftService
     }
 
     public static string OpenedSummary(ShiftEntity shift, ShiftEntity? previous, string cur) =>
-        $"Shift #{shift.Id} opened with a float of {shift.OpeningFloat} {cur}" +
-        (previous?.CountedCash is { } left && left != shift.OpeningFloat ? $" (shift #{previous.Id} closed with {left} {cur} counted)" : "");
+        $"Shift #{shift.Id} opened with a float of {MoneyText.Of(shift.OpeningFloat)} {cur}" +
+        (previous?.CountedCash is { } left && left != shift.OpeningFloat ? $" (shift #{previous.Id} closed with {MoneyText.Of(left)} {cur} counted)" : "");
 
     public static object OpenedDetails(ShiftEntity shift, ShiftEntity? previous) =>
         new { shift.OpeningFloat, note = shift.OpenNote, previousShift = previous?.Id, previousCountedCash = previous?.CountedCash };
 
     public static string ClosedSummary(ShiftEntity shift, string cur) =>
-        $"Shift #{shift.Id} closed: counted {shift.CountedCash} {cur}, expected {shift.ExpectedCash} {cur}, variance {shift.Variance:+0.00;-0.00;0.00} {cur}";
+        $"Shift #{shift.Id} closed: counted {MoneyText.Of(shift.CountedCash)} {cur}, expected {MoneyText.Of(shift.ExpectedCash)} {cur}, variance {shift.Variance:+0.00;-0.00;0.00} {cur}";
 
     public static object ClosedDetails(ShiftEntity shift) =>
         new { shift.OpeningFloat, countedCash = shift.CountedCash, expectedCash = shift.ExpectedCash, variance = shift.Variance, note = shift.CloseNote, openedBy = shift.OpenedByUsername };
@@ -174,9 +174,9 @@ public sealed class ShiftService
         var row = await Ledger.AppendAsync(_db, new LedgerEntryEntity
         {
             Type = LedgerTypes.CashPayout, Method = PaymentMethods.Cash, Amount = amount, DeskAmount = -amount,
-            ShiftId = id, Reason = why, Description = $"Виплата з каси {amount} {cur}: {why}"
+            ShiftId = id, Reason = why, Description = $"Виплата з каси {MoneyText.Of(amount)} {cur}: {why}"
         }, _actor, _clock.UtcNow);
-        await AuditAsync(AuditActions.ShiftCashPayout, id, $"Cash payout {amount} {cur} from shift #{id}: {why}", new { amount, reason = why, ledgerRow = row.Id });
+        await AuditAsync(AuditActions.ShiftCashPayout, id, $"Cash payout {MoneyText.Of(amount)} {cur} from shift #{id}: {why}", new { amount, reason = why, ledgerRow = row.Id });
         await tx.CommitAsync();
         return BillingResult<LedgerEntryEntity>.Success(row);
     }

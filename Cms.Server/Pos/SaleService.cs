@@ -112,7 +112,7 @@ public sealed class SaleService
             BalanceDelta = method == PaymentMethods.Balance ? -total : 0m,
             DeskAmount = PaymentMethods.IsDesk(method) ? total : 0m,
             SaleId = sale.Id, ShiftId = shiftId,
-            Description = $"Бар, чек №{sale.Id}: {ItemsText(items)} — {total} {cur}"
+            Description = $"Бар, чек №{sale.Id}: {ItemsText(items)} — {MoneyText.Of(total)} {cur}"
         }, _actor, now);
         await tx.CommitAsync();
         return BillingResult<SaleEntity>.Success(sale);
@@ -179,12 +179,12 @@ public sealed class SaleService
             BalanceDelta = sale.Method == PaymentMethods.Balance ? sale.Total : 0m,
             DeskAmount = desk ? -sale.Total : 0m,
             SaleId = refund.Id, ShiftId = shiftId, Reason = why,
-            Description = $"Повернення чека №{sale.Id} ({ItemsText(items)}) — {sale.Total} {cur}: {why}"
+            Description = $"Повернення чека №{sale.Id} ({ItemsText(items)}) — {MoneyText.Of(sale.Total)} {cur}: {why}"
         }, _actor, now);
         if (_audit != null)
         {
             await _audit.WriteAsync(AuditActions.SaleRefunded, "sale", sale.Id,
-                $"Bar receipt #{sale.Id} refunded: {sale.Total} {cur} ({sale.Method}): {why}",
+                $"Bar receipt #{sale.Id} refunded: {MoneyText.Of(sale.Total)} {cur} ({sale.Method}): {why}",
                 new { sale = sale.Id, refund = refund.Id, total = sale.Total, method = sale.Method, soldBy = sale.ActorUsername, reason = why, returnToStock,
                       items = items.Select(i => $"{i.Name} x{i.Quantity}") });
         }

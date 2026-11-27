@@ -615,20 +615,20 @@ public static partial class DemoSeeder
             if (plan.Package is { } package)
             {
                 var s = AddSession(pc, plan.Start, plan.End, package.Price, true, package, plan.Terms!.Minutes, user, "ended", cutoffUtc: plan.Terms.CutoffUtc);
-                Pay(s, user, package.Price, LedgerTypes.PackagePurchase, $"Пакет «{package.Name}» на {pc.Device.Hostname} — {package.Price} ₴");
+                Pay(s, user, package.Price, LedgerTypes.PackagePurchase, $"Пакет «{package.Name}» на {pc.Device.Hostname} — {MoneyText.Of(package.Price)} ₴");
             }
             else if (plan.PostPaid)
             {
                 // Post-paid: billed at the end per rule, rounded to the tariff step
                 var cost = TariffCalculator.QuotePlayed(new[] { (pc.Pricing, plan.Start, plan.End) }, pc.Pricing, _zone).Total;
                 var s = AddSession(pc, plan.Start, plan.End, cost, false, null, null, user, "ended");
-                Pay(s, user, cost, LedgerTypes.SessionCharge, $"Сесія на {pc.Device.Hostname} ({(int)Math.Round((plan.End - plan.Start).TotalMinutes)} хв) — {cost} ₴");
+                Pay(s, user, cost, LedgerTypes.SessionCharge, $"Сесія на {pc.Device.Hostname} ({(int)Math.Round((plan.End - plan.Start).TotalMinutes)} хв) — {MoneyText.Of(cost)} ₴");
             }
             else
             {
                 var cost = TariffCalculator.QuoteFixed(pc.Pricing, plan.Start, plan.Minutes!.Value, _zone).Total;
                 var s = AddSession(pc, plan.Start, plan.End, cost, true, null, plan.Minutes, user, "ended");
-                Pay(s, user, cost, LedgerTypes.SessionCharge, $"Сесія на {pc.Device.Hostname} ({plan.Minutes} хв, {pc.Tariff.Name}) — {cost} ₴");
+                Pay(s, user, cost, LedgerTypes.SessionCharge, $"Сесія на {pc.Device.Hostname} ({plan.Minutes} хв, {pc.Tariff.Name}) — {MoneyText.Of(cost)} ₴");
             }
         }
 
@@ -663,14 +663,14 @@ public static partial class DemoSeeder
                     var start = _now.AddMinutes(-_rng.Next(30, 50));
                     var cost = TariffCalculator.QuoteFixed(pc.Pricing, start, 120, _zone).Total;
                     session = AddSession(pc, start, start.AddMinutes(120), cost, true, null, 120, user, "active", pausedUtc: _now.AddMinutes(-4));
-                    Pay(session, user, cost, LedgerTypes.SessionCharge, $"Сесія на {pc.Device.Hostname} (120 хв, {pc.Tariff.Name}) — {cost} ₴");
+                    Pay(session, user, cost, LedgerTypes.SessionCharge, $"Сесія на {pc.Device.Hostname} (120 хв, {pc.Tariff.Name}) — {MoneyText.Of(cost)} ₴");
                     paused.Add(session.Id);
                     locked = true;
                 }
                 else if (i % 3 == 2 && TryPackage(pc, _now.AddMinutes(-_rng.Next(10, 90)), out var package, out var terms) && terms.EndUtc > _now.AddMinutes(5))
                 {
                     session = AddSession(pc, terms.StartUtc, terms.EndUtc, package.Price, true, package, terms.Minutes, user, "active", cutoffUtc: terms.CutoffUtc);
-                    Pay(session, user, package.Price, LedgerTypes.PackagePurchase, $"Пакет «{package.Name}» на {pc.Device.Hostname} — {package.Price} ₴");
+                    Pay(session, user, package.Price, LedgerTypes.PackagePurchase, $"Пакет «{package.Name}» на {pc.Device.Hostname} — {MoneyText.Of(package.Price)} ₴");
                 }
                 else
                 {
@@ -680,7 +680,7 @@ public static partial class DemoSeeder
                     var start = _now.AddMinutes(remaining - duration);
                     var cost = TariffCalculator.QuoteFixed(pc.Pricing, start, duration, _zone).Total;
                     session = AddSession(pc, start, _now.AddMinutes(remaining), cost, true, null, duration, user, "active");
-                    Pay(session, user, cost, LedgerTypes.SessionCharge, $"Сесія на {pc.Device.Hostname} ({duration} хв, {pc.Tariff.Name}) — {cost} ₴");
+                    Pay(session, user, cost, LedgerTypes.SessionCharge, $"Сесія на {pc.Device.Hostname} ({duration} хв, {pc.Tariff.Name}) — {MoneyText.Of(cost)} ₴");
                 }
                 Reserve(pc, session.StartUtc, _now.AddDays(1));
                 if (user != null) Playing(user, session.StartUtc, _now.AddDays(1));
@@ -763,12 +763,12 @@ public static partial class DemoSeeder
 
         private void TopUp(UserEntity user, decimal amount, string method, DateTimeOffset at)
         {
-            Post(user, at, LedgerTypes.TopUp, method, amount, amount, 0m, amount, $"Поповнення балансу +{amount} ₴");
+            Post(user, at, LedgerTypes.TopUp, method, amount, amount, 0m, amount, $"Поповнення балансу +{MoneyText.Of(amount)} ₴");
             var tier = BonusRules.TierFor(BonusTiers, amount);
             var bonus = BonusRules.CashbackFor(BonusTiers, amount);
             if (bonus > 0)
                 Post(user, at.AddMilliseconds(1), LedgerTypes.BonusAccrual, PaymentMethods.None, bonus, 0m, bonus, 0m,
-                    $"Кешбек {tier!.Percent:0.##}% за поповнення {amount} ₴");
+                    $"Кешбек {tier!.Percent:0.##}% за поповнення {MoneyText.Of(amount)} ₴");
         }
 
         private void Refund(UserEntity user, decimal amount, string reason, DateTimeOffset at)
@@ -776,16 +776,16 @@ public static partial class DemoSeeder
             var (balance, _) = _wallets[user.Id];
             if (balance < amount) TopUp(user, 300m, PaymentMethods.Cash, at.AddMilliseconds(-10));
             Post(user, at, LedgerTypes.Refund, PaymentMethods.Cash, amount, -amount, 0m, -amount,
-                $"Повернення {amount} ₴ (готівкою): {reason}", reason: reason);
+                $"Повернення {MoneyText.Of(amount)} ₴ (готівкою): {reason}", reason: reason);
             var reversal = Math.Min(_wallets[user.Id].Bonus, BonusRules.CashbackFor(BonusTiers, amount));
             if (reversal > 0)
                 Post(user, at.AddMilliseconds(1), LedgerTypes.BonusReversal, PaymentMethods.None, reversal, 0m, -reversal, 0m,
-                    $"Скасування кешбеку за повернені {amount} ₴", reason: reason);
+                    $"Скасування кешбеку за повернені {MoneyText.Of(amount)} ₴", reason: reason);
         }
 
         private void Adjust(UserEntity user, decimal amount, string reason, DateTimeOffset at) =>
             Post(user, at, LedgerTypes.Adjustment, PaymentMethods.None, Math.Abs(amount), amount, 0m, 0m,
-                $"Коригування балансу {amount:+0.##;-0.##} ₴: {reason}", reason: reason, actor: "demo-manager");
+                $"Коригування балансу {MoneyText.Signed(amount)} ₴: {reason}", reason: reason, actor: "demo-manager");
 
         private LedgerEntryEntity Post(UserEntity user, DateTimeOffset at, string type, string method, decimal amount, decimal balanceDelta,
             decimal bonusDelta, decimal desk, string description, SessionEntity? session = null, string? reason = null, string? actor = "demo-cashier",

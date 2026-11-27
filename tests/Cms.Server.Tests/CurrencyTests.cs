@@ -62,8 +62,8 @@ public sealed class CurrencyTests : ApiTestBase, IClassFixture<CmsFactory>
             await JsonAsync(await cashier.PostAsJsonAsync($"/api/users/{player}/topup", new { amount = 20, method = "card" }));
             var ledger = (await owner.GetFromJsonAsync<JsonElement>($"/api/users/{player}/ledger")).EnumerateArray()
                 .Select(l => l.GetProperty("description").GetString()).ToList();
-            Assert.Contains(ledger, d => d == "Поповнення балансу +20 €");
-            Assert.Contains(ledger, d => d == "Поповнення балансу +150 ₴");
+            Assert.Contains(ledger, d => d == "Поповнення балансу +20.00 €");
+            Assert.Contains(ledger, d => d == "Поповнення балансу +150.00 ₴");
 
             // The change is audited with both currencies
             var audit = await owner.GetFromJsonAsync<JsonElement>("/api/audit?action=settings.currency_changed");

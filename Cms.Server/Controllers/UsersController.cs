@@ -170,7 +170,7 @@ public class UsersController : ControllerBase
         await using (var tx = await _db.Database.BeginTransactionAsync())
         {
             if (!await Wallet.CreditAsync(_db, id, req.Amount)) return NotFound();
-            var description = string.IsNullOrWhiteSpace(req.Description) ? $"Поповнення балансу +{req.Amount} {cur}" : req.Description.Trim();
+            var description = string.IsNullOrWhiteSpace(req.Description) ? $"Поповнення балансу +{MoneyText.Of(req.Amount)} {cur}" : req.Description.Trim();
             await Ledger.AppendAsync(_db, new LedgerEntryEntity
             {
                 UserId = id, Type = LedgerTypes.TopUp, Method = method, Amount = req.Amount,
@@ -183,7 +183,7 @@ public class UsersController : ControllerBase
                 await Ledger.AppendAsync(_db, new LedgerEntryEntity
                 {
                     UserId = id, Type = LedgerTypes.BonusAccrual, Method = PaymentMethods.None, Amount = bonus, BonusDelta = bonus,
-                    Description = $"Кешбек {cashback.Percent:0.##}% за поповнення {req.Amount} {cur}"
+                    Description = $"Кешбек {cashback.Percent:0.##}% за поповнення {MoneyText.Of(req.Amount)} {cur}"
                 }, Actor, now);
             }
             if (tierBonus > 0)
@@ -192,12 +192,12 @@ public class UsersController : ControllerBase
                 await Ledger.AppendAsync(_db, new LedgerEntryEntity
                 {
                     UserId = id, Type = LedgerTypes.BonusAccrual, Method = PaymentMethods.None, Amount = tierBonus, BonusDelta = tierBonus,
-                    Description = $"Бонус рівня {tier!.Name} {tier.TopUpBonusPercent:0.##}% за поповнення {req.Amount} {cur}"
+                    Description = $"Бонус рівня {tier!.Name} {tier.TopUpBonusPercent:0.##}% за поповнення {MoneyText.Of(req.Amount)} {cur}"
                 }, Actor, now);
             }
             await _audit.WriteAsync(AuditActions.PlayerTopUp, "player", id,
-                $"Balance top-up +{req.Amount} {cur} ({method})" + (bonus > 0 ? $", cashback +{bonus} {cur} bonus" : "") +
-                (tierBonus > 0 ? $", tier {tier!.Name} +{tierBonus} {cur} bonus" : ""),
+                $"Balance top-up +{MoneyText.Of(req.Amount)} {cur} ({method})" + (bonus > 0 ? $", cashback +{MoneyText.Of(bonus)} {cur} bonus" : "") +
+                (tierBonus > 0 ? $", tier {tier!.Name} +{MoneyText.Of(tierBonus)} {cur} bonus" : ""),
                 new { amount = req.Amount, method, bonus, tier = tier?.Name, tierBonus, req.Description });
             await tx.CommitAsync();
         }
@@ -235,7 +235,7 @@ public class UsersController : ControllerBase
             {
                 UserId = id, Type = LedgerTypes.Refund, Method = method, Amount = req.Amount,
                 BalanceDelta = -req.Amount, DeskAmount = -req.Amount, Reason = reason,
-                Description = $"Повернення {req.Amount} {cur} ({(method == PaymentMethods.Card ? "на картку" : "готівкою")}): {reason}"
+                Description = $"Повернення {MoneyText.Of(req.Amount)} {cur} ({(method == PaymentMethods.Card ? "на картку" : "готівкою")}): {reason}"
             }, Actor, now);
             var taken = reversal > 0 ? await Wallet.TakeBonusUpToAsync(_db, id, reversal) : 0m;
             if (taken > 0)
@@ -243,11 +243,11 @@ public class UsersController : ControllerBase
                 await Ledger.AppendAsync(_db, new LedgerEntryEntity
                 {
                     UserId = id, Type = LedgerTypes.BonusReversal, Method = PaymentMethods.None, Amount = taken, BonusDelta = -taken,
-                    Reason = reason, Description = $"Скасування кешбеку за повернені {req.Amount} {cur}"
+                    Reason = reason, Description = $"Скасування кешбеку за повернені {MoneyText.Of(req.Amount)} {cur}"
                 }, Actor, now);
             }
             await _audit.WriteAsync(AuditActions.PlayerRefund, "player", id,
-                $"Refund {req.Amount} {cur} ({method}): {reason}" + (taken > 0 ? $"; cashback -{taken} {cur} bonus" : ""),
+                $"Refund {MoneyText.Of(req.Amount)} {cur} ({method}): {reason}" + (taken > 0 ? $"; cashback -{MoneyText.Of(taken)} {cur} bonus" : ""),
                 new { amount = req.Amount, method, reason, bonusReversed = taken });
             await tx.CommitAsync();
         }
@@ -287,10 +287,10 @@ public class UsersController : ControllerBase
             {
                 UserId = id, Type = LedgerTypes.Adjustment, Method = PaymentMethods.None, Amount = amount,
                 BalanceDelta = bonus ? 0m : req.Amount, BonusDelta = bonus ? req.Amount : 0m, Reason = reason,
-                Description = $"Коригування {(bonus ? "бонусів" : "балансу")} {req.Amount:+0.##;-0.##} {cur}: {reason}"
+                Description = $"Коригування {(bonus ? "бонусів" : "балансу")} {MoneyText.Signed(req.Amount)} {cur}: {reason}"
             }, Actor, now);
             await _audit.WriteAsync(bonus ? AuditActions.PlayerBonusAdjusted : AuditActions.PlayerBalanceAdjusted, "player", id,
-                $"{(bonus ? "Bonus" : "Balance")} correction {req.Amount:+0.##;-0.##} {cur}: {reason}", new { amount = req.Amount, target = bonus ? "bonus" : "balance", reason });
+                $"{(bonus ? "Bonus" : "Balance")} correction {MoneyText.Signed(req.Amount)} {cur}: {reason}", new { amount = req.Amount, target = bonus ? "bonus" : "balance", reason });
             await tx.CommitAsync();
         }
         return Ok(await ViewAsync(id));
@@ -323,10 +323,10 @@ public class UsersController : ControllerBase
             {
                 UserId = id, Type = LedgerTypes.DebtPayment, Method = method, Amount = req.Amount, DebtDelta = -req.Amount,
                 BalanceDelta = fromBalance ? -req.Amount : 0m, DeskAmount = fromBalance ? 0m : req.Amount,
-                Description = $"Сплата боргу {req.Amount} {cur} ({(fromBalance ? "з балансу" : method == PaymentMethods.Card ? "карткою" : "готівкою")})"
+                Description = $"Сплата боргу {MoneyText.Of(req.Amount)} {cur} ({(fromBalance ? "з балансу" : method == PaymentMethods.Card ? "карткою" : "готівкою")})"
             }, Actor, now);
             var left = await Wallet.GetAccountsAsync(_db, id);
-            await _audit.WriteAsync(AuditActions.PlayerDebtPaid, "player", id, $"Debt paid: {req.Amount} {cur} ({method}), {left?.Debt} {cur} left",
+            await _audit.WriteAsync(AuditActions.PlayerDebtPaid, "player", id, $"Debt paid: {MoneyText.Of(req.Amount)} {cur} ({method}), {MoneyText.Of(left?.Debt)} {cur} left",
                 new { amount = req.Amount, method, debtLeft = left?.Debt });
             await tx.CommitAsync();
         }
@@ -356,9 +356,9 @@ public class UsersController : ControllerBase
             await Ledger.AppendAsync(_db, new LedgerEntryEntity
             {
                 UserId = id, Type = LedgerTypes.DebtWriteOff, Method = PaymentMethods.None, Amount = req.Amount, DebtDelta = -req.Amount,
-                Reason = reason, Description = $"Списання боргу {req.Amount} {cur}: {reason}"
+                Reason = reason, Description = $"Списання боргу {MoneyText.Of(req.Amount)} {cur}: {reason}"
             }, Actor, now);
-            await _audit.WriteAsync(AuditActions.PlayerDebtWrittenOff, "player", id, $"Debt written off: {req.Amount} {cur}: {reason}",
+            await _audit.WriteAsync(AuditActions.PlayerDebtWrittenOff, "player", id, $"Debt written off: {MoneyText.Of(req.Amount)} {cur}: {reason}",
                 new { amount = req.Amount, reason });
             await tx.CommitAsync();
         }
