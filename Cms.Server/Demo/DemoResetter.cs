@@ -15,9 +15,13 @@ public sealed class DemoResetter
     private readonly ILogger<DemoResetter> _logger;
     private readonly ClubClock _clock;
 
+    private readonly Cms.Server.Accounts.GameAccountVault? _vault;
+
     public DemoResetter(IServiceScopeFactory scopes, DemoOptions options, DemoState state,
-        DemoSimulator simulator, DeviceRuntimeState runtime, ILogger<DemoResetter> logger, ClubClock clock)
+        DemoSimulator simulator, DeviceRuntimeState runtime, ILogger<DemoResetter> logger, ClubClock clock,
+        Cms.Server.Accounts.GameAccountVault? vault = null)
     {
+        _vault = vault;
         _scopes = scopes;
         _options = options;
         _state = state;
@@ -46,7 +50,7 @@ public sealed class DemoResetter
     {
         var now = _clock.UtcNow;
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        var seed = await DemoSeeder.ResetAsync(db, now, Random.Shared, _clock.Zone, ct);
+        var seed = await DemoSeeder.ResetAsync(db, now, Random.Shared, _clock.Zone, ct, _vault);
         _runtime.Clear();
         _simulator.Load(seed, now);
         _state.MarkReset(now, _options.ResetInterval);

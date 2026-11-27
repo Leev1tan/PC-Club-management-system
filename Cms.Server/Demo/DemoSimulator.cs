@@ -75,9 +75,12 @@ public sealed class DemoSimulator
     private DateTimeOffset _nextOrderUtc;
     private DateTimeOffset _nextOrderDeskUtc;
 
+    private readonly Cms.Server.Accounts.GameAccountVault? _vault;
+
     public DemoSimulator(ILogger<DemoSimulator> logger, DeviceRuntimeState runtime, Random? rng = null, ClubClock? clock = null, Random? posRng = null,
-        Random? reservationRng = null, Random? orderRng = null)
+        Random? reservationRng = null, Random? orderRng = null, Cms.Server.Accounts.GameAccountVault? vault = null)
     {
+        _vault = vault;
         _resv = reservationRng ?? new Random();
         _ord = orderRng ?? new Random();
         _logger = logger;
@@ -507,7 +510,15 @@ public sealed class DemoSimulator
                 if (r <= 0) { pick = o.Game; break; }
             }
             if (await GamePlays.StartAsync(db, session.DeviceId, pick.Id, now, ct))
+            {
                 _logger.LogDebug("Demo: {Game} started on {Device}", pick.Name, session.DeviceId);
+                // A game that needs a club account: the simulated agent leases one and fetches the (fake) credentials once
+                if (pick.AccountPlatform != null)
+                {
+                    db.ChangeTracker.Clear();
+                    await DemoAccounts.LeaseAsync(db, _vault, session.DeviceId, pick.Id, now, _logger);
+                }
+            }
             db.ChangeTracker.Clear();
         }
     }

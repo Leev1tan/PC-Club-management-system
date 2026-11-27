@@ -10,7 +10,8 @@ namespace Cms.Server.Demo;
 public static partial class DemoSeeder
 {
     /// <summary>Zones: null = all zones, else zone indexes (0 Standard, 1 VIP, 2 Bootcamp / Pro). Weights per zone index.</summary>
-    private sealed record GameSpec(string Name, string Category, GameLaunch Launch, string? Process, int[]? Zones, double[] Weights, bool Active = true);
+    private sealed record GameSpec(string Name, string Category, GameLaunch Launch, string? Process, int[]? Zones, double[] Weights, bool Active = true,
+        string? AccountPlatform = null);
 
     private const string RiotClient = @"C:\Riot Games\Riot Client\RiotClientServices.exe";
 
@@ -24,7 +25,8 @@ public static partial class DemoSeeder
             new GameLaunch(GameLaunchKinds.Url, LaunchUrl: "com.epicgames.launcher://apps/fn%3A4fe75bbc5a674f4f9b356b5c90567da5%3AFortnite?action=launch&silent=true"),
             "FortniteClient-Win64-Shipping", new[] { 0, 1 }, new[] { 12.0, 8, 0 }),
         new("PUBG: BATTLEGROUNDS", "Королівська битва", new GameLaunch(GameLaunchKinds.Steam, SteamAppId: 578080), "TslGame", null, new[] { 10.0, 8, 6 }),
-        new("Grand Theft Auto V", "Пригоди", new GameLaunch(GameLaunchKinds.Steam, SteamAppId: 271590), "GTA5", new[] { 0, 1 }, new[] { 8.0, 14, 0 }),
+        new("Grand Theft Auto V", "Пригоди", new GameLaunch(GameLaunchKinds.Steam, SteamAppId: 271590), "GTA5", new[] { 0, 1 }, new[] { 8.0, 14, 0 },
+            AccountPlatform: AccountPlatforms.Steam),
         new("Apex Legends", "Королівська битва", new GameLaunch(GameLaunchKinds.Steam, SteamAppId: 1172470), "r5apex", null, new[] { 8.0, 6, 6 }),
         new("League of Legends", "MOBA", new GameLaunch(GameLaunchKinds.Exe, RiotClient, "--launch-product=league_of_legends --launch-patchline=live"),
             "League of Legends", null, new[] { 8.0, 5, 8 }),
@@ -33,8 +35,10 @@ public static partial class DemoSeeder
         new("Rocket League", "Спорт",
             new GameLaunch(GameLaunchKinds.Url, LaunchUrl: "com.epicgames.launcher://apps/9773aa1aa54f4f7b80e44bef04986cea%3A530145df28a24424923f5828cc9031a1%3ASugar?action=launch&silent=true"),
             "RocketLeague", new[] { 0, 1 }, new[] { 5.0, 5, 0 }),
-        new("EA SPORTS FC 25", "Спорт", new GameLaunch(GameLaunchKinds.Steam, SteamAppId: 2669320), "FC25", new[] { 0, 1 }, new[] { 5.0, 8, 0 }),
-        new("Rust", "Виживання", new GameLaunch(GameLaunchKinds.Steam, SteamAppId: 252490), "RustClient", null, new[] { 4.0, 6, 0 }),
+        new("EA SPORTS FC 25", "Спорт", new GameLaunch(GameLaunchKinds.Steam, SteamAppId: 2669320), "FC25", new[] { 0, 1 }, new[] { 5.0, 8, 0 },
+            AccountPlatform: AccountPlatforms.Steam),
+        new("Rust", "Виживання", new GameLaunch(GameLaunchKinds.Steam, SteamAppId: 252490), "RustClient", null, new[] { 4.0, 6, 0 },
+            AccountPlatform: AccountPlatforms.Steam),
         new("Deadlock", "MOBA", new GameLaunch(GameLaunchKinds.Steam, SteamAppId: 1422450), "deadlock", null, new[] { 4.0, 3, 6 }),
         new("Minecraft", "Пісочниця", new GameLaunch(GameLaunchKinds.Exe, @"C:\Program Files (x86)\Minecraft Launcher\MinecraftLauncher.exe"),
             "javaw", new[] { 0 }, new[] { 6.0, 0, 0 }),
@@ -73,7 +77,7 @@ public static partial class DemoSeeder
                     ExePath = spec.Launch.ExePath, Arguments = spec.Launch.Arguments, WorkingDirectory = spec.Launch.WorkingDirectory,
                     SteamAppId = spec.Launch.SteamAppId, LaunchUrl = spec.Launch.LaunchUrl, ProcessName = spec.Process,
                     AllZones = spec.Zones == null, Color = GameTile.DefaultColor(spec.Name), SortOrder = (i + 1) * 10,
-                    IsActive = spec.Active, CreatedUtc = created, UpdatedUtc = created
+                    IsActive = spec.Active, CreatedUtc = created, UpdatedUtc = created, AccountPlatform = spec.AccountPlatform
                 };
                 Club.Add(game);
                 _games.Add(new DemoGame(game, spec.Weights, spec.Zones));

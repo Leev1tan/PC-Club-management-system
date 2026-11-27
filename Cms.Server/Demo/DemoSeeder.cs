@@ -108,7 +108,7 @@ public static partial class DemoSeeder
     /// <summary>Tables with many rows: PostgreSQL empties them with one TRUNCATE.</summary>
     private static readonly string[] BigTables =
         { "Commands", "Heartbeats", "Transactions", "GamePlays", "SessionSegments", "Sessions", "SaleItems", "Sales", "StockMovements", "Shifts", "LedgerEntries", "AuditLog", "Reservations",
-          "BarOrderItems", "BarOrders", "EventMatches", "EventPlayers", "EventTeams", "EventDevices", "Events" };
+          "BarOrderItems", "BarOrders", "EventMatches", "EventPlayers", "EventTeams", "EventDevices", "Events", "GameAccountLeases", "GameAccounts" };
 
     /// <summary>Tables of the bulk insert whose foreign keys PostgreSQL checks once at the end.</summary>
     private static readonly string[] BulkTables = { "Sessions", "SessionSegments", "GamePlays", "Sales", "SaleItems", "StockMovements", "LedgerEntries" };
@@ -117,7 +117,7 @@ public static partial class DemoSeeder
 
     /// <summary>Tables with ids from a sequence that the seed fills with explicit ids in date order.</summary>
     private static readonly string[] SequenceTables = { "Shifts", "Sales", "SaleItems", "StockMovements", "LedgerEntries", "AuditLog", "Reservations", "BarOrderItems", "BarOrders",
-        "Events", "EventTeams", "EventPlayers", "EventMatches" };
+        "Events", "EventTeams", "EventPlayers", "EventMatches", "GameAccountLeases" };
 
     /// <summary>
     /// True when the database is empty or was seeded by demo mode. Demo mode refuses to
@@ -139,13 +139,16 @@ public static partial class DemoSeeder
                && !await db.Reservations.AnyAsync(ct)
                && !await db.BarOrders.AnyAsync(ct)
                && !await db.Events.AnyAsync(ct)
+               && !await db.GameAccounts.AnyAsync(ct)
                && !await db.StaffUsers.AnyAsync(ct);
     }
 
     public static Task<DemoSeedResult> ResetAsync(CmsDbContext db, DateTimeOffset now, Random rng, CancellationToken ct = default) =>
         ResetAsync(db, now, rng, ClubTimeZone.Default, ct);
 
-    public static async Task<DemoSeedResult> ResetAsync(CmsDbContext db, DateTimeOffset now, Random rng, TimeZoneInfo zone, CancellationToken ct = default)
+    /// <param name="vault">The vault of the server for the fake club accounts (null: keys in memory only).</param>
+    public static async Task<DemoSeedResult> ResetAsync(CmsDbContext db, DateTimeOffset now, Random rng, TimeZoneInfo zone, CancellationToken ct = default,
+        Cms.Server.Accounts.GameAccountVault? vault = null)
     {
         // Plan the whole club in memory first: ids of shifts, receipts, the stock log, the ledger and the
         // audit log are given in date order, and every closed shift gets its anchor in the audit chain
@@ -183,6 +186,8 @@ public static partial class DemoSeeder
         else
         {
             // Children first (foreign key order); the append-only tables are cleared the demo way
+            await db.GameAccountLeases.ExecuteDeleteAsync(ct);
+            await db.GameAccounts.ExecuteDeleteAsync(ct);
             await db.EventMatches.ExecuteDeleteAsync(ct);
             await db.EventPlayers.ExecuteDeleteAsync(ct);
             await db.EventTeams.ExecuteDeleteAsync(ct);
@@ -240,6 +245,10 @@ public static partial class DemoSeeder
                     $"SELECT setval(pg_get_serial_sequence('\"{table}\"', 'Id'), COALESCE((SELECT MAX(\"Id\") FROM \"{table}\"), 0) + 1, false)", ct);
         }
         await tx.CommitAsync(ct);
+        db.ChangeTracker.Clear();
+
+        // Fake club accounts (random secrets made now) and the leases of the PCs that play a game that needs one
+        await DemoAccounts.SeedAsync(db, vault ?? Cms.Server.Accounts.GameAccountVault.Ephemeral(), now, zone, ct);
         db.ChangeTracker.Clear();
 
         // An event in two days, through the real service (entry fees in the ledger, audit rows), then the reservations
