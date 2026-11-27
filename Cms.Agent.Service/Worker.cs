@@ -754,13 +754,16 @@ public partial class Worker : BackgroundService
 
         using var req = new HttpRequestMessage(HttpMethod.Post, "api/devices/heartbeat");
         req.Headers.Add("X-Device-Key", _deviceKey);
+        var ip = GetLocalIpAddress();
         var payload = new DeviceHeartbeatRequest
         {
             CpuPercent = GetCpuPercent(),
             MemPercent = GetMemPercent(),
             ActiveUser = Environment.UserName,
-            Ip = GetLocalIpAddress(),
-            Uptime = TimeSpan.FromMilliseconds(Environment.TickCount64)
+            Ip = ip,
+            Uptime = TimeSpan.FromMilliseconds(Environment.TickCount64),
+            // For Wake-on-LAN: the card that reaches the server
+            Mac = NetworkIdentity.PickMac(NetworkIdentity.Current(), ip)
         };
         req.Content = JsonContent.Create(payload);
         using var resp = await http.SendAsync(req, ct);
@@ -917,6 +920,9 @@ public partial class Worker : BackgroundService
                     case CommandTypes.Restart:
                         ExecuteRestart();
                         break;
+                    case CommandTypes.Shutdown:
+                        ExecuteShutdown();
+                        break;
                     case CommandTypes.Lock:
                         SetManualLock(true);
                         break;
@@ -1029,6 +1035,17 @@ public partial class Worker : BackgroundService
         _logger.LogInformation("Restart scheduled in 5 seconds");
     }
 
+    private void ExecuteShutdown()
+    {
+        var psi = new ProcessStartInfo("shutdown", "/s /t 5")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        Process.Start(psi);
+        _logger.LogInformation("Shutdown scheduled in 5 seconds (Wake-on-LAN starts the PC again)");
+    }
+
     private void ExecuteLogoff()
     {
         var psi = new ProcessStartInfo("shutdown", "/l")
@@ -1105,5 +1122,6 @@ public partial class Worker : BackgroundService
         public string? ActiveUser { get; set; }
         public string Ip { get; set; } = string.Empty;
         public TimeSpan Uptime { get; set; }
+        public string? Mac { get; set; }
     }
 }
