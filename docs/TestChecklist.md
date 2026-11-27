@@ -80,7 +80,7 @@ that `C:\ProgramData\ClubAgent\staff-pin.json` exists. Lock the VM via admin UI,
 - [ ] A masked PIN prompt appears; the lock screen stays visible behind it
 - [ ] A wrong PIN is refused; after 3 wrong PINs the prompt waits 30 s
 - [ ] The correct PIN drops the overlay
-- [ ] A new lock from the admin UI locks the VM again
+- [ ] A new lock from the admin UI locks the VM again, also when the PC had no session (see Test 25.2)
 
 ### Test 4: Session Start & Countdown
 From admin UI, click "Start Session" on the device:
@@ -420,8 +420,119 @@ px, below 512 KB); a GIF file; screens of 1366 × 768 and 1920 × 1080 if the cl
 - [ ] Stop the server, restart the PC: the lock screen shows the last theme and logo
 - [ ] UA / EN on the lock screen: the texts stay in one language in every theme
 
+### Test 25: Fixes of the Windows Test of 2026-11-27 (v0.9.1)
+Bench: the server VM (service ClubServer) and one club PC in kiosk mode, both updated to v0.9.1. Use an administrator
+PowerShell on the club PC (Ctrl+Alt+Del > Switch user > `ClubAdmin`, or the guest agent as SYSTEM). The agent log is
+`C:\ProgramData\ClubAgent\logs\agent.log`. Never print a token, a key, a PIN or a password into a log or a screenshot.
+
+**25.1 The agent does not stop when the server does not answer (defect 1)**
+1. On the server: `Stop-Service ClubServer`. Restart the club PC and wait 3 minutes.
+- [ ] `Get-Service ClubAgent` shows `Running`; the lock screen shows the locked screen, not "АГЕНТ НЕ ВІДПОВІДАЄ".
+- [ ] agent.log has "Registration: the server did not answer in time" or "Registration failed (server unreachable?)",
+      with a delay that grows to 60 s; no line stops the agent.
+2. On the server: `Start-Service ClubServer`.
+- [ ] Within about 70 s the PC is online in the admin UI; agent.log has "Registered device".
+- [ ] `sc.exe qfailure ClubAgent` shows RESET_PERIOD 86400 and RESTART 5000, 5000, 30000; `sc.exe qfailureflag ClubAgent`
+      shows TRUE. On the server the same for `ClubServer`.
+3. `Stop-Process -Name Cms.Agent.Service -Force`.
+- [ ] Within 10 s `Get-Service ClubAgent` shows `Running` again (restart action).
+
+**25.2 A lock from the admin UI ends a staff PIN unlock (defect 2)**
+1. The PC is locked and has no session. Press Ctrl+Shift+U and enter the staff PIN.
+- [ ] The PC is unlocked. Within 10 s the admin UI (PC map) shows "🔓 PIN" (title "Розблоковано PIN персоналу на екрані ПК").
+2. Admin UI: Lock (or `POST /api/devices/{id}/commands {"type":"lock"}`).
+- [ ] Within 5 s the screen shows "[ ЗАБЛОКОВАНО ]"; `state.json` has a `lockGeneration` one higher; agent.log has
+      "Locked by the server (lock N; ...)"; the admin UI shows 🔒.
+3. Repeat steps 1 and 2 once more.
+- [ ] The second lock also locks the screen.
+
+**25.3 A club account on a standard install (defect 3)**
+1. Check that the agent is LocalService: `(Get-CimInstance Win32_Service -Filter "Name='ClubAgent'").StartName` gives
+   `NT AUTHORITY\LocalService`. Run Test 23.
+- [ ] The tile logs in with the club account; no "pipe_client_untrusted" and no raw code on the screen.
+- [ ] The copy of `Cms.Launcher.exe` on the Desktop is refused: agent.log has "refused: OtherProgram"; the screen
+      says "Клубний акаунт видається лише встановленому екрану блокування цього ПК".
+- [ ] agent.log has no "RevertToSelf" line, and `Get-Service ClubAgent` stays `Running`.
+
+**25.4 The update of a kiosk PC (defect 4)**
+1. The PC runs v0.9.0 in kiosk mode; `ClubUser` is signed in; no session runs. Extract the v0.9.1 zips into a new
+   folder and run as SYSTEM or Administrator: `Install.cmd -ServerUrl "http://<server>:5081" -EnrollmentToken "<token>" -KioskMode`.
+- [ ] Exit code 0. The last lines say "RESULT: OK - the club PC software is updated", the agent version 0.9.1.0 and
+      "ClubUser was signed out; the automatic sign-in starts the new lock screen".
+- [ ] `ClubUser` signs in again by itself; the new lock screen shows "[ ЗАБЛОКОВАНО ]". `C:\ClubAgent.new`,
+      `C:\ClubAgent.old`, `C:\ClubLauncher.new` and `C:\ClubLauncher.old` do not exist.
+- [ ] `C:\ClubAgent\appsettings.json` keeps `Teardown` and `AccountPool:Platforms`; `AccountPool:LauncherPath` is
+      `C:\ClubLauncher\Cms.Launcher.exe`.
+2. Failure test. In an administrator PowerShell keep the lock screen file open for reading only:
+   `$f = [IO.File]::Open('C:\ClubLauncher\Cms.Launcher.exe', 'Open', 'Read', 'Read')`. Run the same `Install.cmd` in a
+   second window.
+- [ ] Exit code 1 and "UPDATE FAILED: Could not copy the lock screen files ... The old version is restored and runs
+      again", then "RESULT: FAILED".
+- [ ] `Get-Service ClubAgent` is `Running`; `(Get-Item C:\ClubAgent\Cms.Agent.Service.exe).VersionInfo.FileVersion` is
+      the old version; `ClubUser` signed in again with the old lock screen. Then `$f.Close()` and run the update again: OK.
+
+**25.5 A killed lock screen comes back (defect 5)**
+1. The PC is locked. In the admin session: `Get-Process Cms.Launcher | Format-Table Id, SessionId, MainWindowHandle, StartTime`.
+- [ ] Two processes run in the session of `ClubUser`: the watchdog (MainWindowHandle 0) and the lock screen.
+2. `Stop-Process -Id <id of the lock screen> -Force`, then switch back to `ClubUser`.
+- [ ] The lock screen is back within 2 s (a new StartTime) and shows the locked screen.
+3. `Stop-Process -Id <id of the watchdog> -Force`.
+- [ ] Within 5 s a new watchdog process runs.
+4. `Stop-Process -Name Cms.Launcher -Force` (both at once).
+- [ ] Within 60 s both are back (scheduled task `ClubLauncherWatchdog`; `Get-ScheduledTask ClubLauncherWatchdog` exists).
+5. `Disable-ScheduledTask ClubLauncherWatchdog`, then `Stop-Process -Name Cms.Launcher -Force`, wait 30 s.
+- [ ] agent.log has the warning "The lock screen does not answer ... while this PC must be locked"; the admin UI shows
+      ⚠️ on the PC ("Екран блокування не відповідає: перевірте ПК").
+6. `Enable-ScheduledTask ClubLauncherWatchdog`.
+- [ ] Within 60 s the lock screen is back; agent.log has "The lock screen answers again"; the ⚠️ is gone.
+
+**25.6 The agent log (defect 6)**
+- [ ] `C:\ProgramData\ClubAgent\logs\agent.log` exists; `icacls C:\ProgramData\ClubAgent\logs` lists only SYSTEM,
+      Administrators and LOCAL SERVICE.
+- [ ] It has "ClubAgent 0.9.1.0 started", "Club accounts: N platform(s) can log in", after a logo change "Club logo
+      Downloaded"; it has no "Sending HTTP request" lines.
+- [ ] `Get-EventLog -LogName Application -Source Cms.Agent.Service -Newest 5` works; the Application log has no new
+      "The source Cms.Agent.Service was not found".
+- [ ] `Select-String -Path C:\ProgramData\ClubAgent\logs\*.log -Pattern '<token>','<staff PIN>','<account secret>'`
+      finds nothing (type the values only into this command; do not keep the command history).
+
+**25.7 The enrollment token does not stay (defect 7)**
+- [ ] After the update of 25.4 the installer said "This PC is registered already: the enrollment token is not stored",
+      and `Test-Path C:\ProgramData\ClubAgent\private\enrollment-token.txt` is `False`.
+- [ ] A new install: the file exists only until the PC is online; agent.log has "Deleted the enrollment token file".
+
+**25.8 No window above the locked screen (defect 8)**
+1. Start a session; start the catalog entry of `calc.exe` (the "Open with" dialog opens). Pause the session in the admin UI.
+- [ ] Within 2 s the dialog is gone from the screen; the locked screen is on top and takes the clicks.
+- [ ] Ctrl+Shift+U opens the staff PIN dialog above the lock screen; it takes the input; the PIN works.
+
+**25.9 One language, texts and layout (defect 9)**
+- [ ] End the session on the PC: the question is the own dialog of the lock screen in the club theme with
+      "[ ТАК ]" / "[ НІ ]" (English: "[ YES ]" / "[ NO ]"); Esc is "No". A wrong staff PIN shows the own dialog too.
+- [ ] A catalog entry with a missing program says "Не вдалося запустити «…»: програму не знайдено на цьому ПК", not the
+      Windows text of the error. No screen shows a code such as `pipe_client_untrusted` or "Помилка сервера (500)".
+- [ ] Bar panel: "+" and "−" show the signs. With "[ СКАСУВАТИ ЗАМОВЛЕННЯ ]" visible, "[ ЗАКРИТИ ]" is fully visible.
+      "+" at the stock limit says "Більше цього товару в одному замовленні не можна"; "+" above the amount limit says
+      "Не більше 500.00 ₴ за одне замовлення".
+- [ ] Set the display to 1024 × 768, then 1280 × 800. On the locked screen with a reservation or event line and a
+      two-line login error the UA / EN button is in the top right corner and the login button is visible. In a
+      session with less than 10 minutes the warning line is below the top bar and does not cover "> ЗАЛИШИЛОСЬ ЧАСУ".
+- [ ] Start Notepad from the grid; the admin UI shows "Notepad". Log off from the admin UI: within 10 s the admin UI
+      shows no current game; the session goes on.
+- [ ] After the update from 0.9.0, `C:\ProgramData\ClubAgent\client-settings.json` has `"theme"` within 10 s.
+
+**25.10 Discovery on a server with two network cards (known issue)**
+1. Give the server VM a second network card with the default route on it. Install a club PC without `-ServerUrl`.
+- [ ] The server log says "Sent discovery response: http://<address on the club LAN>:5081"; agent.log says "Using
+      discovered server: http://<address on the club LAN>:5081".
+
+**25.11 The lock state after a start (known issue)**
+- [ ] Restart `ClubServer`: within 10 s the admin UI shows 🔒 for every locked PC that is online (not empty).
+- [ ] Restart a club PC that has no session: within 10 s after it is online, the admin UI shows 🔒.
+
 ## Known Issues / Debug
-- If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
+- If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates and
+  `C:\ProgramData\ClubAgent\logs\agent.log`
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`
 - If countdown doesn't show: check `state.json` has `"remainingSeconds"` > 0
 - If keys not blocked: ensure launcher has focus or is topmost

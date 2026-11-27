@@ -145,6 +145,8 @@ Notes:
 
 - Port 5081 serves the admin UI and proxies `/api` to the server container, so the MikroTik rules above stay the same (use the Docker host IP as `10.3.3.100`).
 - UDP discovery does not work from the container network. Always install clients with `-ServerUrl`.
+- On a Windows server with two network cards, discovery answers with the address of the card that the request
+  came in on (set `Discovery:ServerUrl` to force one address).
 - On Windows with Docker Desktop, allow TCP 5081 in Windows Firewall.
 
 ## First Start: Owner, Staff, Staff PIN
@@ -198,8 +200,9 @@ launcher zips extracted into one folder):
 ClubClientSetup.exe -ServerUrl "http://10.3.3.1:5081" -EnrollmentToken "<token>" -KioskMode
 ```
 
-- With the enrollment token the PC is approved at once. The agent deletes the token after the first
-  registration. The token is sent only to the explicit `-ServerUrl`, never to a server found by discovery.
+- With the enrollment token the PC is approved at once. The agent deletes the token file after its first
+  successful registration or heartbeat. On a PC that is registered already (an update) the installer does not
+  store the token. The token is sent only to the explicit `-ServerUrl`, never to a server found by discovery.
 - Without the token the PC appears as "pending" in the admin UI (Devices). Approve it there (Owner,
   Manager or Tech). Reject unknown PCs.
 - A reinstalled PC with the same name keeps its record (zone, history) when it registers with the token;
@@ -208,6 +211,12 @@ ClubClientSetup.exe -ServerUrl "http://10.3.3.1:5081" -EnrollmentToken "<token>"
   A staff unlock of a PC without a session ends when the agent or the PC restarts.
 - The installer works as Administrator and as SYSTEM (RMM tools, Intune, a VM guest agent). It asks no
   question when it runs without a console.
+- The agent never stops because the server is off, the network is down or a request times out: it tries
+  again until the server answers. Windows also restarts the service after a failure (restart actions 5 s, 5 s,
+  30 s; `sc.exe qfailure ClubAgent`). The server service `ClubServer` has the same restart actions.
+- The agent log is `C:\ProgramData\ClubAgent\logs\agent.log` (at most 4 files of 1 MB; Administrators only). It has
+  no tokens, keys, PINs, passwords or account secrets. Warnings and errors also go to the Application event log
+  (source `Cms.Agent.Service`, registered by the installer).
 
 Check:
 
@@ -228,6 +237,10 @@ state.json is created after the agent starts
 staff-pin.json exists after the staff PIN is set (True)
 private: only SYSTEM, Administrators and LOCAL SERVICE have access
 ```
+
+More checks: `sc.exe qfailure ClubAgent` lists RESTART actions; `icacls C:\ProgramData\ClubAgent\logs` shows only
+SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\logs\agent.log -Tail 20` shows
+"ClubAgent ... started"; `C:\ProgramData\ClubAgent\private\enrollment-token.txt` is gone after the first heartbeat.
 
 ### Kiosk mode (`-KioskMode`)
 
@@ -252,8 +265,15 @@ private: only SYSTEM, Administrators and LOCAL SERVICE have access
 
   Without `-AdminPassword` and without a console (SYSTEM), the installer creates no `ClubAdmin` and prints a
   warning. Then create a local administrator for the staff yourself.
+- The shell of `ClubUser` is `Cms.Launcher.exe --watchdog`: a process without a window that starts the lock
+  screen and starts it again within about a second when it ends (a player killed it, or it failed). The lock
+  screen in turn starts a new watchdog when the watchdog is gone. The scheduled task `ClubLauncherWatchdog` of
+  `ClubUser` (at sign-in and every minute) starts the watchdog when both were ended. The agent logs a warning when
+  the lock screen does not answer while the PC must be locked, and the admin UI shows ⚠️ on the PC.
+- While the PC is locked, the lock screen stays on top: every second it takes the foreground back and pushes down
+  the top-most windows of other programs (for example the Windows "Open with" dialog).
 - `uninstall-kiosk.ps1` removes the kiosk shell, the policies of `ClubUser`, the automatic sign-in and its LSA
-  secret.
+  secret, and the scheduled task `ClubLauncherWatchdog`.
 
 ## Session teardown
 
