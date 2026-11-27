@@ -3,14 +3,24 @@ using System.Runtime.InteropServices;
 
 namespace Cms.Launcher;
 
+/// <summary>
+/// The keyboard hook of the locked screen (on only while locked): it blocks the Windows key, Alt+Tab, Ctrl+Esc and Alt+F4,
+/// and it turns Ctrl+Shift+U into the staff PIN prompt whatever window has the keyboard (Cms.Client.StaffChord; Windows
+/// test 2026-11-27 night, defects 2 and 3). The key state comes from GetAsyncKeyState: GetKeyState knows only the keys
+/// that this thread read, so it missed Ctrl and Shift while another window had the keyboard.
+/// </summary>
 internal static class KeyboardBlocker
 {
     private static IntPtr _hookId = IntPtr.Zero;
     private static LowLevelKeyboardProc? _proc;
     private static bool _enabled;
+    private static Action? _onStaffChord;
+    private static readonly Cms.Client.StaffChord Chord = new();
 
-    public static void Enable()
+    /// <summary>onStaffChord: called in the hook on Ctrl+Shift+U; it must only queue the prompt (a hook call must return at once).</summary>
+    public static void Enable(Action onStaffChord)
     {
+        _onStaffChord = onStaffChord;
         if (_enabled) return;
         _proc = HookCallback;
         _hookId = SetHook(_proc);
@@ -40,10 +50,18 @@ internal static class KeyboardBlocker
         if (nCode >= 0)
         {
             int msg = wParam.ToInt32();
-            if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
+            var down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+            if (down || msg == WM_KEYUP || msg == WM_SYSKEYUP)
             {
                 var kb = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-                if (ShouldBlock(kb))
+                // Ctrl+Shift+U: the staff PIN prompt, queued on the window thread; the key does not reach any window
+                var (fire, swallow) = Chord.OnKey(kb.vkCode, down, IsKeyDown(VK_CONTROL), IsKeyDown(VK_SHIFT), IsKeyDown(VK_MENU),
+                    IsKeyDown(VK_LWIN) || IsKeyDown(VK_RWIN));
+                if (fire)
+                {
+                    try { _onStaffChord?.Invoke(); } catch { /* the hook must return */ }
+                }
+                if (swallow || (down && ShouldBlock(kb)))
                 {
                     return (IntPtr)1; // swallow
                 }
@@ -54,11 +72,6 @@ internal static class KeyboardBlocker
 
     private static bool ShouldBlock(KBDLLHOOKSTRUCT kb)
     {
-        // ALWAYS allow Ctrl+Shift+U (staff unlock escape)
-        if (kb.vkCode == 0x55 /* VK_U */ &&
-            (IsKeyDown(VK_LCONTROL) || IsKeyDown(VK_RCONTROL)) &&
-            (IsKeyDown(0xA0) /* VK_LSHIFT */ || IsKeyDown(0xA1) /* VK_RSHIFT */))
-            return false;
 
         // Windows keys
         if (kb.vkCode == VK_LWIN || kb.vkCode == VK_RWIN) return true;
@@ -75,15 +88,20 @@ internal static class KeyboardBlocker
         return false;
     }
 
+    /// <summary>The key is held now (GetAsyncKeyState: the real state, also while another window has the keyboard).</summary>
     private static bool IsKeyDown(int vk)
     {
-        short s = GetKeyState(vk);
+        short s = GetAsyncKeyState(vk);
         return (s & 0x8000) != 0;
     }
 
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100;
+    private const int WM_KEYUP = 0x0101;
     private const int WM_SYSKEYDOWN = 0x0104;
+    private const int WM_SYSKEYUP = 0x0105;
+    private const int VK_SHIFT = 0x10;
+    private const int VK_CONTROL = 0x11;
 
     private const int VK_LWIN = 0x5B;
     private const int VK_RWIN = 0x5C;
@@ -117,7 +135,7 @@ internal static class KeyboardBlocker
     private static extern IntPtr GetModuleHandle(string lpModuleName);
 
     [DllImport("user32.dll")]
-    private static extern short GetKeyState(int nVirtKey);
+    private static extern short GetAsyncKeyState(int nVirtKey);
 }
 
 

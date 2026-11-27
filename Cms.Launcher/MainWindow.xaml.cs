@@ -93,6 +93,8 @@ public partial class MainWindow : Window
     }
 
     // ──── KEYBOARD SHORTCUTS ────
+    // While the PC is locked, the keyboard hook (KeyboardBlocker) starts the PIN prompt on Ctrl+Shift+U, whatever window has
+    // the keyboard; this handler is for the unlocked screen, where the hook is off.
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.U &&
@@ -112,25 +114,24 @@ public partial class MainWindow : Window
     /// </summary>
     private async void PromptStaffUnlock()
     {
-        if (_pinPromptOpen) return;
-
-        var wait = _pinLimiter.WaitTime(DateTimeOffset.UtcNow);
-        if (wait is { } w)
-        {
-            ClubDialog.Show(this, _texts, _texts.UnlockTitle, LauncherTexts.Format(_texts.PinWait, Math.Ceiling(w.TotalSeconds)), warning: true);
-            return;
-        }
-
-        var hash = ReadStaffPinHash();
-        if (hash == null)
-        {
-            ClubDialog.Show(this, _texts, _texts.UnlockTitle, _texts.PinNotSet);
-            return;
-        }
-
+        if (_pinPromptOpen) return; // one prompt (or its message) at a time, also when Ctrl+Shift+U comes again
         _pinPromptOpen = true;
         try
         {
+            var wait = _pinLimiter.WaitTime(DateTimeOffset.UtcNow);
+            if (wait is { } w)
+            {
+                ClubDialog.Show(this, _texts, _texts.UnlockTitle, LauncherTexts.Format(_texts.PinWait, Math.Ceiling(w.TotalSeconds)), warning: true);
+                return;
+            }
+
+            var hash = ReadStaffPinHash();
+            if (hash == null)
+            {
+                ClubDialog.Show(this, _texts, _texts.UnlockTitle, _texts.PinNotSet);
+                return;
+            }
+
             var dialog = new StaffPinDialog(this, _texts);
             if (dialog.ShowDialog() != true || string.IsNullOrEmpty(dialog.Pin)) return;
 
@@ -586,7 +587,8 @@ public partial class MainWindow : Window
         if (_lockOverlay != null) _lockOverlay.Visibility = Visibility.Visible;
         SessionPanel.Visibility = Visibility.Collapsed; // nothing behind the lock screen takes keyboard focus
         this.Topmost = true;
-        KeyboardBlocker.Enable();
+        // Ctrl+Shift+U from the hook: never inside the hook call (a modal dialog there would stop the hook), always queued
+        KeyboardBlocker.Enable(() => Dispatcher.BeginInvoke(new Action(PromptStaffUnlock)));
     }
 
     private void SetUnlocked()
