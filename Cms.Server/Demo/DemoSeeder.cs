@@ -17,9 +17,12 @@ public sealed record DemoSeedResult(IReadOnlyList<SimulatedPc> Pcs, IReadOnlyLis
 /// night prices, 3 h and 5 h packs, a morning pack and a night pack per zone, cashback on top-ups,
 /// players whose balances and bonuses come from their ledger history (top-ups, cashback, sessions,
 /// packages, a refund, a correction), about a week of sessions and live sessions (packages, a paused
-/// session, an open-ended one). All data is fictional. Nothing here is used outside DEMO_MODE.
+/// session, an open-ended one). Bar and desk (DemoSeeder.Bar.cs): a bar catalog with stock, back-to-back
+/// 12 h shifts (the current one open, yesterday's day shift closed with a small variance), receipts,
+/// a refund, a cash payout, deliveries and a stock correction, a player with debt, and an audit log
+/// (hash chain) of the notable actions. All data is fictional. Nothing here is used outside DEMO_MODE.
 /// </summary>
-public static class DemoSeeder
+public static partial class DemoSeeder
 {
     /// <summary>AgentVersion of simulated PCs; also marks a database as a demo database.</summary>
     public const string AgentVersion = "demo-sim";
@@ -91,6 +94,8 @@ public static class DemoSeeder
         if (await db.Devices.AnyAsync(d => d.AgentVersion == AgentVersion, ct)) return true;
         return !await db.Devices.AnyAsync(ct)
                && !await db.Users.AnyAsync(ct)
+               && !await db.Products.AnyAsync(ct)
+               && !await db.Shifts.AnyAsync(ct)
                && !await db.Zones.AnyAsync(ct)
                && !await db.Tariffs.AnyAsync(ct)
                && !await db.Packages.AnyAsync(ct)
@@ -129,22 +134,55 @@ public static class DemoSeeder
         var result = seed.Run();
         db.SkipShiftCheck = true; // the seeded history writes its rows directly
         await db.SaveChangesAsync(ct);
-        // Ledger rows one by one in date order, so that their ids follow the dates
+        // Shifts, receipts, the stock log and the ledger one row at a time in date order, so that ids follow
+        // the dates. The change tracker is cleared after each row: a growing tracker makes every save slower.
+        db.ChangeTracker.Clear();
+        async Task SaveOneAsync()
+        {
+            await db.SaveChangesAsync(ct);
+            db.ChangeTracker.Clear();
+        }
+        foreach (var shift in seed.Shifts)
+        {
+            db.Shifts.Add(shift);
+            await SaveOneAsync();
+        }
+        foreach (var sale in seed.Sales.OrderBy(x => x.CreatedUtc))
+        {
+            sale.ShiftId = seed.ShiftAt(sale.CreatedUtc)?.Id;
+            if (seed.RefundOf.TryGetValue(sale, out var original)) sale.RefundOfSaleId = original.Id;
+            db.Sales.Add(sale);
+            await SaveOneAsync();
+        }
+        foreach (var (sale, items) in seed.SaleItems)
+        {
+            foreach (var item in items) item.SaleId = sale.Id;
+            db.SaleItems.AddRange(items);
+        }
+        await SaveOneAsync();
+        foreach (var movement in seed.Movements.OrderBy(m => m.CreatedUtc))
+        {
+            movement.ShiftId = seed.ShiftAt(movement.CreatedUtc)?.Id;
+            if (seed.MovementSale.TryGetValue(movement, out var sale)) movement.SaleId = sale.Id;
+            db.StockMovements.Add(movement);
+            await SaveOneAsync();
+        }
         foreach (var row in seed.LedgerRows.OrderBy(r => r.CreatedUtc))
         {
+            row.ShiftId = seed.ShiftAt(row.CreatedUtc)?.Id;
+            if (seed.RowSale.TryGetValue(row, out var sale)) row.SaleId = sale.Id;
             db.Ledger.Add(row);
-            await db.SaveChangesAsync(ct);
+            await SaveOneAsync();
         }
         await BonusRules.SaveAsync(db, BonusTiers, "demo", now, ct);
         db.ClubSettings.Add(new ClubSettingEntity { Key = ClubSettingKeys.LedgerBackfilled, Value = "demo", UpdatedUtc = now, UpdatedBy = "demo" });
         db.ClubSettings.Add(new ClubSettingEntity { Key = ClubSettingKeys.AuditChainSealed, Value = "demo", UpdatedUtc = now, UpdatedBy = "demo" });
-        // The shift of the demo cashier is open, so walk-in guests can pay at the desk
-        var cashier = await db.StaffUsers.AsNoTracking().FirstAsync(s => s.Role == StaffRoles.Cashier, ct);
-        db.Shifts.Add(new ShiftEntity
-        {
-            Status = ShiftStatuses.Open, OpenedUtc = now.AddHours(-3), OpenedById = cashier.Id, OpenedByUsername = cashier.Username, OpeningFloat = 1000m
-        });
         await db.SaveChangesAsync(ct);
+        foreach (var entry in seed.AuditEntries().OrderBy(e => e.CreatedUtc))
+        {
+            await AuditChain.AppendAsync(db, entry, ct);
+            db.ChangeTracker.Clear();
+        }
         db.SkipShiftCheck = false;
         await tx.CommitAsync(ct);
         db.ChangeTracker.Clear();
@@ -154,7 +192,7 @@ public static class DemoSeeder
     private static T Pick<T>(Random rng, params T[] items) => items[rng.Next(items.Length)];
 
     /// <summary>One seeding run (keeps the generated data together).</summary>
-    private sealed class Seeding
+    private sealed partial class Seeding
     {
         private readonly CmsDbContext _db;
         private readonly DateTimeOffset _now;
@@ -162,6 +200,7 @@ public static class DemoSeeder
         private readonly TimeZoneInfo _zone;
         private readonly List<(DeviceEntity Device, TariffEntity Tariff, TariffPricing Pricing, List<PackageEntity> Packs)> _pcs = new();
         private readonly Dictionary<Guid, (decimal Balance, decimal Bonus)> _wallets = new();
+        private readonly Dictionary<Guid, decimal> _debts = new();
         private readonly List<(DateTimeOffset At, int Order, Action Apply)> _playerEvents = new();
         private List<UserEntity> _users = new();
 
@@ -182,7 +221,9 @@ public static class DemoSeeder
             SeedPlayers();
             SeedHistory();
             var paused = SeedLiveSessions(pcs);
+            SeedBarAndDesk();
             ApplyPlayerEvents();
+            PlanShifts();
             return new DemoSeedResult(pcs, paused);
         }
 
@@ -272,11 +313,13 @@ public static class DemoSeeder
             var staffHash = Passwords.Hash(DemoOptions.StaffPassword);
             foreach (var (username, displayName, role) in DemoOptions.StaffAccounts)
             {
-                _db.StaffUsers.Add(new StaffUserEntity
+                var staff = new StaffUserEntity
                 {
                     Id = Guid.NewGuid(), Username = username, DisplayName = displayName,
                     PasswordHash = staffHash, Role = role, IsActive = true, CreatedUtc = _now
-                });
+                };
+                _db.StaffUsers.Add(staff);
+                _staff[role] = staff;
             }
         }
 
@@ -516,20 +559,26 @@ public static class DemoSeeder
             Post(user, at, LedgerTypes.Adjustment, PaymentMethods.None, Math.Abs(amount), amount, 0m, 0m,
                 $"Коригування балансу {amount:+0.##;-0.##} ₴: {reason}", reason: reason, actor: "demo-manager");
 
-        private void Post(UserEntity user, DateTimeOffset at, string type, string method, decimal amount, decimal balanceDelta,
-            decimal bonusDelta, decimal desk, string description, SessionEntity? session = null, string? reason = null, string? actor = "demo-cashier")
+        private LedgerEntryEntity Post(UserEntity user, DateTimeOffset at, string type, string method, decimal amount, decimal balanceDelta,
+            decimal bonusDelta, decimal desk, string description, SessionEntity? session = null, string? reason = null, string? actor = "demo-cashier",
+            decimal debtDelta = 0m)
         {
             var (balance, bonus) = _wallets[user.Id];
             balance += balanceDelta;
             bonus += bonusDelta;
             _wallets[user.Id] = (balance, bonus);
-            LedgerRows.Add(new LedgerEntryEntity
+            var debt = (_debts.TryGetValue(user.Id, out var d) ? d : 0m) + debtDelta;
+            _debts[user.Id] = debt;
+            var row = new LedgerEntryEntity
             {
                 CreatedUtc = at, UserId = user.Id, Type = type, Method = method, Amount = amount,
                 BalanceDelta = balanceDelta, BonusDelta = bonusDelta, DeskAmount = desk, BalanceAfter = balance, BonusAfter = bonus,
+                DebtDelta = debtDelta, DebtAfter = debt,
                 SessionId = session?.Id, PackageId = session?.PackageId, DeviceId = session?.DeviceId,
                 Description = description, Reason = reason, ActorUsername = actor
-            });
+            };
+            LedgerRows.Add(row);
+            return row;
         }
 
         /// <summary>Applies the player events in date order; balances end at 50 ₴ or more.</summary>
@@ -543,6 +592,7 @@ public static class DemoSeeder
                 if (balance < 50m)
                     TopUp(user, Math.Ceiling((50m - balance) / 100m) * 100m + 100m, PaymentMethods.Card, _now.AddSeconds(-30)); // after all events
                 (user.Balance, user.BonusPoints) = _wallets[user.Id];
+                user.Debt = _debts.TryGetValue(user.Id, out var debt) ? debt : 0m;
             }
         }
     }

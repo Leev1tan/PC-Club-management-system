@@ -1,8 +1,11 @@
 using System.Text.Json;
+using Cms.Server.Auth;
 using Cms.Server.Billing;
 using Cms.Server.Controllers;
 using Cms.Server.Data;
+using Cms.Server.Pos;
 using Cms.Server.Repositories;
+using Cms.Server.Shifts;
 using Cms.Shared;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,8 +20,12 @@ namespace Cms.Server.Demo;
 ///  - "restart" takes the PC offline for about 30 s, then it comes back;
 ///  - an autopilot starts sessions so the club map keeps changing: walk-in guests pay in cash or by
 ///    card, sometimes a registered player pays from the balance, sometimes a package is bought;
-///  - now and then a session is paused for a few minutes and resumed.
-/// Sessions go through Billing/SessionService, so prices, ledger rows and commands follow the real rules.
+///  - now and then a session is paused for a few minutes and resumed;
+///  - the bar sells a drink or a snack every minute or so (cash, card or a player's balance), and a
+///    sold-out product gets a delivery; desk payments happen only while a shift is open, and when a
+///    visitor closes the shift the demo cashier opens a new one a few minutes later;
+///  - once in a while a PC reports an emergency staff PIN unlock (audit log).
+/// Sessions, sales and shifts go through the real services, so prices, ledger rows and commands follow the real rules.
 /// Not thread-safe: called from one background loop only.
 /// </summary>
 public sealed class DemoSimulator
@@ -39,12 +46,20 @@ public sealed class DemoSimulator
     private DateTimeOffset _nextAutopilotUtc;
     private DateTimeOffset _nextPauseUtc;
     private DateTimeOffset _nextPruneUtc;
+    // Bar, shifts and PIN unlocks use their own random numbers, so the session autopilot behaves as before
+    private readonly Random _pos;
+    private DateTimeOffset _nextBarUtc;
+    private DateTimeOffset _nextShiftCheckUtc;
+    private DateTimeOffset? _noShiftSinceUtc;
+    private DateTimeOffset _nextUnlockUtc;
+    private static readonly TimeSpan ReopenShiftAfter = TimeSpan.FromMinutes(3);
 
-    public DemoSimulator(ILogger<DemoSimulator> logger, DeviceRuntimeState runtime, Random? rng = null, ClubClock? clock = null)
+    public DemoSimulator(ILogger<DemoSimulator> logger, DeviceRuntimeState runtime, Random? rng = null, ClubClock? clock = null, Random? posRng = null)
     {
         _logger = logger;
         _runtime = runtime;
         _rng = rng ?? new Random();
+        _pos = posRng ?? new Random();
         _zone = clock?.Zone ?? ClubTimeZone.Default;
     }
 
@@ -73,6 +88,10 @@ public sealed class DemoSimulator
         _nextAutopilotUtc = now.AddSeconds(20);
         _nextPauseUtc = now.AddSeconds(_rng.Next(60, 120));
         _nextPruneUtc = now + HeartbeatPruneInterval;
+        _nextBarUtc = now.AddSeconds(_pos.Next(30, 60));
+        _nextShiftCheckUtc = now.AddSeconds(30);
+        _noShiftSinceUtc = null;
+        _nextUnlockUtc = now.AddMinutes(_pos.Next(40, 90));
     }
 
     public async Task TickAsync(CmsDbContext db, IDeviceRepository repo, DateTimeOffset now, CancellationToken ct = default)
@@ -92,6 +111,22 @@ public sealed class DemoSimulator
         {
             _nextPauseUtc = now.AddSeconds(_rng.Next(90, 180));
             await PauseOneSessionAsync(db, repo, now, ct);
+        }
+
+        if (now >= _nextShiftCheckUtc)
+        {
+            _nextShiftCheckUtc = now.AddSeconds(20);
+            await KeepAShiftOpenAsync(db, now, ct);
+        }
+        if (now >= _nextBarUtc)
+        {
+            _nextBarUtc = now.AddSeconds(_pos.Next(35, 95));
+            await SellAtTheBarAsync(db, now, ct);
+        }
+        if (now >= _nextUnlockUtc)
+        {
+            _nextUnlockUtc = now.AddMinutes(_pos.Next(60, 120));
+            await ReportEmergencyUnlockAsync(db, now, ct);
         }
 
         if (now >= _nextPruneUtc)
@@ -178,8 +213,13 @@ public sealed class DemoSimulator
         }
     }
 
-    private SessionService Sessions(CmsDbContext db, IDeviceRepository repo, DateTimeOffset now) =>
-        new(db, repo, new ClubClock(new FixedTimeProvider(now), _zone));
+    private SessionService Sessions(CmsDbContext db, IDeviceRepository repo, DateTimeOffset now, StaffActor? actor = null) =>
+        new(db, repo, new ClubClock(new FixedTimeProvider(now), _zone), actor: actor);
+
+    private ClubClock ClockAt(DateTimeOffset now) => new(new FixedTimeProvider(now), _zone);
+
+    /// <summary>The cashier on duty (opener of the open shift) takes the money at the desk.</summary>
+    private static StaffActor? OnDuty(ShiftEntity? shift) => shift == null ? null : new StaffActor(shift.OpenedById, shift.OpenedByUsername);
 
     /// <summary>
     /// When occupancy is low, someone takes a free PC: a guest paying 30 min - 3 h in cash or by card,
@@ -223,11 +263,15 @@ public sealed class DemoSimulator
             if (players.Count > 0) player = players[_rng.Next(players.Count)];
         }
         var desk = _rng.NextDouble() < 0.7 ? PaymentMethods.Cash : PaymentMethods.Card;
+        // Money at the desk needs an open shift (when the club requires it); players can still pay from the balance
+        var shift = await ShiftService.OpenShiftAsync(db, ct);
+        var deskOpen = shift != null || !db.RequireOpenShift;
+        if (!deskOpen && player == null) return;
 
-        var service = Sessions(db, repo, now);
+        var service = Sessions(db, repo, now, OnDuty(shift));
         var result = await service.StartAsync(new StartSessionRequest(device.Id, null, player?.Id, packageId.HasValue ? null : minutes,
             packageId, player != null ? PaymentMethods.Balance : desk));
-        if (!result.Ok && player != null)
+        if (!result.Ok && player != null && deskOpen)
         {
             db.ChangeTracker.Clear();
             result = await service.StartAsync(new StartSessionRequest(device.Id, null, null, packageId.HasValue ? null : minutes, packageId, desk));
@@ -269,6 +313,92 @@ public sealed class DemoSimulator
             db.ChangeTracker.Clear();
             if (result.Ok) _logger.LogInformation("Demo: session {Id} resumed", id);
         }
+    }
+
+    /// <summary>A visitor closed the shift: after a few minutes the demo cashier opens the next one.</summary>
+    private async Task KeepAShiftOpenAsync(CmsDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        if (await ShiftService.OpenShiftAsync(db, ct) != null)
+        {
+            _noShiftSinceUtc = null;
+            return;
+        }
+        _noShiftSinceUtc ??= now;
+        if (now - _noShiftSinceUtc.Value < ReopenShiftAfter) return;
+        var cashier = await db.StaffUsers.AsNoTracking().FirstOrDefaultAsync(s => s.Role == StaffRoles.Cashier && s.IsActive, ct);
+        if (cashier == null) return;
+        var result = await new ShiftService(db, ClockAt(now), actor: new StaffActor(cashier.Id, cashier.Username))
+            .OpenAsync(DemoSeeder.ShiftFloat, "Нова зміна (демо)");
+        db.ChangeTracker.Clear();
+        _noShiftSinceUtc = null;
+        if (result.Ok) _logger.LogInformation("Demo: {Cashier} opened shift #{Id}", cashier.Username, result.Value!.Id);
+    }
+
+    /// <summary>
+    /// A walk-in guest buys one or two things at the bar (cash or card), or a player pays from the
+    /// real balance; a sold-out product gets a delivery first.
+    /// </summary>
+    private async Task SellAtTheBarAsync(CmsDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var shift = await ShiftService.OpenShiftAsync(db, ct);
+        var deskOpen = shift != null || !db.RequireOpenShift;
+        var products = await db.Products.AsNoTracking().Where(p => p.IsActive).ToListAsync(ct);
+        var soldOut = products.Where(p => p.TrackStock && p.StockQuantity == 0).ToList();
+        if (soldOut.Count > 0)
+        {
+            var product = soldOut[_pos.Next(soldOut.Count)];
+            var manager = await db.StaffUsers.AsNoTracking().FirstOrDefaultAsync(s => s.Role == StaffRoles.Manager, ct);
+            await using (var tx = await db.Database.BeginTransactionAsync(ct))
+            {
+                await Stock.AddAsync(db, product.Id, DemoSeeder.DeliveryQuantity, ct);
+                await Stock.RecordAsync(db, product.Id, StockMovementTypes.Restock, DemoSeeder.DeliveryQuantity,
+                    manager == null ? null : new StaffActor(manager.Id, manager.Username), now,
+                    shiftId: shift?.Id, reason: "Поставка від дистриб'ютора", ct: ct);
+                await tx.CommitAsync(ct);
+            }
+            db.ChangeTracker.Clear();
+            _logger.LogInformation("Demo: delivery of {Product}", product.Name);
+            return;
+        }
+
+        var available = products.Where(p => !p.TrackStock || p.StockQuantity > 0).ToList();
+        if (available.Count == 0) return;
+        var lines = Enumerable.Range(0, _pos.Next(1, 3)).Select(_ => available[_pos.Next(available.Count)]).Distinct()
+            .Select(p => new SaleLine(p.Id, 1)).ToList();
+        UserEntity? player = null;
+        if (_pos.NextDouble() < 0.2)
+        {
+            var players = await db.Users.AsNoTracking().ToListAsync(ct);
+            if (players.Count > 0) player = players[_pos.Next(players.Count)];
+        }
+        if (player == null && !deskOpen) return;
+        var method = player != null ? PaymentMethods.Balance : _pos.NextDouble() < 0.6 ? PaymentMethods.Cash : PaymentMethods.Card;
+
+        var service = new SaleService(db, ClockAt(now), actor: OnDuty(shift));
+        var result = await service.SellAsync(lines, method, player?.Id);
+        db.ChangeTracker.Clear();
+        if (!result.Ok && player != null && deskOpen)
+        {
+            result = await service.SellAsync(lines, PaymentMethods.Cash, null); // the balance is too low: pays in cash
+            db.ChangeTracker.Clear();
+        }
+        if (result.Ok)
+            _logger.LogInformation("Demo: bar receipt #{Id}, {Total} ₴ ({Method})", result.Value!.Id, result.Value.Total, result.Value.Method);
+    }
+
+    /// <summary>Somebody on staff used the PIN on the lock screen of a PC; the agent reports it.</summary>
+    private async Task ReportEmergencyUnlockAsync(CmsDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var online = _pcs.Values.Where(p => p.IsUp(now)).ToList();
+        if (online.Count == 0) return;
+        var pc = online[_pos.Next(online.Count)];
+        var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == pc.Info.Id, ct);
+        if (device == null) return;
+        var request = new DeviceEventRequest(Guid.NewGuid(), LauncherEvent.StaffUnlock, now.AddMinutes(-_pos.Next(1, 10)),
+            _pos.NextDouble() < 0.5 ? nameof(LockReason.LockedByAgent) : nameof(LockReason.AgentSilent), "player");
+        await DeviceEvents.RecordAsync(db, new AuditLogger(db, new HttpContextAccessor()), device, request, now, ClockAt(now), ct);
+        db.ChangeTracker.Clear();
+        _logger.LogInformation("Demo: emergency PIN unlock reported by {Host}", device.Hostname);
     }
 
     private static string ReadMessageText(object? payload)

@@ -20,5 +20,9 @@ public sealed class TestDb : IDisposable
     public CmsDbContext NewContext() =>
         new(new DbContextOptionsBuilder<CmsDbContext>().UseSqlite(_connection).Options);
 
+    /// <summary>A context like the server's: cash and card rows need an open shift.</summary>
+    public CmsDbContext NewShiftContext() =>
+        new(new DbContextOptionsBuilder<CmsDbContext>().UseSqlite(_connection).Options, new ShiftOptions { RequireOpenShift = true });
+
     public void Dispose() => _connection.Dispose();
 }
