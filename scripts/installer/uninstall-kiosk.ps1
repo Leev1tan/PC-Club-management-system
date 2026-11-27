@@ -55,7 +55,16 @@ function Get-TrustedOwners([string[]]$Extra = @()) {
     try {
         foreach ($member in @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop)) { if ($member.SID) { $list.Add($member.SID.Value) } }
     } catch {
-        # Get-LocalGroupMember fails on a group with an orphaned member: then only the accounts above count
+        # Get-LocalGroupMember fails on a group with an orphaned member (a deleted domain account): read it with ADSI
+        try {
+            $name = (New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')).Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+            foreach ($member in @(([ADSI]"WinNT://./$name,group").psbase.Invoke('Members'))) {
+                $bytes = $member.GetType().InvokeMember('objectSid', 'GetProperty', $null, $member, $null)
+                if ($bytes) { $list.Add((New-Object Security.Principal.SecurityIdentifier($bytes, 0)).Value) }
+            }
+        } catch {
+            # then only the accounts above count
+        }
     }
     return ,$list.ToArray()
 }
@@ -101,8 +110,25 @@ function Remove-TreeNoFollow([string]$Path) {
     [IO.Directory]::Delete($Path, $false)
 }
 
+# The first account that may change the content of a folder (write, add, delete, change the permissions or the owner)
+# and is not trusted, or $null. Rules: the access rules of the folder; inherit-only rules do not apply to the folder.
+function Get-ForeignWriter($Rules, [string[]]$TrustedOwners) {
+    # WriteData, AppendData, WriteExtendedAttributes, DeleteSubdirectoriesAndFiles, WriteAttributes, Delete,
+    # ChangePermissions, TakeOwnership, GENERIC_ALL, GENERIC_WRITE
+    $write = 0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000
+    foreach ($rule in @($Rules)) {
+        if ("$($rule.AccessControlType)" -ne 'Allow') { continue }
+        if (("$($rule.PropagationFlags)" -split ',\s*') -contains 'InheritOnly') { continue }
+        if (([long]$rule.FileSystemRights -band $write) -eq 0) { continue }
+        $sid = "$($rule.IdentityReference)"
+        if ($TrustedOwners -notcontains $sid) { return $sid }
+    }
+    return $null
+}
+
 # Removes a folder (a staged or backed-up version, a leftover of an earlier version, a profile). Refused with a warning
-# when Get-FolderProblem finds a problem. True when the folder is gone.
+# when Get-FolderProblem finds a problem, or when an untrusted account may still change the folder (it could swap a
+# folder inside for a junction during the delete). True when the folder is gone.
 function Remove-FolderSafely([string]$Path, [string[]]$TrustedOwners) {
     $problem = Get-FolderProblem $Path $TrustedOwners
     if ($problem) {
@@ -110,6 +136,15 @@ function Remove-FolderSafely([string]$Path, [string[]]$TrustedOwners) {
         return $false
     }
     if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    try {
+        $writer = Get-ForeignWriter ((Get-Acl -LiteralPath $Path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) $TrustedOwners
+    } catch {
+        $writer = 'unknown (the permissions cannot be read)'
+    }
+    if ($writer) {
+        Write-Warning "Not removed: $Path (the account $writer may change it). Check it and remove it by hand."
+        return $false
+    }
     try {
         Remove-TreeNoFollow $Path
         return $true
@@ -137,7 +172,10 @@ function New-FolderSecurity([string[]]$Grants) {
 # existing one must be a plain folder of SYSTEM or an administrator (Get-FolderProblem). Throws otherwise.
 function Initialize-ProtectedFolder([string]$Path, [string[]]$Grants, [string[]]$TrustedOwners) {
     $problem = Get-FolderProblem $Path $TrustedOwners
-    if ($problem) { throw "$Path cannot be used: $problem. A player may have prepared it; check it and remove it by hand" }
+    if ($problem) {
+        throw ("$Path cannot be used: $problem. A player may have prepared it: check it and remove it by hand. If an " +
+            "administrator made it, make Administrators its owner: icacls `"$Path`" /setowner *S-1-5-32-544")
+    }
     if (-not (Test-Path -LiteralPath $Path)) {
         $security = New-FolderSecurity $Grants
         if ([IO.Directory].GetMethod('CreateDirectory', [Type[]]@([string], [System.Security.AccessControl.DirectorySecurity]))) {
