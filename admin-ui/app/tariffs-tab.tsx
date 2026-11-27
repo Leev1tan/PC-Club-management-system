@@ -1,4 +1,5 @@
 'use client';
+import { LoyaltySection } from './loyalty';
 import { useCallback, useEffect, useState } from 'react';
 import { Permissions, api, errorText, getJson, postJson } from './api';
 import { BillingSettings, BonusTier, Package, Tariff, TariffRule } from './billing';
@@ -151,6 +152,7 @@ export function TariffsTab({ can, zones, devices, tariffs, toast, onChanged, onA
 
       {/* Cashback */}
       <BonusSection settings={settings} canEdit={can.management} toast={toast} onSaved={loadSettings} />
+      <LoyaltySection canEdit={can.owner} toast={toast} />
 
       {editTariff && (
         <TariffEditor tariff={editTariff === 'new' ? null : editTariff} zones={zones} toast={toast}

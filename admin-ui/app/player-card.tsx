@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Permissions, errorText, getJson, postJson } from './api';
 import { BillingSettings, LedgerCheck, LedgerEntry, cashbackFor } from './billing';
 import { dateTime, fmt, ledgerTypeLabel, methodLabel, money, t } from './i18n';
+import { PlayerTier } from './loyalty';
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
 type Player = { id: string; username: string; displayName: string; balance: number; bonusPoints: number; createdUtc: string; debt?: number };
@@ -57,7 +58,7 @@ export function PlayerCard({ player, can, toast, initialForm, onClose, onChanged
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
-        <div className="modal-title">{fmt(t.player.cardTitle, { username: me.username })} · {me.displayName}</div>
+        <div className="modal-title">{fmt(t.player.cardTitle, { username: me.username })} · <span className="data">{me.displayName}</span></div>
 
         <div className="stats-grid" style={{ marginBottom: 12 }}>
           <div className="stat-card">
@@ -69,6 +70,7 @@ export function PlayerCard({ player, can, toast, initialForm, onClose, onChanged
             <div className="stat-card-value" style={{ color: 'var(--amber)' }}>{money(me.bonusPoints)} {t.currency}</div>
             <div className="stat-card-sub">{t.player.bonusHint}</div>
           </div>
+          <PlayerTier playerId={me.id} refresh={rows.length + (rows[0]?.id ?? 0)} />
           {(me.debt ?? 0) > 0 && (
             <div className="stat-card debt-card">
               <div className="stat-card-label">{t.player.debt}</div>

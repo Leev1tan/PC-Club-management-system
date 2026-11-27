@@ -32,7 +32,7 @@ export type Analytics = {
     withVariance: { id: number; closedUtc: string; closedBy: string | null; variance: number; note: string | null }[] };
   check: { ledgerRows: number; reconciled: boolean; shiftsInside: number; zReports: Sums; outsideShifts: Sums; shiftsAddUp: boolean };
   topGames?: GameStat[];
-  holds?: { depositsHeld: number; depositsReleased: number; depositsKept: number };
+  holds?: { depositsHeld: number; depositsReleased: number; depositsKept: number; eventFeesHeld?: number; eventFeesReleased?: number; eventFeesKept?: number };
 };
 type GameStat = { gameId: string; name: string; category: string; color: string; plays: number; hours: number; share: number | null };
 
@@ -404,6 +404,11 @@ export function AnalyticsTab() {
           {a.holds && (a.holds.depositsHeld > 0 || a.holds.depositsKept > 0) && (
             <div className="auth-sub" style={{ marginBottom: 8 }}>
               {fmt(t.analytics.deposits, { held: cash(a.holds.depositsHeld), released: cash(a.holds.depositsReleased), kept: cash(a.holds.depositsKept) })}
+            </div>
+          )}
+          {a.holds && ((a.holds.eventFeesHeld ?? 0) > 0 || (a.holds.eventFeesKept ?? 0) > 0) && (
+            <div className="auth-sub" style={{ marginBottom: 8 }}>
+              {fmt(t.analytics.eventFees, { held: cash(a.holds.eventFeesHeld), released: cash(a.holds.eventFeesReleased), kept: cash(a.holds.eventFeesKept) })}
             </div>
           )}
           <div className={a.check.reconciled && a.check.shiftsAddUp ? 'chain-ok' : 'auth-error'} role="status">

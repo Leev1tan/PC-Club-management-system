@@ -1925,3 +1925,7 @@ body::after {
   .event-columns { grid-template-columns: minmax(0, 1fr); }
   .bracket-round { min-width: 160px; }
 }
+
+/* ===== Loyalty tiers (phase 8) ===== */
+.loyalty-row { flex-wrap: wrap; }
+.loyalty-row .rule-times .form-input { max-width: 130px; }

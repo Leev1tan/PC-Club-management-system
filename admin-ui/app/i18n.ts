@@ -129,6 +129,16 @@ export const uk = {
     timeZone: 'Часовий пояс клубу: {zone}',
   },
 
+  loyalty: {
+    title: '🏅 Рівні лояльності',
+    hint: 'Рівень гравця залежить від реальних грошей, витрачених у клубі за останні {days} днів (час на ПК, пакети, бар, сплачений борг; не поповнення й не бонуси). Рівень дає бонус на поповнення й знижку на час на ПК (не на ціну подій).',
+    ownerOnly: 'Змінювати рівні може лише власник.', off: 'Рівні вимкнено',
+    period: 'Період, днів', name: 'Назва', minSpend: 'Від витрат, ₴', bonus: 'Бонус на поповнення, %', discount: 'Знижка на час, %', players: 'Гравців',
+    addTier: '+ Рівень', saved: 'Рівні лояльності збережено ✓',
+    tier: 'Рівень', noTier: 'без рівня', spent: 'Витрачено {amount} за {days} дн.', perks: 'бонус +{bonus}%, знижка {discount}%',
+    toNext: 'до наступного: ще {amount} —',
+  },
+
   session: {
     fromBalance: 'з балансу',
     fromBalanceHint: 'Гравець увійшов на ПК: час іде з балансу й закінчується, коли кошти вичерпано',
@@ -249,6 +259,9 @@ export const uk = {
     deposit_kept: 'Депозит броні утримано (неявка)',
     order_hold: 'Замовлення бару (утримано)',
     order_release: 'Замовлення бару: зняття утримання',
+    event_fee_hold: 'Внесок за участь у події (утримано)',
+    event_fee_release: 'Внесок за участь повернуто',
+    event_fee_kept: 'Внесок за участь залишено клубу',
   } as Record<string, string>,
 
   audit: {
@@ -421,6 +434,7 @@ export const uk = {
     other: 'Інші операції',
     orders: 'Замовлення бару з ПК (передоплата)', ordersHeld: 'Утримано з балансів', ordersReleased: 'Знято з утримання (видано або скасовано)',
     deposits: 'Депозити броні', depositsHeld: 'Утримано з балансів', depositsReleased: 'Повернуто на баланси (вхід, скасування)', depositsKept: 'Залишено клубу (неявка; у виручці за час)',
+    eventFees: 'Внески за участь у подіях', eventFeesHeld: 'Утримано з балансів', eventFeesReleased: 'Повернуто на баланси (зняття, скасування)', eventFeesKept: 'Залишено клубу (подія відбулася; у виручці за час)',
     count: 'шт.',
   },
 
@@ -603,7 +617,7 @@ export const uk = {
     add: '+ Новий гравець',
     empty: 'Немає гравців',
     emptyHint: 'Створіть гравця кнопкою «Новий гравець»',
-    col: { login: 'Логін', name: 'Ім\'я', balance: 'Баланс', bonus: 'Бонуси', created: 'Зареєстрований', actions: 'Дії' },
+    col: { login: 'Логін', name: 'Ім\'я', balance: 'Баланс', bonus: 'Бонуси', tier: 'Рівень', created: 'Зареєстрований', actions: 'Дії' },
     pin: 'Пароль / PIN',
     pinPrompt: 'Новий пароль або PIN для @{username} (мін. 4 символи):',
     pinChanged: 'Пароль гравця змінено ✓',
@@ -864,11 +878,13 @@ export const uk = {
     shiftLine: 'зміна #{id} · {time} · {who}',
     checkOk: 'Збігається з журналом операцій ({rows} рядків) і з Z-звітами змін, що повністю в періоді ({shifts}) ✓',
     deposits: 'Депозити броні: утримано {held}, повернуто на баланси {released}, залишено клубу за неявку {kept} (у виручці за час).',
+    eventFees: 'Внески за участь у подіях: утримано {held}, повернуто на баланси {released}, залишено клубу {kept} (у виручці за час).',
     checkBad: 'Суми НЕ збігаються з журналом операцій або Z-звітами — перевірте журнал',
     noData: 'Немає даних за період',
   },
 
   errors: {
+    bad_loyalty_settings: 'Перевірте рівні: період 7–365 днів, до 6 рівнів, назва 1–20 символів без повторів, різні суми витрат, відсотки 0–50.',
     event_not_found: 'Подію не знайдено',
     event_bad_name: 'Введіть назву: від 1 до 80 символів.',
     event_bad_time: 'Оберіть дату й час (за часом клубу) від зараз до 90 днів наперед.',
@@ -1148,6 +1164,16 @@ export const en: typeof uk = {
     timeZone: 'Club time zone: {zone}',
   },
 
+  loyalty: {
+    title: '🏅 Loyalty tiers',
+    hint: 'The tier of a player depends on the real money spent at the club in the last {days} days (PC time, packages, bar, debt paid; not top-ups and not bonus). A tier gives a bonus on top-ups and a discount on PC time (not on the price of events).',
+    ownerOnly: 'Only the owner can change the tiers.', off: 'Tiers are off',
+    period: 'Period, days', name: 'Name', minSpend: 'From spend, ₴', bonus: 'Bonus on top-ups, %', discount: 'Discount on PC time, %', players: 'Players',
+    addTier: '+ Tier', saved: 'Loyalty tiers saved ✓',
+    tier: 'Tier', noTier: 'no tier', spent: 'Spent {amount} in {days} days', perks: 'bonus +{bonus}%, discount {discount}%',
+    toNext: 'next tier: {amount} more —',
+  },
+
   session: {
     fromBalance: 'from the balance',
     fromBalanceHint: 'The player logged in on the PC: the time runs from the balance and ends when the money is used up',
@@ -1268,6 +1294,9 @@ export const en: typeof uk = {
     deposit_kept: 'Reservation deposit kept (no-show)',
     order_hold: 'Bar order (held)',
     order_release: 'Bar order: hold released',
+    event_fee_hold: 'Event entry fee (held)',
+    event_fee_release: 'Event entry fee returned',
+    event_fee_kept: 'Event entry fee kept by the club',
   } as Record<string, string>,
 
   audit: {
@@ -1440,6 +1469,7 @@ export const en: typeof uk = {
     other: 'Other rows',
     orders: 'Bar orders from the PCs (prepaid)', ordersHeld: 'Held from balances', ordersReleased: 'Released (delivered or cancelled)',
     deposits: 'Reservation deposits', depositsHeld: 'Held from balances', depositsReleased: 'Back on balances (check-in, cancel)', depositsKept: 'Kept for no-shows (in PC time revenue)',
+    eventFees: 'Event entry fees', eventFeesHeld: 'Held from balances', eventFeesReleased: 'Back on balances (withdrawal, cancel)', eventFeesKept: 'Kept (event held; in PC time revenue)',
     count: 'pcs',
   },
 
@@ -1622,7 +1652,7 @@ export const en: typeof uk = {
     add: '+ New player',
     empty: 'No players',
     emptyHint: 'Create a player with the button "New player"',
-    col: { login: 'User name', name: 'Name', balance: 'Balance', bonus: 'Bonus', created: 'Registered', actions: 'Actions' },
+    col: { login: 'User name', name: 'Name', balance: 'Balance', bonus: 'Bonus', tier: 'Tier', created: 'Registered', actions: 'Actions' },
     pin: 'Password / PIN',
     pinPrompt: 'New password or PIN for @{username} (min. 4 characters):',
     pinChanged: 'Player password changed ✓',
@@ -1883,11 +1913,13 @@ export const en: typeof uk = {
     shiftLine: 'shift #{id} · {time} · {who}',
     checkOk: 'Matches the ledger ({rows} rows) and the Z-reports of the shifts fully in the period ({shifts}) ✓',
     deposits: 'Reservation deposits: held {held}, back on balances {released}, kept for no-shows {kept} (in the PC time revenue).',
+    eventFees: 'Event entry fees: held {held}, back on balances {released}, kept {kept} (in the PC time revenue).',
     checkBad: 'The sums do NOT match the ledger or the Z-reports — check the ledger',
     noData: 'No data for the period',
   },
 
   errors: {
+    bad_loyalty_settings: 'Check the tiers: a period of 7 to 365 days, at most 6 tiers, names of 1 to 20 characters without repeats, different spends, percents 0 to 50.',
     event_not_found: 'Event not found',
     event_bad_name: 'Enter a name: 1 to 80 characters.',
     event_bad_time: 'Choose a date and time (club time) from now up to 90 days ahead.',

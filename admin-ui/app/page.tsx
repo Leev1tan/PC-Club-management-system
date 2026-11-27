@@ -22,7 +22,7 @@ import { TariffsTab } from './tariffs-tab';
 
 // ===== Types =====
 type Zone = { id: string; name: string; color: string; sortOrder: number };
-type User = { id: string; username: string; displayName: string; balance: number; bonusPoints: number; createdUtc: string; debt?: number };
+type User = { id: string; username: string; displayName: string; balance: number; bonusPoints: number; createdUtc: string; debt?: number; tier?: string | null };
 type Device = {
   id: string; hostname: string; osVersion: string; agentVersion: string;
   lastSeenUtc: string | null; lastIp: string | null; status: string;
@@ -753,7 +753,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <div className="table-wrapper">
             <table className="data-table">
               <thead><tr>
-                <th>{t.players.col.login}</th><th>{t.players.col.name}</th><th>{t.players.col.balance}</th><th>{t.players.col.bonus}</th><th>{t.players.col.created}</th><th>{t.players.col.actions}</th>
+                <th>{t.players.col.login}</th><th>{t.players.col.name}</th><th>{t.players.col.balance}</th><th>{t.players.col.bonus}</th><th>{t.players.col.tier}</th><th>{t.players.col.created}</th><th>{t.players.col.actions}</th>
               </tr></thead>
               <tbody>
                 {users.map(u => (
@@ -765,6 +765,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                       {cash(u.bonusPoints)} 🎁
                       {(u.debt ?? 0) > 0 && <div><span className="badge badge-red">{t.player.debt}: {cash(u.debt)}</span></div>}
                     </td>
+                    <td>{u.tier ? <span className="badge badge-purple data">{u.tier}</span> : <span className="user-chip">—</span>}</td>
                     <td>{fmtDate(u.createdUtc)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
