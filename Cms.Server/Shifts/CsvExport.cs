@@ -168,7 +168,7 @@ public static class CsvExport
             csv.Row(staff, $"{p.Username}: {t.T("готівка", "cash")}", p.CashNet, p.Rows);
             csv.Row(staff, $"{p.Username}: {t.T("картка", "card")}", p.CardNet);
             csv.Row(staff, $"{p.Username}: {t.T("час", "PC time")}", p.TimeSales);
-            csv.Row(staff, $"{p.Username}: {t.T("бар", "bar")}", p.BarSales - p.BarRefunds);
+            csv.Row(staff, $"{p.Username}: {t.T("бар (продажі)", "bar sales")}", p.BarSales);
             csv.Row(staff, $"{p.Username}: {t.T("поповнення", "top-ups")}", p.TopUps);
             csv.Row(staff, $"{p.Username}: {t.T("повернення", "refunds")}", p.Refunds + p.BarRefunds);
             csv.Row(staff, $"{p.Username}: {t.T("виплати", "payouts")}", p.Payouts);
