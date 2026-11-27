@@ -1,12 +1,20 @@
 # Server Installer Script for Windows
 # Run as Administrator
-# Usage: .\install-server.ps1
+# Usage: .\install-server.ps1 [-PostgresConnectionString "Host=...;Database=cms;Username=...;Password=..."]
+#
+# Data directory (-DataPath, default C:\ProgramData\PCClub): SQLite database cms.db, login cookie
+# keys, one-time setup code. Only SYSTEM and Administrators can open it.
+# First start: the installer shows the one-time setup code; open the admin UI and create the Owner.
+# -EnrollmentToken: secret for the club PC installer. Empty = keep the token of an earlier install,
+# or create a new random one.
 
 param(
     [int]$HttpPort = 5081,
     [int]$DiscoveryPort = 5082,
     [string]$InstallPath = "C:\ClubServer",
-    [string]$PostgresConnectionString = ""
+    [string]$DataPath = (Join-Path $env:ProgramData "PCClub"),
+    [string]$PostgresConnectionString = "",
+    [string]$EnrollmentToken = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +42,21 @@ if (!(Test-Path $InstallPath)) {
     New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
 }
 
+$appsettings = Join-Path $InstallPath "appsettings.json"
+
+# Keep the enrollment token of an earlier install: the club PCs were installed with it
+if (-not $EnrollmentToken -and (Test-Path $appsettings)) {
+    try {
+        $previous = Get-Content $appsettings -Raw | ConvertFrom-Json
+        if ($previous.Devices.EnrollmentToken) { $EnrollmentToken = $previous.Devices.EnrollmentToken }
+    } catch {}
+}
+if (-not $EnrollmentToken) {
+    $bytes = New-Object byte[] 24
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    $EnrollmentToken = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
 $serviceName = "ClubServer"
 try { Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue } catch {}
 try { sc.exe delete $serviceName 2>$null | Out-Null } catch {}
@@ -54,9 +77,14 @@ if (Test-Path $serverFiles) {
 
 # Step 3: Configure appsettings
 Write-Host "[3/5] Configuring server..." -ForegroundColor Yellow
-$appsettings = Join-Path $InstallPath "appsettings.json"
 
-$config = @{
+# Data directory: absolute path (a Windows service starts in C:\Windows\System32). The server copies a
+# cms.db of an earlier version from there or from the install folder on the first start.
+New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
+icacls $DataPath /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not restrict the permissions of $DataPath" }
+
+$config = [ordered]@{
     Logging = @{
         LogLevel = @{
             Default = "Information"
@@ -64,8 +92,10 @@ $config = @{
             "Microsoft.EntityFrameworkCore" = "Warning"
         }
     }
-    ConnectionStrings = @{
-        DefaultConnection = if ($PostgresConnectionString) { $PostgresConnectionString } else { "Host=localhost;Database=cms;Username=postgres;Password=postgres" }
+    Storage = @{ DataDirectory = $DataPath }
+    Devices = @{
+        EnrollmentToken = $EnrollmentToken
+        AllowPendingRegistration = $true
     }
     Discovery = @{
         Enabled = $true
@@ -74,8 +104,16 @@ $config = @{
     }
     Urls = "http://0.0.0.0:$HttpPort"
 }
+if ($PostgresConnectionString) {
+    $config.Database = @{ Provider = "postgres" }
+    $config.ConnectionStrings = @{ DefaultConnection = $PostgresConnectionString }
+} else {
+    $config.Database = @{ Provider = "sqlite" }   # file: $DataPath\cms.db
+}
 
 $config | ConvertTo-Json -Depth 5 | Set-Content -Path $appsettings
+# appsettings.json holds the enrollment token (and maybe a database password): admins and the service only
+icacls $appsettings /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" | Out-Null
 
 # Step 4: Open firewall ports
 Write-Host "[4/5] Configuring firewall..." -ForegroundColor Yellow
@@ -110,7 +148,24 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Server URL: http://localhost:$HttpPort" -ForegroundColor Cyan
 Write-Host "API Docs:   http://localhost:$HttpPort/swagger" -ForegroundColor Cyan
+Write-Host "Data:       $DataPath" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Client PCs will auto-discover this server on the LAN." -ForegroundColor White
+
+# First start: no staff account yet -> the server writes a one-time setup code
+$setupFile = Join-Path $DataPath "setup-code.txt"
+for ($i = 0; $i -lt 30 -and !(Test-Path $setupFile); $i++) { Start-Sleep -Seconds 1 }
+if (Test-Path $setupFile) {
+    $setupCode = (Get-Content $setupFile -Raw).Trim()
+    Write-Host "FIRST START: open http://localhost:$HttpPort and create the Owner account." -ForegroundColor Magenta
+    Write-Host "  One-time setup code: $setupCode" -ForegroundColor Magenta
+    Write-Host "  (also in $setupFile; it stops working when the Owner exists)" -ForegroundColor Gray
+} else {
+    Write-Host "Sign in at http://localhost:$HttpPort with a staff account." -ForegroundColor White
+}
+Write-Host ""
+Write-Host "Install the club PCs with:" -ForegroundColor White
+Write-Host "  ClubClientSetup.exe -ServerUrl `"http://<this-server-or-router>:$HttpPort`" -EnrollmentToken `"$EnrollmentToken`"" -ForegroundColor Cyan
+Write-Host "  Keep the token secret. Without it a PC waits for approval in the admin UI (Devices)." -ForegroundColor Gray
+Write-Host "Then set the staff PIN for the lock screens in the admin UI (Settings)." -ForegroundColor White
 Write-Host "Firewall rules have been created for ports $HttpPort and $DiscoveryPort." -ForegroundColor White
 Write-Host ""

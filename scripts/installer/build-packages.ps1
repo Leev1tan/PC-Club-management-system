@@ -143,12 +143,16 @@ Project by Volodymyr Shabat
 - ``-HttpPort 5081`` (default: 5081)
 - ``-DiscoveryPort 5082`` (default: 5082)
 - ``-InstallPath "C:\ClubServer"`` (default)
+- ``-DataPath "C:\ProgramData\PCClub"`` (default; SQLite database, keys, setup code)
 - ``-PostgresConnectionString "Host=..."`` (optional, uses embedded SQLite otherwise)
+- ``-EnrollmentToken "..."`` (optional; default: keep the old one or create a new one)
 
 ## After Installation
 - Server API: http://localhost:5081
 - Swagger docs: http://localhost:5081/swagger
 - Windows Service: ClubServer
+- First start: the installer prints a one-time setup code (also in C:\ProgramData\PCClub\setup-code.txt).
+  Open the admin UI, create the Owner account with it, then set the staff PIN (Settings).
 
 Firewall rules are automatically created for ports 5081 (TCP) and 5082 (UDP).
 "@ | Set-Content "$serverDir\README.txt"

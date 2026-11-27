@@ -53,7 +53,8 @@ builder.AddStaffAuth(paths, demo.Enabled);
 // Database: PostgreSQL for production/containers, SQLite for single-PC installs and testing.
 //   Database:Provider    - "postgres" or "sqlite"; when empty the legacy rule is used:
 //                          no connection string, or one that contains "localhost" => SQLite
-//   Database:SqlitePath  - SQLite file path (default: cms.db in the working directory)
+//   Database:SqlitePath  - SQLite file; default <data directory>/cms.db (Windows: C:\ProgramData\PCClub\cms.db).
+//                          A relative path is resolved against the data directory, never the working directory.
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 var provider = (builder.Configuration["Database:Provider"] ?? string.Empty).Trim().ToLowerInvariant();
 var useSqlite = provider switch
@@ -62,12 +63,13 @@ var useSqlite = provider switch
     "postgres" or "postgresql" or "npgsql" => false,
     _ => string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("localhost")
 };
+string? sqliteCopiedFrom = null;
+string? sqlitePath = null;
 if (useSqlite)
 {
-    var sqlitePath = builder.Configuration["Database:SqlitePath"];
-    if (string.IsNullOrWhiteSpace(sqlitePath)) sqlitePath = "cms.db";
-    builder.Services.AddDbContext<CmsDbContext>(options =>
-        options.UseSqlite($"Data Source={sqlitePath}"));
+    (sqlitePath, sqliteCopiedFrom) = paths.ResolveSqlitePath(builder.Configuration);
+    var sqliteConnection = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = sqlitePath }.ToString();
+    builder.Services.AddDbContext<CmsDbContext>(options => options.UseSqlite(sqliteConnection));
 }
 else
 {
@@ -102,6 +104,11 @@ var app = builder.Build();
 if (builder.Configuration.GetValue("Cors:AllowAnyOrigin", false))
     app.Logger.LogWarning("Cors:AllowAnyOrigin is no longer supported and is ignored; use Cors:AllowedOrigins.");
 app.Logger.LogInformation("Data directory: {DataDirectory}", paths.DataDirectory);
+if (sqlitePath != null)
+    app.Logger.LogInformation("SQLite database: {Path}", sqlitePath);
+if (sqliteCopiedFrom != null)
+    app.Logger.LogWarning("Copied the SQLite database of an earlier version from {Old} to {New}. " +
+                          "The old file is kept; delete it after a check.", sqliteCopiedFrom, sqlitePath);
 
 // Create or migrate the database (PostgreSQL: EF Core migrations; SQLite: EnsureCreated + additive upgrade)
 await DatabaseInitializer.InitializeAsync(app.Services, app.Logger);
