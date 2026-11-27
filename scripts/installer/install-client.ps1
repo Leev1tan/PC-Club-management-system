@@ -325,14 +325,17 @@ function Remove-MachineValue([string]$Path, [string]$Name, [string]$What) {
 # --- lock screen of the signed-in ClubUser and left the PC out of service). The order is: prepare everything,
 # --- stop the agent and the lock screen, copy, start; on a failure the old version is restored and started again.
 
-# Copies a folder with robocopy: every file (also unchanged ones), 3 tries 2 s apart for a file that is held for a
-# moment (antivirus). -Mirror also removes files that the source does not have (used to restore the old version).
+# Copies a folder with robocopy, 3 tries 2 s apart for a file that is held for a moment (antivirus). A normal copy
+# copies every file (also unchanged ones). -Mirror restores the old version: it copies only the files that differ and
+# removes the files that the source does not have, so an old file that is still open does not stop the restore.
 # True when every file was copied (robocopy exit code below 8).
 function Copy-Folder([string]$From, [string]$To, [switch]$Mirror) {
     $ErrorActionPreference = 'Continue'
-    $mode = '/E'
-    if ($Mirror) { $mode = '/MIR' }
-    & robocopy.exe $From $To $mode /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($Mirror) {
+        & robocopy.exe $From $To /MIR /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+    } else {
+        & robocopy.exe $From $To /E /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+    }
     return ($LASTEXITCODE -lt 8)
 }
 
