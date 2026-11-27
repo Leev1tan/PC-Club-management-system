@@ -137,6 +137,41 @@ from now, a 3 h package for the zone, and a cashback tier (for example from 200 
 - [ ] Cashier cannot refund or correct; Manager refund takes back the cashback of the refunded amount
 - [ ] Audit log shows session.paused / resumed / transferred and package / tariff changes
 
+### Test 10: Bar, Shift and Z-Report (phase 4)
+Prepare (Owner or Manager, admin UI → Склад / Stock): two products with a counted stock (for example
+"Monster 0,5 л" 75 ₴, stock 10, warn at 3) and one without (coffee). A player with a real balance.
+- [ ] Cashier, Каса / Бар without an open shift: the cash and card buttons are off; a cash top-up on
+      the player card answers "Спершу відкрийте зміну"
+- [ ] Зміна → open a shift with a float of 500 ₴; the shift shows "🙈" for the expected cash (blind)
+- [ ] Каса / Бар: tap two products, pay in cash → "Чек №N"; the stock goes down; a third product from
+      the player's balance (bonus is not used)
+- [ ] A sale of more than the stock is refused ("Не вистачає ... на складі")
+- [ ] The cashier has no "Повернути" button; Manager: "Повернути" on the cash receipt, with a reason →
+      the receipt shows "Повернено", the stock goes back up
+- [ ] Stock: a delivery (+24) by the cashier; a stock count with a reason by the Manager; both in the
+      stock log with who and when; "Склад збігається з журналом ✓"
+- [ ] Manager: a cash payout with a reason; more than the drawer holds is refused
+- [ ] Close the shift with the counted cash: the result shows expected, counted and the variance
+- [ ] 📄 Z-звіт: time, bar, top-ups, refunds, bonus, debt, payouts, cash and card, staff table,
+      "Звіт збігається з журналом операцій ✓", the audit anchor; Print shows black on white
+- [ ] CSV (UA, Excel) opens in Excel with Ukrainian text and numbers in columns; CSV (EN) with commas
+- [ ] Manager, Зміна: ledger CSV for this month opens in Excel
+- [ ] A closed shift cannot be closed again ("Зміну закрито")
+- [ ] Open-ended session of a player with an empty balance: end it with "У борг" → the player card
+      shows the debt; "Сплатити борг" in cash; a new open-ended session is refused while a debt is left
+- [ ] Owner, Журнал дій → 🔗 Перевірити ланцюжок: "Ланцюжок цілий ✓"
+- [ ] UA / EN switch in the top bar: the desk tabs, the player card and the dialogs change language
+
+### Test 11: Emergency PIN Unlock Is Audited (phase 4)
+On the VM (installed with `install-client.ps1`, so `C:\ProgramData\ClubAgent\inbox` exists):
+- [ ] `icacls C:\ProgramData\ClubAgent\inbox`: Users have only `(WD,S)`, OWNER RIGHTS `(OI)(IO)(RC)`
+- [ ] As the player (standard user): `dir C:\ProgramData\ClubAgent\inbox` is refused
+- [ ] Stop the agent (`sc.exe stop ClubAgent`), wait 15 s, unlock with Ctrl+Shift+U + the staff PIN
+- [ ] As Administrator: a file `event-*.json` is in the inbox; as the player, `del` of it is refused
+- [ ] Start the agent: within 10 s the file is gone and the audit log has `device.emergency_unlock`
+      for this PC with "the agent was not responding"
+- [ ] The same unlock while the agent runs: `device.emergency_unlock` with "the PC was locked"
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

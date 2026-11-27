@@ -61,7 +61,14 @@ graph TB
 | [Billing/SessionService.cs](../Cms.Server/Billing/SessionService.cs) | Session rules and money handling (used by the API and the demo simulator) |
 | [Billing/TariffCalculator.cs](../Cms.Server/Billing/TariffCalculator.cs) | Prices of PC time per time-of-day rule, rounding, minimum charge |
 | [Billing/PackageWindows.cs](../Cms.Server/Billing/PackageWindows.cs) | When a package is on sale and when it ends (cut-off) |
-| [Billing/Wallet.cs](../Cms.Server/Billing/Wallet.cs) | Atomic balance and bonus changes, append-only ledger, reconciliation |
+| [Billing/Wallet.cs](../Cms.Server/Billing/Wallet.cs) | Atomic balance, bonus and debt changes, append-only ledger, reconciliation |
+| [Shifts/ShiftService.cs](../Cms.Server/Shifts/ShiftService.cs) | Open / close a shift, expected cash, cash payouts, the shift lock of ledger rows |
+| [Shifts/ZReport.cs](../Cms.Server/Shifts/ZReport.cs) | Z-report of a shift from its ledger rows |
+| [Shifts/CsvExport.cs](../Cms.Server/Shifts/CsvExport.cs) | CSV (UTF-8 with BOM) of the Z-report and of the ledger for a date range |
+| [Pos/SaleService.cs](../Cms.Server/Pos/SaleService.cs) | Bar checkout and refunds of receipts |
+| [Pos/Stock.cs](../Cms.Server/Pos/Stock.cs) | Atomic stock changes, the stock log, stock reconciliation |
+| [Auth/AuditChain.cs](../Cms.Server/Auth/AuditChain.cs) | SHA-256 hash chain of the audit log, one-time seal of older rows, verify |
+| [Auth/DeviceEvents.cs](../Cms.Server/Auth/DeviceEvents.cs) | Events reported by a PC afterwards (emergency staff PIN unlock) |
 | [CmsDbContext.cs](../Cms.Server/Data/CmsDbContext.cs) | EF Core DbContext with entity definitions |
 | [IDeviceRepository.cs](../Cms.Server/Repositories/IDeviceRepository.cs) | Device operations interface |
 | [ISessionRepository.cs](../Cms.Server/Repositories/ISessionRepository.cs) | Session operations interface |
@@ -72,7 +79,8 @@ graph TB
 POST /api/auth/login | logout | setup | password, GET /api/auth/me | status   → staff login (cookie)
 GET/POST/PUT /api/staff                     → staff accounts                  [Owner]
 GET/PUT/DELETE /api/settings[/staff-pin]    → lock-screen staff PIN           [Owner]
-GET  /api/audit                             → audit log, read-only            [Owner, Manager]
+GET  /api/audit                             → audit log, read-only, with the hash of each row  [Owner, Manager]
+GET  /api/audit/verify                      → recompute the hash chain, first broken row         [Owner]
 
 POST /api/devices/register       → Register a PC: enrollment token, current key, or "pending"   [agent]
 POST /api/devices/heartbeat      → Agent heartbeat; returns status + staff PIN hash             [X-Device-Key]
@@ -81,10 +89,12 @@ POST /api/devices/{id}/commands/{cmdId}/ack → Acknowledge command             
 GET  /api/devices                → List all devices                               [all staff]
 POST /api/devices/{id}/commands  → Enqueue lock/unlock/restart/logoff/message     [all staff]
 POST /api/devices/{id}/approve | reject | revoke, PUT .../zone                    [Owner, Manager, Tech]
+POST /api/devices/{id}/events    → Agent: emergency staff PIN unlock noted by the lock screen  [X-Device-Key, approved]
 
 POST /api/sessions               → Start: tariff (prepaid minutes or open-ended) or packageId;   [Owner, Manager, Cashier]
-                                   paymentMethod balance | cash | card, useBonus
+                                   paymentMethod balance | cash | card, useBonus; free + reason [Owner, Manager]
 POST /api/sessions/{id}/end      → End; open-ended: billed per segment, balances first, rest at the desk
+                                   (deskMethod cash | card) or as the player's debt (deskMethod debt)
 POST /api/sessions/{id}/extend   → Add minutes to a prepaid or package session (never past a cut-off)
 POST /api/sessions/{id}/pause | resume            → Stop / restart the time (PC locks / unlocks)
 GET  /api/sessions/{id}/transfer-quote?targetDeviceId= , POST /api/sessions/{id}/transfer → move to a free PC
@@ -97,8 +107,25 @@ POST/PUT/DELETE /api/packages    → Package catalog                            
 GET  /api/billing/settings, PUT  → Club time zone, cashback tiers (PUT: Owner, Manager)
 POST /api/users/{id}/topup       → Top-up in cash or by card, cashback            [front desk]
 POST /api/users/{id}/refund | adjust              → Refund / correction of balance or bonus, reason  [Owner, Manager]
+POST /api/users/{id}/debt/pay    → Debt paid in cash, by card or from the balance          [front desk]
+POST /api/users/{id}/debt/writeoff → Debt written off with a reason                         [Owner, Manager]
 GET  /api/users/{id}/ledger[/check]               → Player ledger, reconciliation with the balances  [front desk]
 GET  /api/ledger, /api/ledger/reconcile           → Club ledger (read-only), reconciliation of all players  [Owner, Manager]
+GET  /api/ledger/export.csv?from=&to=&lang=&sep=  → Ledger of a club-time date range as CSV (UTF-8 BOM)  [Owner, Manager]
+
+GET  /api/shifts/current         → Open shift, expected cash (Owner, Manager only: blind close)  [front desk]
+POST /api/shifts                 → Open a shift with an opening float (one open shift)          [front desk]
+POST /api/shifts/{id}/close      → Close with the counted cash: expected cash and variance      [opener, Owner, Manager]
+POST /api/shifts/{id}/payout     → Cash out of the drawer with a reason                         [Owner, Manager]
+GET  /api/shifts[/{id}]          → Shifts (cashier: own shifts)                                 [front desk]
+GET  /api/shifts/{id}/report[.csv] → Z-report (cashier: own shift after the close)              [front desk]
+GET  /api/products[?includeInactive|lowStockOnly], /{id}, /movements → catalog, stock log      [front desk]
+POST/PUT/DELETE /api/products    → Products and prices (delete only without history)            [Owner, Manager]
+POST /api/products/{id}/restock  → Delivery: who, when, how many                                [front desk]
+POST /api/products/{id}/correction → Stock count with a reason                                  [Owner, Manager]
+GET  /api/products/stock/check   → Stock against the stock log                                  [Owner, Manager]
+POST /api/sales, GET /api/sales[/{id}] → Bar checkout (cash | card | balance), receipt log      [front desk]
+POST /api/sales/{id}/refund      → Refund of a receipt with a reason                            [Owner, Manager]
 POST /api/users/login            → Player login on the lock screen (password or PIN required)   [public, rate limited]
 
 GET  /health, /api/health        → Health check                                   [public]
@@ -137,6 +164,8 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 ├── state.json           # Lock state, remaining seconds, time of the last lock change
 ├── agent_heartbeat.txt  # Agent liveness marker (the launcher locks when it is older than 15 s)
 ├── staff-pin.json       # PBKDF2 hash of the staff PIN (from the server)
+├── inbox\               # players: create files only (no read, change, delete)
+│   └── event-*.json     # note of an emergency PIN unlock (launcher); the agent sends it, then deletes it
 └── private\             # SYSTEM, Administrators, agent only
     ├── device.json            # device id + key
     └── enrollment-token.txt   # from the installer; deleted after the first registration
@@ -157,6 +186,8 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 - Staff unlock with the staff PIN (`Ctrl+Shift+U`); the owner sets the PIN in the admin UI, the
   launcher verifies it locally against `staff-pin.json`, so it also works offline. No default PIN.
 - Fail closed: stays locked when the agent heartbeat is older than 15 s or `state.json` is missing
+- Every successful staff PIN unlock leaves a note in `ClubAgent\inbox`; the agent sends it to
+  `POST /api/devices/{id}/events` (audit `device.emergency_unlock`), also later when it was down
 
 **State Polling**:
 - Reads `state.json` every 2 seconds
@@ -176,6 +207,9 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 - Device status indicators (online/offline)
 - Quick action buttons: Lock, Unlock, Restart, Start Session
 - Session duration prompt
+- Desk: bar checkout (touch tiles, cash / card / balance), shift (open, blind close, payouts, ledger CSV),
+  stock (deliveries, stock counts, stock log); printable Z-report page `zreport.html?id=N`
+- Ukrainian and English (`app/i18n.ts`, switch in the top bar)
 
 ---
 
@@ -251,6 +285,44 @@ erDiagram
 - **Bonus.** Cashback tiers on top-ups (`billing.bonus_topup_rules`). Bonus pays only for PC time
   (sessions, packages, extensions, transfer differences), bonus first unless `useBonus = false`; it is
   never refunded; a refund takes back the cashback of the refunded amount.
+
+## Bar, stock, shifts, debt and the audit chain
+
+```mermaid
+erDiagram
+    ShiftEntity ||--o{ LedgerEntryEntity : "ShiftId (rows of the shift)"
+    ShiftEntity ||--o{ SaleEntity : "receipts of the shift"
+    SaleEntity ||--o{ SaleItemEntity : "lines"
+    SaleEntity |o--o| SaleEntity : "refund receipt -> sale (unique)"
+    ProductEntity ||--o{ StockMovementEntity : "stock log (append-only)"
+    SaleEntity ||--o{ LedgerEntryEntity : "SaleId (bar_sale / bar_refund)"
+    UserEntity ||--o{ LedgerEntryEntity : "Balance, BonusPoints, Debt = sums"
+    AuditLogEntity ||--|| AuditLogEntity : "PrevHash -> Hash"
+```
+
+- **Shift rule.** While a shift is open, `Ledger.AppendAsync` stamps every ledger row with its id.
+  Cash and card rows need an open shift (`Shifts:RequireOpenShift`, default true): `CmsDbContext`
+  refuses such a row without a shift (`ShiftRequiredException` → 409 `shift_required`, the transaction
+  rolls back). Balance and bonus rows do not need a shift. One open shift at a time (partial unique
+  index). PostgreSQL: a payment share-locks the open shift row (`FOR SHARE`), the close locks it
+  (`FOR UPDATE`), so a payment either belongs to the shift and is counted or is refused.
+- **Expected cash** = opening float + the sum of `DeskAmount` of the cash rows of the shift (cash
+  sales and top-ups, cash debt payments, minus cash refunds and payouts). Variance = counted − expected.
+  A cashier closes blind (the expected cash is not shown before the count). A closed shift is final
+  (no API, `SaveChanges` guard, trigger).
+- **Z-report** (`Shifts/ZReport.cs`): built only from the ledger rows of the shift, every desk amount in
+  exactly one section, so it always reconciles with the ledger (`ledger.reconciled`).
+- **Bar.** A receipt (`Sales` + `SaleItems`) and one ledger row (`bar_sale`). Stock: a conditional
+  `UPDATE ... WHERE StockQuantity >= n` per tracked product (never below zero) and a `StockMovements`
+  row; `Products.StockQuantity` is the cached sum of the stock log. A refund is a receipt of kind
+  `refund` that points to the sale (unique index: one refund per sale) and a `bar_refund` ledger row.
+  Lock order on PostgreSQL: player row, product rows by id, open shift, audit chain.
+- **Debt.** `Users.Debt` changes only with a ledger row (`DebtDelta`, `DebtAfter`), like the balances.
+- **Audit chain.** `Hash = SHA-256(PrevHash + "\n" + JSON ["v1", time (UTC, µs), actor id, actor,
+  role, action, target type, target id, summary, details, IP])`, hex. Appends run one at a time
+  (PostgreSQL `pg_advisory_xact_lock`; SQLite has one writer). A closed shift stores the head
+  (`AuditHeadId`, `AuditHeadHash`). `AuditChain.VerifyAsync` reports the first broken row: hash,
+  link, missing, anchor. Rows of an older version are hashed once at start (`audit.chain_sealed`).
 
 ## Communication Flow
 
@@ -367,8 +439,9 @@ commands and [ClubDeployment.md](ClubDeployment.md) for the club network.
 | **CORS** | Same origin only; `Cors:AllowedOrigins` for exceptions |
 | **Staff Unlock** | Staff PIN set by the owner, PBKDF2 hash verified locally by the launcher |
 | **Fail-Closed** | Launcher stays locked when the agent is silent (>15 s) |
-| **Audit log** | Append-only table (database trigger), read-only page for Owner and Manager |
-| **Money ledger** | Append-only table (database trigger); balances change only with a ledger row; reconciliation endpoint |
+| **Audit log** | Append-only table (database trigger), SHA-256 hash chain with a verify endpoint (Owner), shift anchors; read-only page for Owner and Manager |
+| **Money ledger** | Append-only table (database trigger); balances and debt change only with a ledger row; reconciliation endpoint; cash and card rows need an open shift |
+| **Receipts, stock, shifts** | Receipts and the stock log are append-only (triggers); a closed shift cannot be changed; blind close for cashiers |
 
 ---
 
