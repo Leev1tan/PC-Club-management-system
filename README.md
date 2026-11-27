@@ -45,6 +45,8 @@ The images below come from demo mode (30 days of simulated history; Ukrainian in
 | **Game catalog**: what the lock screens start (Steam AppID, a program, a launcher link), per zone, generated tiles (no logos) | **Reservations**: requests from the booking page (staff only see the name and phone), the day timeline by zone and PC, the held PC in yellow, the "now" line |
 | ![Order queue](docs/screenshots/orders.png) | ![Booking page on a phone](docs/screenshots/book-phone.png) |
 | **Orders from the PCs**: the queue with a badge, prepaid or at the desk, delivered as a bar sale | **Public booking page** `/book` on a phone: zone, day, duration, free PCs per start time (demo banner) |
+| ![Events and tournaments](docs/screenshots/events.png) | ![Club game accounts](docs/screenshots/game-accounts.png) |
+| **Events**: a finished tournament of the demo: the seats, the teams with their entry fees, the bracket with the results | **Game accounts**: the club account pool with masked logins, "secret stored", the PCs that use an account now and "free it" |
 
 ![Dashboard (demo mode)](docs/screenshots/dashboard.png)
 
