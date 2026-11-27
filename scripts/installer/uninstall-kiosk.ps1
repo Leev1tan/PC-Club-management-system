@@ -293,6 +293,121 @@ namespace ClubUninstall
 }
 '@
 
+# The Windows sessions of a local account and their sign-out (wtsapi32). Windows re-test 2026-11-27 late, defect 4: the
+# text of "query user" has an empty SESSIONNAME column for a disconnected session (after "Switch user"), so the old parse
+# read "Disc" as the session id and ClubUser stayed signed in. The API gives the session id and the user of every session
+# (active or disconnected), the same on every Windows language. C# 5 only.
+$sessionSource = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+namespace ClubUninstall
+{
+    public static class KioskSessions
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WtsSessionInfo
+        {
+            public int SessionId;
+            public IntPtr WinStationName;
+            public int State;
+        }
+
+        [DllImport("wtsapi32.dll", SetLastError = true, EntryPoint = "WTSEnumerateSessionsW")]
+        private static extern bool WTSEnumerateSessions(IntPtr server, int reserved, int version, out IntPtr sessions, out int count);
+
+        [DllImport("wtsapi32.dll", SetLastError = true, EntryPoint = "WTSQuerySessionInformationW")]
+        private static extern bool WTSQuerySessionInformation(IntPtr server, int sessionId, int infoClass, out IntPtr buffer, out int bytes);
+
+        [DllImport("wtsapi32.dll")]
+        private static extern void WTSFreeMemory(IntPtr memory);
+
+        [DllImport("wtsapi32.dll", SetLastError = true)]
+        private static extern bool WTSLogoffSession(IntPtr server, int sessionId, bool wait);
+
+        private const int WtsUserName = 5;
+        private const int WtsDomainName = 7;
+
+        // True when the user of a session is the local account (the domain of a local account is the computer name)
+        public static bool IsUser(string sessionUser, string sessionDomain, string user, string computer)
+        {
+            if (string.IsNullOrEmpty(sessionUser) || !string.Equals(sessionUser, user, StringComparison.OrdinalIgnoreCase)) return false;
+            return string.IsNullOrEmpty(sessionDomain) || string.Equals(sessionDomain, computer, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // The ids of the sessions (active or disconnected) of the local account on this PC
+        public static int[] Of(string user, string computer)
+        {
+            IntPtr list;
+            int count;
+            if (!WTSEnumerateSessions(IntPtr.Zero, 0, 1, out list, out count)) throw new System.ComponentModel.Win32Exception();
+            List<int> ids = new List<int>();
+            try
+            {
+                int size = Marshal.SizeOf(typeof(WtsSessionInfo));
+                for (int i = 0; i < count; i++)
+                {
+                    WtsSessionInfo info = (WtsSessionInfo)Marshal.PtrToStructure(new IntPtr(list.ToInt64() + (long)i * size), typeof(WtsSessionInfo));
+                    if (IsUser(Query(info.SessionId, WtsUserName), Query(info.SessionId, WtsDomainName), user, computer)) ids.Add(info.SessionId);
+                }
+            }
+            finally
+            {
+                WTSFreeMemory(list);
+            }
+            return ids.ToArray();
+        }
+
+        private static string Query(int sessionId, int infoClass)
+        {
+            IntPtr buffer;
+            int bytes;
+            if (!WTSQuerySessionInformation(IntPtr.Zero, sessionId, infoClass, out buffer, out bytes)) return null;
+            try { return Marshal.PtrToStringUni(buffer); }
+            finally { WTSFreeMemory(buffer); }
+        }
+
+        // Signs the session out (programs close without a question) and waits until Windows has ended it
+        public static bool LogOff(int sessionId)
+        {
+            return WTSLogoffSession(IntPtr.Zero, sessionId, true);
+        }
+    }
+}
+'@
+
+# Signs the kiosk user out of all its sessions and waits until the sessions and the registry hive of its profile are gone,
+# so no file of the profile is in use when the profile is deleted. True when that happened within $Seconds. The session
+# list, the sign-out and the hive check are script blocks: the installer self-check runs this function with stand-ins.
+function Stop-KioskSessions([string]$UserName, [string]$Sid, [int]$Seconds, [scriptblock]$ListSessions, [scriptblock]$LogOff, [scriptblock]$HiveLoaded) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    $asked = @{}
+    while ($true) {
+        $sessions = @(& $ListSessions)
+        foreach ($id in $sessions) {
+            if ($asked.ContainsKey("$id")) { continue }
+            $asked["$id"] = $true
+            if (& $LogOff $id) {
+                Write-Host "   Signed out the session $id of $UserName" -ForegroundColor Gray
+            } else {
+                Write-Warning "Windows refused to sign out the session $id of $UserName"
+            }
+        }
+        $hive = [bool](& $HiveLoaded)
+        if ($sessions.Count -eq 0 -and -not $hive) { return $true }
+        if ((Get-Date) -ge $deadline) {
+            if ($sessions.Count -gt 0) {
+                Write-Warning "$UserName is still signed in (session $($sessions -join ', ')) after $Seconds s."
+            } else {
+                Write-Warning "Windows still has the registry hive of $UserName (HKEY_USERS\$Sid) loaded after $Seconds s: files of the profile are in use."
+            }
+            return $false
+        }
+        Start-Sleep -Seconds 1
+    }
+}
+
 if (-not (Test-IsAdmin)) {
     Write-Error "Please run this script as Administrator."
     exit 1
@@ -304,6 +419,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $kioskUser = "ClubUser"
+$script:accountNotDeleted = $false
 
 # Step 1: Restore shell to explorer.exe
 Write-Host "[1/5] Restoring shell to explorer.exe..." -ForegroundColor Yellow
@@ -391,34 +507,45 @@ Write-Host "[4/5] ClubUser account..." -ForegroundColor Yellow
 if ($existingUser) {
     $response = if (Test-InteractiveSession) { Read-Host "   Delete '$kioskUser' account and profile? (y/N)" } else { 'n' }
     if ($response -eq 'y' -or $response -eq 'Y') {
-        # Log off ClubUser first
-        $sessions = query user 2>$null | Select-String $kioskUser
-        if ($sessions) {
-            $sessionId = ($sessions -split '\s+')[3]
-            logoff $sessionId /f 2>$null
-            Start-Sleep -Seconds 2
+        # Sign ClubUser out first (also a disconnected session) and wait until Windows has released its profile. The
+        # automatic sign-in is off since step 2, so ClubUser does not sign in again.
+        $signedOut = $false
+        try {
+            if (-not ('ClubUninstall.KioskSessions' -as [type])) { Add-Type -TypeDefinition $sessionSource -IgnoreWarnings }
+            $signedOut = Stop-KioskSessions -UserName $kioskUser -Sid $sid -Seconds 60 `
+                -ListSessions { [ClubUninstall.KioskSessions]::Of($kioskUser, $env:COMPUTERNAME) } `
+                -LogOff { param($id) [ClubUninstall.KioskSessions]::LogOff($id) } `
+                -HiveLoaded { Test-Path "Registry::HKEY_USERS\$sid" }
+        } catch {
+            Write-Warning "Could not read or end the Windows sessions of ${kioskUser}: $($_.Exception.Message)"
         }
-        
-        Remove-LocalUser -Name $kioskUser -ErrorAction SilentlyContinue
-        
-        # Remove the profile folder. The player owned it and may have put junctions into it: they are removed as links,
-        # their targets stay (Remove-Item -Recurse of Windows PowerShell 5.1 deleted the targets as administrator)
-        if (Test-Path -LiteralPath $profilePath) {
-            if (-not (Remove-FolderSafely $profilePath (Get-TrustedOwners @($sid)))) {
-                Write-Warning "The profile folder $profilePath was not removed completely; remove the rest by hand"
+        if (-not $signedOut) {
+            # Never delete a profile that is in use: Windows keeps the open files, and the account would be gone
+            Write-Host "   ERROR: '$kioskUser' and its profile were NOT deleted: $kioskUser is still signed in, or Windows still uses its profile." -ForegroundColor Red
+            Write-Host "   Restart the PC (the automatic sign-in is off now, so $kioskUser does not sign in), then run this script again." -ForegroundColor Red
+            $script:accountNotDeleted = $true
+        } else {
+            Remove-LocalUser -Name $kioskUser -ErrorAction SilentlyContinue
+
+            # Remove the profile folder. The player owned it and may have put junctions into it: they are removed as links,
+            # their targets stay (Remove-Item -Recurse of Windows PowerShell 5.1 deleted the targets as administrator)
+            if (Test-Path -LiteralPath $profilePath) {
+                if (-not (Remove-FolderSafely $profilePath (Get-TrustedOwners @($sid)))) {
+                    Write-Warning "The profile folder $profilePath was not removed completely; remove the rest by hand"
+                }
             }
-        }
-        
-        # Remove profile registry entry
-        $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
-        Get-ChildItem $profileListPath | ForEach-Object {
-            $profileImagePath = (Get-ItemProperty $_.PSPath).ProfileImagePath
-            if ($profileImagePath -like "*$kioskUser*") {
-                Remove-Item $_.PSPath -Recurse -Force
+
+            # Remove profile registry entry
+            $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
+            Get-ChildItem $profileListPath | ForEach-Object {
+                $profileImagePath = (Get-ItemProperty $_.PSPath).ProfileImagePath
+                if ($profileImagePath -like "*$kioskUser*") {
+                    Remove-Item $_.PSPath -Recurse -Force
+                }
             }
+
+            Write-Host "   User '$kioskUser' removed" -ForegroundColor Gray
         }
-        
-        Write-Host "   User '$kioskUser' removed" -ForegroundColor Gray
     } else {
         Write-Host "   User '$kioskUser' kept (you can delete manually later)" -ForegroundColor Gray
     }
@@ -463,3 +590,8 @@ Write-Host "Task Manager: Enabled" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Restart the PC for all changes to take effect." -ForegroundColor Yellow
 Write-Host ""
+if ($script:accountNotDeleted) {
+    Write-Host "RESULT: the account '$kioskUser' and its profile are NOT deleted (see the error in step 4)." -ForegroundColor Red
+    Write-Host "Restart the PC, then run this script again and answer y." -ForegroundColor Red
+    exit 1
+}
