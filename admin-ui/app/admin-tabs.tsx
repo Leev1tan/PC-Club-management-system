@@ -227,7 +227,38 @@ type CurrencyView = { code: string; symbol: string; nameUk: string; nameEn: stri
 type Settings = {
   staffPinConfigured: boolean; staffPinUpdatedUtc: string | null; enrollmentTokenConfigured: boolean; allowPendingRegistration: boolean;
   currency?: CurrencyView | null; currencies?: CurrencyView[];
+  language?: string; languages?: string[];
 };
+
+/** Language of the lock screens on the club PCs (uk, en); the admin UI language is a browser choice. */
+function LockScreenLanguage({ settings, toast, onSaved }: { settings: Settings | null; toast: ToastFn; onSaved: () => void }) {
+  const [code, setCode] = useState(settings?.language ?? 'uk');
+  useEffect(() => { if (settings?.language) setCode(settings.language); }, [settings?.language]);
+  const list = settings?.languages ?? [];
+  const name = (c: string) => t.settings.languageNames[c] ?? c;
+
+  const save = async () => {
+    const res = await postJson('/api/settings/language', { code }, 'PUT');
+    if (!res.ok) { toast(await failed(res), 'error'); return; }
+    const saved: { code: string } = await res.json();
+    toast(fmt(t.settings.languageSaved, { name: name(saved.code) }), 'success');
+    onSaved();
+  };
+
+  return (
+    <div className="section-card">
+      <div className="section-card-header"><span className="section-card-title">{t.settings.languageTitle}</span></div>
+      <p className="auth-sub">{t.settings.languageHint}</p>
+      <form className="staff-form" onSubmit={e => { e.preventDefault(); save(); }}>
+        <label className="form-label" htmlFor="club-language" style={{ alignSelf: 'center', margin: 0 }}>{t.settings.languageLabel}</label>
+        <select id="club-language" className="form-select" value={code} onChange={e => setCode(e.target.value)}>
+          {list.map(c => <option key={c} value={c}>{name(c)}</option>)}
+        </select>
+        <button className="btn btn-primary" type="submit" disabled={!list.length || code === settings?.language}>{t.settings.languageSave}</button>
+      </form>
+    </div>
+  );
+}
 
 /** Club currency (display only): UAH, EUR, USD, PLN. The amounts in the database are never converted. */
 function CurrencySettings({ settings, toast, onCurrency }: { settings: Settings | null; toast: ToastFn; onCurrency: (code: string) => void }) {
@@ -294,6 +325,7 @@ export function SettingsTab({ toast, onCurrency }: { toast: ToastFn; onCurrency:
   return (
     <>
       <CurrencySettings settings={settings} toast={toast} onCurrency={code => { onCurrency(code); load(); }} />
+      <LockScreenLanguage settings={settings} toast={toast} onSaved={load} />
 
       <div className="section-card">
         <div className="section-card-header"><span className="section-card-title">{t.settings.pinTitle}</span></div>

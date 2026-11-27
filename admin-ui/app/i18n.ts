@@ -636,6 +636,12 @@ export const uk = {
     currencySave: 'Зберегти валюту',
     currencySaved: 'Валюту клубу змінено: {name} ✓',
     currencyNames: { UAH: 'Гривня', EUR: 'Євро', USD: 'Долар США', PLN: 'Злотий' } as Record<string, string>,
+    languageTitle: '🌐 Мова екранів блокування на ПК',
+    languageHint: 'Мова екрана блокування (вхід гравця, таймер, ігри) на всіх ПК клубу. ПК отримують її за кілька секунд; ПК, який ще жодного разу не з\'єднався з сервером, показує українську. Гравець може тимчасово перемкнути мову на екрані блокування. Мова цієї адмін-панелі перемикається вгорі.',
+    languageLabel: 'Мова',
+    languageSave: 'Зберегти мову',
+    languageSaved: 'Мову екранів блокування змінено: {name} ✓',
+    languageNames: { uk: 'Українська', en: 'English' } as Record<string, string>,
   },
 
   analytics: {
@@ -694,6 +700,8 @@ export const uk = {
   },
 
   errors: {
+    bad_currency: 'Валюта: лише UAH, EUR, USD або PLN',
+    bad_language: 'Мова: лише українська або англійська',
     device_not_found: 'ПК не знайдено',
     device_not_approved: 'ПК не схвалено',
     device_busy: 'На цьому ПК вже є активна сесія',
@@ -1395,6 +1403,12 @@ export const en: typeof uk = {
     currencySave: 'Save the currency',
     currencySaved: 'Club currency changed: {name} ✓',
     currencyNames: { UAH: 'Ukrainian hryvnia', EUR: 'Euro', USD: 'US dollar', PLN: 'Polish złoty' } as Record<string, string>,
+    languageTitle: '🌐 Language of the lock screens',
+    languageHint: 'Language of the lock screen (player login, timer, games) on all club PCs. The PCs get it within a few seconds; a PC that never reached the server shows Ukrainian. A player can switch the language on the lock screen for a while. The language of this admin UI is switched at the top.',
+    languageLabel: 'Language',
+    languageSave: 'Save the language',
+    languageSaved: 'Lock screen language changed: {name} ✓',
+    languageNames: { uk: 'Ukrainian', en: 'English' } as Record<string, string>,
   },
 
   analytics: {
@@ -1453,6 +1467,8 @@ export const en: typeof uk = {
   },
 
   errors: {
+    bad_currency: 'Currency: only UAH, EUR, USD or PLN',
+    bad_language: 'Language: only Ukrainian or English',
     device_not_found: 'PC not found',
     device_not_approved: 'The PC is not approved',
     device_busy: 'This PC already has an active session',
