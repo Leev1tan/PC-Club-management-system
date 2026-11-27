@@ -38,6 +38,8 @@ public partial class Worker : BackgroundService
     private readonly object _gate = new();
     private DateTimeOffset? _sessionEndUtc;
     private ClientSessionInfo? _session;
+    /// <summary>"Log off" of the staff, for the lock screen (a service in session 0 cannot log off the player).</summary>
+    private LogoffRequest? _logoff;
     private bool _manualLockRequested;
     private bool? _lastLocked;
     private DateTimeOffset _lockChangedUtc = DateTimeOffset.UtcNow;
@@ -136,10 +138,12 @@ public partial class Worker : BackgroundService
                     _lockChangedUtc = now;
                 }
                 var reason = _manualLockRequested ? "manual" : sessionExpired ? "session_expired" : "none";
+                if (_logoff != null && now - _logoff.RequestedUtc > LogoffTrigger.MaxAge) _logoff = null;
                 state = new AgentState(locked, remaining, _sessionEndUtc, reason, _serverUrl, _lockChangedUtc, _enrollmentStatus)
                 {
                     AgentPid = Environment.ProcessId,
-                    Session = _session
+                    Session = _session,
+                    Logoff = _logoff
                 };
             }
 
@@ -930,7 +934,7 @@ public partial class Worker : BackgroundService
                         SetManualLock(false);
                         break;
                     case CommandTypes.Logoff:
-                        ExecuteLogoff();
+                        result = ForwardLogoff();
                         break;
                     case CommandTypes.Message:
                         _logger.LogInformation("MESSAGE: {Text}", cmd.Payload?.ToString() ?? "");
@@ -1046,15 +1050,16 @@ public partial class Worker : BackgroundService
         _logger.LogInformation("Shutdown scheduled in 5 seconds (Wake-on-LAN starts the PC again)");
     }
 
-    private void ExecuteLogoff()
+    /// <summary>
+    /// The agent is a service in session 0 (LocalService): "shutdown /l" there logs off nothing in the player's
+    /// session. The lock screen runs in that session, so the agent hands the request to it through state.json
+    /// (for one minute); the lock screen logs the session off once.
+    /// </summary>
+    private string ForwardLogoff()
     {
-        var psi = new ProcessStartInfo("shutdown", "/l")
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        Process.Start(psi);
-        _logger.LogInformation("Logoff initiated");
+        lock (_gate) _logoff = new LogoffRequest { Id = Guid.NewGuid(), RequestedUtc = DateTimeOffset.UtcNow };
+        _logger.LogInformation("Log off: handed to the lock screen of the player's session");
+        return "Sent to the lock screen: it logs off the player's Windows session";
     }
 
     private void SetManualLock(bool isLocked)
@@ -1083,6 +1088,8 @@ public partial class Worker : BackgroundService
         public int AgentPid { get; init; }
         /// <summary>Active session from the last heartbeat (player, tariff, planned end), for display only.</summary>
         public ClientSessionInfo? Session { get; init; }
+        /// <summary>A "log off" of the staff for the lock screen (one minute).</summary>
+        public LogoffRequest? Logoff { get; init; }
     }
 
     private sealed record LauncherConfig(string ServerUrl);

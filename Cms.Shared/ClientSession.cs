@@ -23,3 +23,14 @@ public sealed class ClientSessionInfo
     public decimal? Balance { get; init; }
     public decimal? Bonus { get; init; }
 }
+
+/// <summary>
+/// "Log off" from the admin UI (command logoff). The agent runs as a service in session 0 and cannot log off the
+/// player's Windows session, so it puts this request into state.json for about a minute; the lock screen, which
+/// runs in the player's session, logs that session off once (Cms.Client.LogoffTrigger).
+/// </summary>
+public sealed class LogoffRequest
+{
+    public Guid Id { get; init; }
+    public DateTimeOffset RequestedUtc { get; init; }
+}

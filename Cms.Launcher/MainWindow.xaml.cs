@@ -35,6 +35,10 @@ public partial class MainWindow : Window
     private LauncherState? _lastState;
     private DateTimeOffset _lastStateReadUtc = DateTimeOffset.MinValue;
 
+    // "Log off" of the staff: the agent forwards it in state.json, the lock screen logs this Windows session off
+    private readonly LogoffTrigger _logoff = new(DateTimeOffset.UtcNow);
+    private bool _loggingOff;
+
     // Kiosk mode
     private bool _kioskMode = false;
     private KioskKeyboardHook? _kioskHook;
@@ -73,7 +77,7 @@ public partial class MainWindow : Window
 
     private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_kioskMode && !_lock.StaffOverride)
+        if (_kioskMode && !_lock.StaffOverride && !_loggingOff)
         {
             // Prevent closing in kiosk mode unless staff unlocked
             e.Cancel = true;
@@ -426,6 +430,7 @@ public partial class MainWindow : Window
             if (decision.Locked && !_wasLocked) _languageOverride = null;
             _wasLocked = decision.Locked;
             CheckTeardown(decision, state);
+            if (_logoff.ShouldLogOff(state?.Logoff, now)) LogOffWindowsSession();
             RefreshClientSettings();
             RefreshCatalog();
             TrackGames();
@@ -582,4 +587,6 @@ internal record LauncherState(
     public int AgentPid { get; init; }
     /// <summary>Active session from the server (player, tariff, planned end), for display.</summary>
     public ClientSessionInfo? Session { get; init; }
+    /// <summary>"Log off" of the staff, forwarded by the agent.</summary>
+    public LogoffRequest? Logoff { get; init; }
 }

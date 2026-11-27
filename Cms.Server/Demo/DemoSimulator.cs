@@ -240,7 +240,7 @@ public sealed class DemoSimulator
             case CommandTypes.SessionSet:
                 return ("done", "Session end time updated");
             case CommandTypes.Logoff:
-                return ("done", "Windows user logged off");
+                return ("done", "Sent to the lock screen: it logs off the player's Windows session");
             case CommandTypes.Message:
                 return ("done", "Message shown: " + Truncate(ReadMessageText(cmd.Payload), 200));
             case CommandTypes.Restart:
