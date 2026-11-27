@@ -38,6 +38,9 @@ public class DevicesController : ControllerBase
     public async Task<ActionResult<DeviceRegistrationResponse>> Register([FromBody] DeviceRegistrationRequest request)
     {
         var result = _devices.Register(request);
+        // A PC that joins with the enrollment token (new or reinstalled) is locked unless a session runs on it
+        if (result.Response != null && result.Kind is DeviceRegistrationKind.Enrolled or DeviceRegistrationKind.ReEnrolled)
+            await LockIfNoSessionAsync(result.Response.DeviceId);
         if (result.Response != null && result.Kind != DeviceRegistrationKind.ReRegistered)
         {
             var how = result.Kind switch
@@ -202,17 +205,34 @@ public class DevicesController : ControllerBase
         var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId);
         if (device == null) return NotFound();
 
+        // An unlock of a PC without an active session gives time without payment. The agent gets {"reason":"staff"}:
+        // no time limit, and it ends with the next agent start. While a session runs, the unlock has no payload and
+        // the session end applies (Cms.Shared.UnlockReasons).
+        var withoutSession = type == CommandTypes.Unlock && !await HasActiveSessionAsync(deviceId);
+        if (type == CommandTypes.Unlock)
+            request = request with { Payload = withoutSession ? new { reason = UnlockReasons.Staff } : null };
+
         var cmd = _devices.EnqueueCommand(deviceId, request with { Type = type });
         if (cmd is null) return NotFound();
-
-        // An unlock of a PC without an active session gives time without payment
-        var withoutSession = type == CommandTypes.Unlock &&
-                             !await _db.Sessions.AnyAsync(s => s.DeviceId == deviceId && s.Status == "active");
         var text = type == CommandTypes.Message ? MessageText(request.Payload) : null;
         await AuditAsync(withoutSession ? AuditActions.UnlockWithoutSession : AuditActions.DeviceCommand, deviceId,
             withoutSession ? $"Unlocked {device.Hostname} without an active session (no payment)" : $"Command {type} sent to {device.Hostname}",
             new { type, message = text is { Length: > 200 } ? text[..200] : text });
         return Ok(cmd);
+    }
+
+    private Task<bool> HasActiveSessionAsync(Guid deviceId) =>
+        _db.Sessions.AnyAsync(s => s.DeviceId == deviceId && s.Status == "active");
+
+    /// <summary>
+    /// A club PC is locked unless a session runs on it or staff unlocked it. A PC that joins the club (registered with
+    /// the enrollment token, or approved) gets a "lock" when no session runs on it, also when its agent is of an older
+    /// version that starts unlocked.
+    /// </summary>
+    private async Task LockIfNoSessionAsync(Guid deviceId)
+    {
+        if (await HasActiveSessionAsync(deviceId)) return;
+        _devices.EnqueueCommand(deviceId, new EnqueueCommandRequest(CommandTypes.Lock, null));
     }
 
     private static bool CanPower(System.Security.Claims.ClaimsPrincipal user) =>
@@ -349,6 +369,7 @@ public class DevicesController : ControllerBase
         if (device.Status != DeviceStatuses.Pending) return Conflict(new { error = "Only a pending PC can be approved." });
         device.Status = DeviceStatuses.Approved;
         await _db.SaveChangesAsync();
+        await LockIfNoSessionAsync(deviceId);
         await AuditAsync(AuditActions.DeviceApproved, deviceId, $"PC {device.Hostname} approved", new { device.Hostname, device.LastIp });
         return Ok();
     }
