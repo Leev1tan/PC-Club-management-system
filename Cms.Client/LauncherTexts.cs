@@ -77,6 +77,30 @@ public sealed class LauncherTexts
     public required string EndSessionBalance { get; init; }
     public required string EndSessionFailed { get; init; }
 
+    // Bar orders (during a session)
+    public required string OrderButton { get; init; }
+    public required string OrderTitle { get; init; }
+    public required string OrderEmptyMenu { get; init; }
+    public required string OrderTotal { get; init; }
+    public required string OrderMax { get; init; }
+    public required string OrderPayBalance { get; init; }
+    public required string OrderPayDesk { get; init; }
+    public required string OrderPlace { get; init; }
+    public required string OrderPlaced { get; init; }
+    public required string OrderCancel { get; init; }
+    public required string OrderClose { get; init; }
+    public required string OrderLine { get; init; }
+    public required string OrderStatusNew { get; init; }
+    public required string OrderStatusPreparing { get; init; }
+    public required string OrderStatusDelivered { get; init; }
+    public required string OrderStatusCancelled { get; init; }
+    public required string OrderPaidBalance { get; init; }
+    public required string OrderPayAtDesk { get; init; }
+    public required string OrderOneOpen { get; init; }
+    public required string OrderBalanceLow { get; init; }
+    public required string OrderNotAvailable { get; init; }
+    public required string OrderSoldOut { get; init; }
+
     // Game grid (the catalog of the PC's zone, only during a session)
     public required string GamesTitle { get; init; }
     public required string GamesSearch { get; init; }
@@ -164,6 +188,29 @@ public sealed class LauncherTexts
         EndSessionBalance = "Завершити сесію зараз? Зіграний час буде списано з балансу.",
         EndSessionFailed = "Не вдалося завершити сесію: {0}",
 
+        OrderButton = "🥤 ЗАМОВИТИ",
+        OrderTitle = "// ЗАМОВЛЕННЯ З БАРУ",
+        OrderEmptyMenu = "Зараз у барі немає товарів для замовлення.",
+        OrderTotal = "Разом: {0}",
+        OrderMax = "Не більше {0} за одне замовлення",
+        OrderPayBalance = "З мого балансу ({0})",
+        OrderPayDesk = "Оплачу на касі",
+        OrderPlace = "[ ЗАМОВИТИ ]",
+        OrderPlaced = "Замовлення прийнято. Його принесуть до вашого ПК.",
+        OrderCancel = "[ СКАСУВАТИ ЗАМОВЛЕННЯ ]",
+        OrderClose = "[ ЗАКРИТИ ]",
+        OrderLine = "Замовлення №{0}: {1} · {2} · {3}",
+        OrderStatusNew = "прийнято",
+        OrderStatusPreparing = "готується",
+        OrderStatusDelivered = "видано",
+        OrderStatusCancelled = "скасовано",
+        OrderPaidBalance = "оплачено з балансу",
+        OrderPayAtDesk = "оплата на касі",
+        OrderOneOpen = "У вас уже є відкрите замовлення.",
+        OrderBalanceLow = "Замало грошей на балансі (бонуси не оплачують бар). Оберіть оплату на касі.",
+        OrderNotAvailable = "Замовлення з бару зараз недоступні.",
+        OrderSoldOut = "Одного з товарів уже немає. Оновіть замовлення.",
+
         GamesTitle = "// ІГРИ",
         GamesSearch = "Пошук гри",
         GamesAll = "Усі",
@@ -249,6 +296,29 @@ public sealed class LauncherTexts
         EndSessionPrepaid = "End the session now? Unused paid time is not refunded.",
         EndSessionBalance = "End the session now? The time played is paid from your balance.",
         EndSessionFailed = "The session could not be ended: {0}",
+
+        OrderButton = "🥤 ORDER",
+        OrderTitle = "// ORDER FROM THE BAR",
+        OrderEmptyMenu = "The bar has nothing to order right now.",
+        OrderTotal = "Total: {0}",
+        OrderMax = "At most {0} per order",
+        OrderPayBalance = "From my balance ({0})",
+        OrderPayDesk = "I pay at the desk",
+        OrderPlace = "[ ORDER ]",
+        OrderPlaced = "Order received. It will be brought to your PC.",
+        OrderCancel = "[ CANCEL THE ORDER ]",
+        OrderClose = "[ CLOSE ]",
+        OrderLine = "Order #{0}: {1} · {2} · {3}",
+        OrderStatusNew = "received",
+        OrderStatusPreparing = "being prepared",
+        OrderStatusDelivered = "delivered",
+        OrderStatusCancelled = "cancelled",
+        OrderPaidBalance = "paid from the balance",
+        OrderPayAtDesk = "pay at the desk",
+        OrderOneOpen = "You already have an open order.",
+        OrderBalanceLow = "Not enough money on the balance (bonus does not pay at the bar). Choose to pay at the desk.",
+        OrderNotAvailable = "Bar orders are not available right now.",
+        OrderSoldOut = "One of the products is sold out. Change the order.",
 
         GamesTitle = "// GAMES",
         GamesSearch = "Search games",

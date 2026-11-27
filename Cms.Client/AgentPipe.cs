@@ -13,11 +13,22 @@ public static class PipeOps
     public const string Login = "login";
     /// <summary>The player ends the session (POST /api/devices/{id}/player-logout).</summary>
     public const string Logout = "logout";
+    /// <summary>The bar menu of this PC (GET /api/devices/{id}/bar-menu).</summary>
+    public const string Menu = "menu";
+    /// <summary>A bar order (POST /api/devices/{id}/orders).</summary>
+    public const string Order = "order";
+    /// <summary>The player cancels the new order (POST /api/devices/{id}/orders/cancel).</summary>
+    public const string OrderCancel = "order_cancel";
 
-    public static readonly IReadOnlyList<string> All = new[] { Offers, Login, Logout };
+    public static readonly IReadOnlyList<string> All = new[] { Offers, Login, Logout, Menu, Order, OrderCancel };
 }
 
-public sealed record PipeRequest(string Op, string? Username = null, string? Secret = null, string? Offer = null, int? Minutes = null, Guid? PackageId = null);
+/// <summary>A line of a bar order (product and quantity).</summary>
+public sealed record PipeOrderItem(Guid ProductId, int Quantity);
+
+/// <summary>Items and Payment (balance or desk): a bar order.</summary>
+public sealed record PipeRequest(string Op, string? Username = null, string? Secret = null, string? Offer = null, int? Minutes = null, Guid? PackageId = null,
+    IReadOnlyList<PipeOrderItem>? Items = null, string? Payment = null);
 
 /// <summary>Status: the HTTP status of the server, or 503 when the agent or the server cannot answer. Body: the JSON of the server.</summary>
 public sealed record PipeResponse(int Status, string? Body)

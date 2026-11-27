@@ -9,8 +9,9 @@ namespace Cms.Agent.Service;
 
 /// <summary>
 /// The pipe of the lock screen (Cms.Client.AgentPipe): the launcher runs as the player and cannot read the
-/// device key, so it asks the agent, and the agent asks the server with the key of this PC. Only three
-/// requests exist: the offers of the zone, the player login and the end of the player's session.
+/// device key, so it asks the agent, and the agent asks the server with the key of this PC. Only these requests
+/// exist: the offers of the zone, the player login, the end of the player's session, the bar menu, a bar order and
+/// the player's cancel of a new order.
 /// The secret of a login goes to the server only; it is never logged or written to disk.
 /// </summary>
 public partial class Worker
@@ -65,6 +66,16 @@ public partial class Worker
             {
                 Content = JsonContent.Create(new { username = req.Username, secret = req.Secret, offer = req.Offer, minutes = req.Minutes, packageId = req.PackageId })
             },
+            PipeOps.Menu => new HttpRequestMessage(HttpMethod.Get, $"api/devices/{_deviceId}/bar-menu"),
+            PipeOps.Order => new HttpRequestMessage(HttpMethod.Post, $"api/devices/{_deviceId}/orders")
+            {
+                Content = JsonContent.Create(new
+                {
+                    items = (req.Items ?? Array.Empty<PipeOrderItem>()).Take(20).Select(i => new { productId = i.ProductId, quantity = i.Quantity }),
+                    payment = req.Payment
+                })
+            },
+            PipeOps.OrderCancel => new HttpRequestMessage(HttpMethod.Post, $"api/devices/{_deviceId}/orders/cancel") { Content = JsonContent.Create(new { }) },
             _ => new HttpRequestMessage(HttpMethod.Post, $"api/devices/{_deviceId}/player-logout") { Content = JsonContent.Create(new { }) }
         };
         message.Headers.Add("X-Device-Key", _deviceKey);
@@ -72,7 +83,7 @@ public partial class Worker
         {
             using var resp = await http.SendAsync(message, ct);
             var body = await resp.Content.ReadAsStringAsync(ct);
-            if (resp.IsSuccessStatusCode && req.Op != PipeOps.Offers)
+            if (resp.IsSuccessStatusCode && req.Op is not (PipeOps.Offers or PipeOps.Menu))
             {
                 // The session changed: the next heartbeat brings it to the lock screen at once
                 _nextHeartbeatUtc = DateTimeOffset.UtcNow;

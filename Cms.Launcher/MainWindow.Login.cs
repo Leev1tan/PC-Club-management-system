@@ -205,6 +205,7 @@ public partial class MainWindow
         SessionTariff.Text = session?.Package is { } package ? LauncherTexts.Format(_texts.PackageLine, package)
             : session?.Tariff is { } tariff ? LauncherTexts.Format(_texts.TariffLine, tariff) : string.Empty;
         EndSessionButton.Visibility = player ? Visibility.Visible : Visibility.Collapsed;
+        UpdateOrderStatus();
     }
 
     /// <summary>At 10, 5 and 1 minute left: a sound and a small window on top of the game.</summary>

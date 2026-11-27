@@ -40,6 +40,11 @@ public static class LoginMessages
             "agent_unavailable" or "agent_untrusted" or "agent_not_ready" or "agent_error" => t.AgentUnavailable,
             "server_unreachable" => LauncherTexts.Format(t.NoConnection, "—"),
             "session_not_found" or "session_ended" or "session_no_player" => t.SessionGone,
+            "order_already_open" => t.OrderOneOpen,
+            "insufficient_balance_bar" or "order_balance_needs_player" => t.OrderBalanceLow,
+            "orders_disabled" or "order_needs_session" or "order_not_found" or "order_not_open" or "order_preparing" => t.OrderNotAvailable,
+            "out_of_stock" or "product_inactive" or "product_not_found" or "order_bad_lines" => t.OrderSoldOut,
+            "order_too_much" => LauncherTexts.Format(t.OrderMax, r.FirstArg ?? "?"),
             _ => LauncherTexts.Format(t.ServerError, r.Status)
         };
     }

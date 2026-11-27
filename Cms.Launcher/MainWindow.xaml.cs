@@ -263,6 +263,7 @@ public partial class MainWindow : Window
         if (LoginButton.IsEnabled) LoginButton.Content = _texts.LoginButton;
         OffersTitleText.Text = _texts.OffersTitle;
         EndSessionButton.Content = _texts.EndSessionButton;
+        ApplyOrderTexts();
         RenderOffers();
         SessionActiveText.Text = _texts.SessionActive;
         SessionStaffHint.Text = _texts.StaffHint;
