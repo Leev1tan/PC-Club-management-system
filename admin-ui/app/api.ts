@@ -1,4 +1,4 @@
-import { errorMessage } from './i18n';
+import { errorMessage, t } from './i18n';
 
 // API access for the admin UI.
 // Same origin by default: the API is served under /api on the host that serves this UI
@@ -9,7 +9,8 @@ export const API = process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5081');
 
 export type Role = 'Owner' | 'Manager' | 'Cashier' | 'Tech';
-export type Me = { id: string; username: string; displayName: string; role: Role };
+/** The signed-in staff member; currency = ISO code of the club currency (UAH, EUR, USD, PLN). */
+export type Me = { id: string; username: string; displayName: string; role: Role; currency?: string };
 export type DemoAccount = { username: string; password: string; role: Role };
 export type AuthStatus = { setupRequired: boolean; demoMode: boolean; demoAccounts: DemoAccount[] | null };
 
@@ -49,8 +50,8 @@ export const postJson = (path: string, body?: unknown, method = 'POST') =>
   api(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
 
 export async function errorText(res: Response): Promise<string> {
-  if (res.status === 403) return 'Немає прав для цієї дії / Not allowed for your role';
-  if (res.status === 429) return 'Забагато спроб, зачекайте / Too many attempts, wait';
+  if (res.status === 403) return t.common.forbidden;
+  if (res.status === 429) return t.common.tooMany;
   const text = await res.text();
   try {
     const json = JSON.parse(text);

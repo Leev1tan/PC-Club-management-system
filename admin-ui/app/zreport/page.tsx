@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { API, api } from '../api';
-import { dateTime, fmt, lang, methodLabel, money, t } from '../i18n';
+import { API, Me, api, getJson } from '../api';
+import { dateTime, fmt, lang, methodLabel, money, setCurrency, t } from '../i18n';
 import { MethodSums, ZReport, signedMoney } from '../pos';
 
 /**
@@ -19,16 +19,20 @@ export default function ZReportPage() {
     if (!Number.isInteger(n) || n <= 0) { setError('?id='); return; }
     setId(n);
     (async () => {
+      // The club currency of the signed-in staff member (amounts are shown with its symbol)
+      const me = await getJson<Me>('/api/auth/me');
+      if (me) setCurrency(me.currency);
       const res = await api(`/api/shifts/${n}/report`);
       if (res.status === 401) { window.location.href = '/'; return; }
       if (res.status === 403) { setError(t.z.notAllowed); return; }
       if (!res.ok) { setError(`HTTP ${res.status}`); return; }
       setReport(await res.json());
-    })().catch(() => setError('Server not reachable'));
+    })().catch(() => setError(t.common.unreachable));
   }, []);
 
   if (error) return <div className="zreport"><p className="auth-error">{error}</p><a className="btn" href="/">{t.back}</a></div>;
-  if (!report || id == null) return <div className="zreport"><p>{t.loading}</p></div>;
+  // No text while loading: the static page is rendered in Ukrainian, the browser may show English (no mismatch)
+  if (!report || id == null) return <div className="zreport"><p aria-busy="true">…</p></div>;
 
   const z = report;
   const s = z.shift;

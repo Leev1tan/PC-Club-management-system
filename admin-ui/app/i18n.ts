@@ -1,7 +1,8 @@
 // UI strings of the admin UI in Ukrainian (uk) and English (en), with the same keys.
 // The language is chosen in the top bar and kept in localStorage ("ccms.lang"); `t` is the dictionary
-// of that language (read once when the page loads; a switch reloads the page). Screens of phases 1-3
-// that are not moved here yet still show Ukrainian text.
+// of that language (read once when the page loads; a switch reloads the page). Every screen takes its
+// texts from here, so no screen mixes the two languages.
+// Money: the texts use the hryvnia sign; `t` replaces it with the symbol of the club currency (setCurrency).
 // Server errors carry a stable `code` (see Cms.Server/Billing/BillingResult.cs); errors.<code> is the text.
 
 export const uk = {
@@ -244,8 +245,8 @@ export const uk = {
   } as Record<string, string>,
 
   audit: {
-    packages: 'Пакети / Packages',
-    billing: 'Кешбек / Cashback',
+    packages: 'Пакети',
+    billing: 'Кешбек',
     shifts: 'Зміни',
     bar: 'Бар і склад',
     emergency: 'Аварійне розблокування PIN',
@@ -412,6 +413,284 @@ export const uk = {
     notAllowed: 'Касир бачить Z-звіт своєї зміни після її закриття.',
     other: 'Інші операції',
     count: 'шт.',
+  },
+
+  common: {
+    errorPrefix: 'Помилка',
+    create: 'Створити',
+    all: 'Всі',
+    forbidden: 'Немає прав для цієї дії',
+    tooMany: 'Забагато спроб, зачекайте',
+    unreachable: 'Сервер недоступний',
+  },
+
+  roles: { Owner: 'Власник', Manager: 'Менеджер', Cashier: 'Касир', Tech: 'Технік' } as Record<string, string>,
+
+  auth: {
+    title: 'Вхід персоналу',
+    username: 'Логін',
+    password: 'Пароль',
+    signIn: 'Увійти',
+    wrong: 'Невірний логін або пароль',
+    demoAccounts: 'LIVE DEMO — публічні демо-акаунти',
+    demoOnly: 'Ці акаунти існують лише в демо-режимі.',
+    setupTitle: 'Перший запуск',
+    setupSub: 'Створіть акаунт власника з одноразовим кодом налаштування. Код — у файлі setup-code.txt у каталозі даних сервера (Windows: C:\\ProgramData\\PCClub, Docker: docker compose exec server cat /app/data/setup-code.txt).',
+    setupCode: 'Код налаштування',
+    ownerUsername: 'Логін власника',
+    displayName: 'Ім\'я',
+    passwordMin: 'Пароль (мін. 8)',
+    passwordRepeat: 'Повторіть пароль',
+    mismatch: 'Паролі не збігаються',
+    createOwner: 'Створити власника',
+  },
+
+  banner: {
+    resetsEvery: 'Дані скидаються кожні {hours} год',
+    resetsOnRestart: 'Дані скидаються при перезапуску',
+    next: 'наступне скидання о {time}',
+    simulated: 'ПК симульовані',
+  },
+  top: { pcsOnline: '{online}/{total} ПК онлайн' },
+
+  ago: {
+    open: 'Відкрита',
+    over: 'Завершено',
+    hm: '{h} год {m} хв',
+    m: '{m} хв',
+    never: 'Ніколи',
+    now: 'Щойно',
+    minutes: '{n} хв тому',
+    hours: '{n} год тому',
+    days: '{n} дн тому',
+  },
+
+  dashboard: {
+    totalPcs: 'Всього ПК',
+    online: '{n} онлайн',
+    free: 'Вільних',
+    ready: 'Готові до гри',
+    active: 'Активні сесії',
+    playing: 'Зараз грають',
+    revenueToday: 'Виручка сьогодні',
+    week: '7 днів: {amount}',
+    activeTitle: '🎮 Активні сесії',
+    noActive: 'Немає активних сесій',
+    noActiveHint: 'Розпочніть сесію на карті ПК',
+    zones: '🗺️ Зони',
+    zoneSummary: '{pcs} ПК · {free} вільних',
+  },
+
+  map: {
+    title: 'Карта ПК',
+    summary: '{free} вільних · {busy} зайнятих',
+    empty: 'Немає пристроїв',
+    emptyHint: 'Встановіть агент на ПК, щоб вони з\'явились тут',
+    free: 'Вільний',
+    busy: 'Зайнятий',
+    offline: 'Офлайн',
+    locked: 'Заблоковано',
+    unlocked: 'Розблоковано',
+    pendingCommands: 'Команди чекають на підтвердження від ПК',
+    start: '🎮 Розпочати сесію',
+    end: '⏹️ Завершити сесію',
+    lock: '🔒 Заблокувати',
+    unlock: '🔓 Розблокувати',
+    restart: '🔄 Перезавантажити',
+    message: '💬 Повідомлення',
+    logoff: '🚪 Вийти з системи',
+    messagePrompt: 'Повідомлення на екран {host}:',
+    commandSent: 'Команду «{type}» надіслано',
+  },
+
+  devices: {
+    title: 'Пристрої',
+    online: '{n} онлайн',
+    empty: 'Немає пристроїв',
+    emptyHint: 'Агент реєструє ПК при першому підключенні',
+    col: { name: 'Ім\'я', status: 'Статус', enrollment: 'Підключення', zone: 'Зона', ip: 'IP', os: 'ОС', lastSeen: 'Останній зв\'язок', actions: 'Дії' },
+    statusOnline: 'Онлайн',
+    statusOffline: 'Офлайн',
+    pending: 'Чекає схвалення',
+    revoked: 'Відкликано',
+    approved: 'Схвалено',
+    noZone: 'Без зони',
+    approve: 'Схвалити',
+    reject: 'Відхилити',
+    restart: 'Перезавантажити',
+    lock: 'Заблокувати',
+    logoff: 'Вийти з системи',
+    revoke: 'Відкликати ключ ПК',
+    confirmRevoke: 'Відкликати {host}? Ключ ПК перестане працювати (історія залишиться).',
+    confirmReject: 'Відхилити {host}?',
+    approvedToast: '{host} схвалено ✓',
+    rejectedToast: '{host} відхилено',
+    revokedToast: '{host} відкликано',
+    zoneAssigned: 'Зону призначено ✓',
+    offlineShort: 'офлайн',
+  },
+
+  sessions: {
+    title: 'Сесії',
+    active: 'Активні',
+    ended: 'Завершені',
+    col: { pc: 'ПК', player: 'Гравець', tariff: 'Тариф', start: 'Початок', left: 'Залишилось', cost: 'Вартість', status: 'Статус' },
+    empty: 'Немає сесій',
+    statusEnded: 'Завершена',
+    statusActive: 'Активна',
+  },
+
+  players: {
+    title: 'Гравці',
+    count: '{n} зареєстровано',
+    add: '+ Новий гравець',
+    empty: 'Немає гравців',
+    emptyHint: 'Створіть гравця кнопкою «Новий гравець»',
+    col: { login: 'Логін', name: 'Ім\'я', balance: 'Баланс', bonus: 'Бонуси', created: 'Зареєстрований', actions: 'Дії' },
+    pin: 'Пароль / PIN',
+    pinPrompt: 'Новий пароль або PIN для @{username} (мін. 4 символи):',
+    pinChanged: 'Пароль гравця змінено ✓',
+    created: 'Гравця @{username} створено ✓',
+    newTitle: '👤 Новий гравець',
+    login: 'Логін',
+    name: 'Ім\'я',
+    password: 'Пароль або PIN (мін. 4) — для входу на екрані блокування',
+  },
+
+  zones: {
+    title: '🗺️ Зони',
+    add: '+ Додати зону',
+    emptyHint: 'Зони групують ПК за місцем і ціною',
+    summary: '{pcs} ПК · {packages} пакетів',
+    newTitle: '🗺️ Нова зона',
+    name: 'Назва',
+    namePlaceholder: 'напр. VIP, Стандарт, Консолі...',
+    color: 'Колір',
+    created: 'Зону «{name}» створено ✓',
+    deleted: 'Зону видалено',
+    packagePlaceholder: 'напр. 3 години, Нічний 22:00–08:00',
+  },
+
+  auditPage: {
+    title: 'Журнал дій',
+    readOnly: 'Лише читання · записи не змінюються й не видаляються',
+    unlockUnpaid: 'Розблокування без оплати',
+    balances: 'Баланси',
+    sessions: 'Сесії',
+    tariffs: 'Тарифи',
+    logins: 'Входи',
+    staff: 'Персонал',
+    pcs: 'ПК',
+    settings: 'Налаштування',
+    actor: 'Логін',
+    col: { time: 'Час', who: 'Хто', action: 'Дія', description: 'Опис', ip: 'IP' },
+    empty: 'Немає записів',
+  },
+
+  staff: {
+    newTitle: '👤 Новий акаунт персоналу',
+    username: 'Логін',
+    displayName: 'Ім\'я',
+    password: 'Пароль (мін. 8)',
+    created: 'Акаунт {username} створено ✓',
+    saved: 'Збережено ✓ (активні входи цього акаунта завершено)',
+    resetPrompt: 'Новий пароль для {username} (мін. 8 символів):',
+    passwordChanged: 'Пароль змінено ✓',
+    col: { login: 'Логін', name: 'Ім\'я', role: 'Роль', status: 'Статус', lastLogin: 'Останній вхід', actions: 'Дії' },
+    you: ' (ви)',
+    active: 'Активний',
+    disabled: 'Вимкнено',
+    disable: 'Вимкнути',
+    enable: 'Увімкнути',
+    passwordButton: 'Пароль',
+  },
+
+  settings: {
+    pinTitle: '🔑 PIN персоналу для екрана блокування',
+    pinHint: 'Ctrl+Shift+U на ПК + цей PIN розблоковує ПК аварійно, також коли сервер або агент не працює. Сервер зберігає лише хеш (PBKDF2); ПК перевіряють PIN локально. Мінімум 8 символів, краще цифри й літери.',
+    pinState: 'Стан',
+    pinSet: 'задано {time}',
+    pinNotSet: 'НЕ задано — аварійного розблокування немає',
+    newPin: 'Новий PIN',
+    repeatPin: 'Повторіть PIN',
+    savePin: 'Зберегти PIN',
+    removePin: 'Видалити PIN',
+    pinMismatch: 'PIN не збігається',
+    pinSaved: 'PIN персоналу збережено ✓ ПК отримають його за кілька секунд',
+    removeConfirm: 'Видалити PIN? Аварійне розблокування на ПК стане неможливим.',
+    pinRemoved: 'PIN видалено',
+    enrollTitle: '🖥️ Підключення ПК',
+    tokenSet: 'Токен підключення: задано на сервері (CMS_ENROLLMENT_TOKEN).',
+    tokenNotSet: 'Токен підключення: не задано.',
+    pendingWait: 'ПК без токена чекають на схвалення у вкладці «Пристрої».',
+    pendingRefused: 'ПК без токена відхиляються.',
+    clientHint: 'Клієнт: ClubClientSetup.exe -ServerUrl "http://сервер:5081" -EnrollmentToken "…"',
+    passwordTitle: '🔒 Мій пароль',
+    currentPassword: 'Поточний пароль',
+    newPassword: 'Новий пароль (мін. 8)',
+    change: 'Змінити',
+    passwordChanged: 'Пароль змінено ✓',
+    currencyTitle: '💱 Валюта клубу',
+    currencyHint: 'Валюта змінює лише відображення сум і заголовки CSV. Суми в базі не перераховуються: після зміни валюти перевірте ціни тарифів, пакетів і бару. Нові записи журналу отримують новий символ, старі залишаються як є.',
+    currencyLabel: 'Валюта',
+    currencySave: 'Зберегти валюту',
+    currencySaved: 'Валюту клубу змінено: {name} ✓',
+    currencyNames: { UAH: 'Гривня', EUR: 'Євро', USD: 'Долар США', PLN: 'Злотий' } as Record<string, string>,
+  },
+
+  analytics: {
+    title: 'Аналітика',
+    today: 'Сьогодні',
+    d7: '7 днів',
+    d30: '30 днів',
+    csv: '⬇️ CSV (UA, Excel)',
+    csvEn: '⬇️ CSV (EN)',
+    failed: 'Не вдалося завантажити аналітику',
+    periodLine: 'Період: {range} · час клубу {zone} · з журналу операцій, сесій і чеків',
+    revenue: 'Виручка',
+    revenueHint: 'час на ПК + бар (нетто)',
+    time: 'Час на ПК',
+    bar: 'Бар (нетто)',
+    barShort: 'Бар',
+    sessions: '{n} оплачених сесій',
+    receipts: '{n} чеків',
+    avgTicket: 'Середній чек сесії',
+    avgReceipt: 'чек бару: {amount}',
+    occupancy: 'Завантаженість',
+    occupancyHint: '{busy} з {capacity} ПК-годин',
+    refunds: 'Повернення',
+    refundsHint: 'бар {bar} · з балансу {balance}',
+    bonus: 'Бонуси нараховано',
+    bonusHint: 'витрачено на час: {spent}',
+    topUps: 'Поповнення (не виручка)',
+    cashDesk: 'каса: готівка {cash} · картка {card}',
+    chartByDay: 'Виручка за днями',
+    chartByHour: 'Виручка за годинами',
+    methods: 'Виручка за способом оплати',
+    zones: 'Завантаженість за зонами',
+    allPcs: 'Усі ПК',
+    noZone: 'Без зони',
+    pcs: '{n} ПК',
+    busyHours: 'зайнято {hours} год',
+    heatmap: 'Завантаженість: день тижня × година',
+    heatmapHint: 'Частка зайнятих ПК у кожну годину тижня за період (час клубу). Пусті рамки: цієї години немає в періоді.',
+    cell: '{day} {hour}:00 — {value}',
+    notInPeriod: 'немає в періоді',
+    showNumbers: 'Показати числа',
+    topProducts: 'Топ товарів бару',
+    product: 'Товар',
+    qty: 'Кількість',
+    amount: 'Сума',
+    shifts: 'Зміни й розбіжності каси',
+    shiftsClosed: 'Закрито змін: {n}',
+    varianceTotal: 'розбіжність разом {amount}',
+    shortage: 'нестача {amount}',
+    surplus: 'надлишок {amount}',
+    noVariance: 'Усі зміни закрито без розбіжності.',
+    shiftLine: 'зміна #{id} · {time} · {who}',
+    checkOk: 'Збігається з журналом операцій ({rows} рядків) і з Z-звітами змін, що повністю в періоді ({shifts}) ✓',
+    checkBad: 'Суми НЕ збігаються з журналом операцій або Z-звітами — перевірте журнал',
+    noData: 'Немає даних за період',
   },
 
   errors: {
@@ -895,6 +1174,284 @@ export const en: typeof uk = {
     count: 'pcs',
   },
 
+  common: {
+    errorPrefix: 'Error',
+    create: 'Create',
+    all: 'All',
+    forbidden: 'Your role may not do this',
+    tooMany: 'Too many attempts, wait a moment',
+    unreachable: 'Server not reachable',
+  },
+
+  roles: { Owner: 'Owner', Manager: 'Manager', Cashier: 'Cashier', Tech: 'Tech' } as Record<string, string>,
+
+  auth: {
+    title: 'Staff sign-in',
+    username: 'User name',
+    password: 'Password',
+    signIn: 'Sign in',
+    wrong: 'Wrong user name or password',
+    demoAccounts: 'LIVE DEMO — public demo accounts',
+    demoOnly: 'These accounts exist only in demo mode.',
+    setupTitle: 'First start',
+    setupSub: 'Create the owner account with the one-time setup code. The code is in setup-code.txt in the server data directory (Windows: C:\\ProgramData\\PCClub, Docker: docker compose exec server cat /app/data/setup-code.txt).',
+    setupCode: 'Setup code',
+    ownerUsername: 'Owner user name',
+    displayName: 'Display name',
+    passwordMin: 'Password (min. 8)',
+    passwordRepeat: 'Repeat the password',
+    mismatch: 'The passwords do not match',
+    createOwner: 'Create the owner',
+  },
+
+  banner: {
+    resetsEvery: 'Data resets every {hours} h',
+    resetsOnRestart: 'Data resets on restart',
+    next: 'next reset at {time}',
+    simulated: 'PCs are simulated',
+  },
+  top: { pcsOnline: '{online}/{total} PCs online' },
+
+  ago: {
+    open: 'Open-ended',
+    over: 'Over',
+    hm: '{h} h {m} min',
+    m: '{m} min',
+    never: 'Never',
+    now: 'Just now',
+    minutes: '{n} min ago',
+    hours: '{n} h ago',
+    days: '{n} d ago',
+  },
+
+  dashboard: {
+    totalPcs: 'PCs',
+    online: '{n} online',
+    free: 'Free',
+    ready: 'Ready to play',
+    active: 'Active sessions',
+    playing: 'Playing now',
+    revenueToday: 'Revenue today',
+    week: '7 days: {amount}',
+    activeTitle: '🎮 Active sessions',
+    noActive: 'No active sessions',
+    noActiveHint: 'Start a session on the PC map',
+    zones: '🗺️ Zones',
+    zoneSummary: '{pcs} PCs · {free} free',
+  },
+
+  map: {
+    title: 'PC map',
+    summary: '{free} free · {busy} busy',
+    empty: 'No devices',
+    emptyHint: 'Install the agent on the PCs and they appear here',
+    free: 'Free',
+    busy: 'Busy',
+    offline: 'Offline',
+    locked: 'Locked',
+    unlocked: 'Unlocked',
+    pendingCommands: 'Commands wait for the PC to confirm them',
+    start: '🎮 Start a session',
+    end: '⏹️ End the session',
+    lock: '🔒 Lock',
+    unlock: '🔓 Unlock',
+    restart: '🔄 Restart',
+    message: '💬 Message',
+    logoff: '🚪 Log off',
+    messagePrompt: 'Message on the screen of {host}:',
+    commandSent: 'Command "{type}" sent',
+  },
+
+  devices: {
+    title: 'Devices',
+    online: '{n} online',
+    empty: 'No devices',
+    emptyHint: 'The agent registers a PC when it connects for the first time',
+    col: { name: 'Name', status: 'Status', enrollment: 'Enrollment', zone: 'Zone', ip: 'IP', os: 'OS', lastSeen: 'Last seen', actions: 'Actions' },
+    statusOnline: 'Online',
+    statusOffline: 'Offline',
+    pending: 'Waits for approval',
+    revoked: 'Revoked',
+    approved: 'Approved',
+    noZone: 'No zone',
+    approve: 'Approve',
+    reject: 'Reject',
+    restart: 'Restart',
+    lock: 'Lock',
+    logoff: 'Log off',
+    revoke: 'Revoke the PC key',
+    confirmRevoke: 'Revoke {host}? The key of the PC stops working (the history stays).',
+    confirmReject: 'Reject {host}?',
+    approvedToast: '{host} approved ✓',
+    rejectedToast: '{host} rejected',
+    revokedToast: '{host} revoked',
+    zoneAssigned: 'Zone set ✓',
+    offlineShort: 'offline',
+  },
+
+  sessions: {
+    title: 'Sessions',
+    active: 'Active',
+    ended: 'Ended',
+    col: { pc: 'PC', player: 'Player', tariff: 'Tariff', start: 'Start', left: 'Left', cost: 'Cost', status: 'Status' },
+    empty: 'No sessions',
+    statusEnded: 'Ended',
+    statusActive: 'Active',
+  },
+
+  players: {
+    title: 'Players',
+    count: '{n} registered',
+    add: '+ New player',
+    empty: 'No players',
+    emptyHint: 'Create a player with the button "New player"',
+    col: { login: 'User name', name: 'Name', balance: 'Balance', bonus: 'Bonus', created: 'Registered', actions: 'Actions' },
+    pin: 'Password / PIN',
+    pinPrompt: 'New password or PIN for @{username} (min. 4 characters):',
+    pinChanged: 'Player password changed ✓',
+    created: 'Player @{username} created ✓',
+    newTitle: '👤 New player',
+    login: 'User name',
+    name: 'Name',
+    password: 'Password or PIN (min. 4) — for the sign-in on the lock screen',
+  },
+
+  zones: {
+    title: '🗺️ Zones',
+    add: '+ Add a zone',
+    emptyHint: 'Zones group the PCs by place and price',
+    summary: '{pcs} PCs · {packages} packages',
+    newTitle: '🗺️ New zone',
+    name: 'Name',
+    namePlaceholder: 'e.g. VIP, Standard, Consoles...',
+    color: 'Colour',
+    created: 'Zone "{name}" created ✓',
+    deleted: 'Zone deleted',
+    packagePlaceholder: 'e.g. 3 hours, Night 22:00–08:00',
+  },
+
+  auditPage: {
+    title: 'Audit log',
+    readOnly: 'Read only · rows are never changed or deleted',
+    unlockUnpaid: 'Unlock without payment',
+    balances: 'Balances',
+    sessions: 'Sessions',
+    tariffs: 'Tariffs',
+    logins: 'Logins',
+    staff: 'Staff',
+    pcs: 'PCs',
+    settings: 'Settings',
+    actor: 'User name',
+    col: { time: 'Time', who: 'Who', action: 'Action', description: 'Description', ip: 'IP' },
+    empty: 'No rows',
+  },
+
+  staff: {
+    newTitle: '👤 New staff account',
+    username: 'User name',
+    displayName: 'Display name',
+    password: 'Password (min. 8)',
+    created: 'Account {username} created ✓',
+    saved: 'Saved ✓ (the active sign-ins of this account have ended)',
+    resetPrompt: 'New password for {username} (min. 8 characters):',
+    passwordChanged: 'Password changed ✓',
+    col: { login: 'User name', name: 'Name', role: 'Role', status: 'Status', lastLogin: 'Last sign-in', actions: 'Actions' },
+    you: ' (you)',
+    active: 'Active',
+    disabled: 'Disabled',
+    disable: 'Disable',
+    enable: 'Enable',
+    passwordButton: 'Password',
+  },
+
+  settings: {
+    pinTitle: '🔑 Staff PIN for the lock screen',
+    pinHint: 'Ctrl+Shift+U on a PC and this PIN unlock the PC in an emergency, also when the server or the agent is down. The server keeps only a hash (PBKDF2); the PCs check the PIN locally. At least 8 characters, digits and letters are best.',
+    pinState: 'State',
+    pinSet: 'set {time}',
+    pinNotSet: 'NOT set — no emergency unlock',
+    newPin: 'New PIN',
+    repeatPin: 'Repeat the PIN',
+    savePin: 'Save the PIN',
+    removePin: 'Remove the PIN',
+    pinMismatch: 'The PINs do not match',
+    pinSaved: 'Staff PIN saved ✓ The PCs get it within a few seconds',
+    removeConfirm: 'Remove the PIN? Emergency unlock on the PCs becomes impossible.',
+    pinRemoved: 'PIN removed',
+    enrollTitle: '🖥️ PC enrollment',
+    tokenSet: 'Enrollment token: set on the server (CMS_ENROLLMENT_TOKEN).',
+    tokenNotSet: 'Enrollment token: not set.',
+    pendingWait: 'PCs without the token wait for approval in the tab "Devices".',
+    pendingRefused: 'PCs without the token are refused.',
+    clientHint: 'Client: ClubClientSetup.exe -ServerUrl "http://server:5081" -EnrollmentToken "…"',
+    passwordTitle: '🔒 My password',
+    currentPassword: 'Current password',
+    newPassword: 'New password (min. 8)',
+    change: 'Change',
+    passwordChanged: 'Password changed ✓',
+    currencyTitle: '💱 Club currency',
+    currencyHint: 'The currency changes only how amounts are shown and the CSV headers. The amounts in the database are not converted: after a change, check the prices of the tariffs, packages and bar. New ledger rows get the new symbol; older rows stay as they are.',
+    currencyLabel: 'Currency',
+    currencySave: 'Save the currency',
+    currencySaved: 'Club currency changed: {name} ✓',
+    currencyNames: { UAH: 'Ukrainian hryvnia', EUR: 'Euro', USD: 'US dollar', PLN: 'Polish złoty' } as Record<string, string>,
+  },
+
+  analytics: {
+    title: 'Analytics',
+    today: 'Today',
+    d7: '7 days',
+    d30: '30 days',
+    csv: '⬇️ CSV (UA, Excel)',
+    csvEn: '⬇️ CSV (EN)',
+    failed: 'The analytics could not be loaded',
+    periodLine: 'Period: {range} · club time {zone} · from the ledger, the sessions and the receipts',
+    revenue: 'Revenue',
+    revenueHint: 'PC time + bar (net)',
+    time: 'PC time',
+    bar: 'Bar (net)',
+    barShort: 'Bar',
+    sessions: '{n} paid sessions',
+    receipts: '{n} receipts',
+    avgTicket: 'Average session',
+    avgReceipt: 'bar receipt: {amount}',
+    occupancy: 'Occupancy',
+    occupancyHint: '{busy} of {capacity} PC-hours',
+    refunds: 'Refunds',
+    refundsHint: 'bar {bar} · from balances {balance}',
+    bonus: 'Bonus issued',
+    bonusHint: 'spent on PC time: {spent}',
+    topUps: 'Top-ups (not revenue)',
+    cashDesk: 'desk: cash {cash} · card {card}',
+    chartByDay: 'Revenue by day',
+    chartByHour: 'Revenue by hour',
+    methods: 'Revenue by payment method',
+    zones: 'Occupancy by zone',
+    allPcs: 'All PCs',
+    noZone: 'No zone',
+    pcs: '{n} PCs',
+    busyHours: 'busy {hours} h',
+    heatmap: 'Occupancy: weekday × hour',
+    heatmapHint: 'Share of busy PCs in each hour of the week over the period (club time). Empty frames: that hour is not in the period.',
+    cell: '{day} {hour}:00 — {value}',
+    notInPeriod: 'not in the period',
+    showNumbers: 'Show numbers',
+    topProducts: 'Top bar products',
+    product: 'Product',
+    qty: 'Quantity',
+    amount: 'Amount',
+    shifts: 'Shifts and cash variance',
+    shiftsClosed: 'Shifts closed: {n}',
+    varianceTotal: 'variance in total {amount}',
+    shortage: 'short {amount}',
+    surplus: 'over {amount}',
+    noVariance: 'Every shift closed without a variance.',
+    shiftLine: 'shift #{id} · {time} · {who}',
+    checkOk: 'Matches the ledger ({rows} rows) and the Z-reports of the shifts fully in the period ({shifts}) ✓',
+    checkBad: 'The sums do NOT match the ledger or the Z-reports — check the ledger',
+    noData: 'No data for the period',
+  },
+
   errors: {
     device_not_found: 'PC not found',
     device_not_approved: 'The PC is not approved',
@@ -979,7 +1536,56 @@ function readLang(): Lang {
 
 /** Language of this page load (the static export renders "uk"; the browser reads the saved choice). */
 export const lang: Lang = readLang();
-export const t: typeof uk = lang === 'en' ? en : uk;
+
+// ===== Club currency (a club setting of the owner; display only, amounts are never converted) =====
+export type CurrencyCode = 'UAH' | 'EUR' | 'USD' | 'PLN';
+export const currencies: { code: CurrencyCode; symbol: string }[] = [
+  { code: 'UAH', symbol: '₴' }, { code: 'EUR', symbol: '€' }, { code: 'USD', symbol: '$' }, { code: 'PLN', symbol: 'zł' },
+];
+const CurrencyKey = 'ccms.currency';
+const isCurrency = (code: unknown): code is CurrencyCode => currencies.some(c => c.code === code);
+const symbolOf = (code: CurrencyCode) => currencies.find(c => c.code === code)!.symbol;
+
+function readCurrency(): CurrencyCode {
+  if (typeof window === 'undefined') return 'UAH';
+  try {
+    const saved = window.localStorage.getItem(CurrencyKey);
+    return isCurrency(saved) ? saved : 'UAH';
+  } catch {
+    return 'UAH';
+  }
+}
+
+/** The dictionary with the hryvnia sign replaced by the club currency symbol in every text. */
+function localize<T>(value: T, symbol: string): T {
+  if (symbol === '₴') return value;
+  if (typeof value === 'string') return value.split('₴').join(symbol) as T;
+  if (Array.isArray(value)) return value.map(v => localize(v, symbol)) as T;
+  if (value && typeof value === 'object')
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, localize(v, symbol)])) as T;
+  return value;
+}
+
+let currencyCode: CurrencyCode = readCurrency();
+const base: typeof uk = lang === 'en' ? en : uk;
+/** Texts of this language and the club currency (a live binding: setCurrency replaces it). */
+export let t: typeof uk = localize(base, symbolOf(currencyCode));
+
+/** ISO code of the club currency shown now. */
+export const currency = () => currencyCode;
+
+/**
+ * Sets the club currency from the server (/api/auth/me). Returns true when it changed: the caller then
+ * renders again, so every screen shows the new symbol. Saved in the browser for the next page load.
+ */
+export function setCurrency(code: string | null | undefined): boolean {
+  const next: CurrencyCode = isCurrency(code) ? code : 'UAH';
+  if (next === currencyCode) return false;
+  currencyCode = next;
+  t = localize(base, symbolOf(next));
+  try { window.localStorage.setItem(CurrencyKey, next); } catch { /* private mode: this page load only */ }
+  return true;
+}
 /** Locale for dates and times. */
 export const locale = lang === 'en' ? 'en-GB' : 'uk-UA';
 
@@ -1002,6 +1608,8 @@ export function fmt(text: string, values: Record<string, string | number>): stri
 }
 
 export const money = (n: number | null | undefined) => (n ?? 0).toFixed(2);
+/** Amount with the club currency symbol: "150.00 ₴", "12.50 €". */
+export const cash = (n: number | null | undefined) => `${money(n)} ${t.currency}`;
 
 export const dateTime = (iso: string, seconds = false) => {
   const d = new Date(iso);
