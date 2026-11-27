@@ -513,6 +513,23 @@ erDiagram
   written without the HTTP context (no IP) and without the data. `ReservationService.ErasePersonalDataAsync` (in the
   15-second job) clears them `EraseAfterDays` after the end of the slot and writes the ids to the audit log.
 
+## Events and tournaments (phase 8)
+
+- `Events`, `EventDevices`, `EventTeams`, `EventPlayers`, `EventMatches` (migration `Events`); `LedgerEntries.EventId` for the
+  entry fee rows. `Events/EventService` does every change; `Events/EventJobService` starts and finishes events every 15 s.
+- Booking: create, move, register, withdraw and cancel run under the reservation lock (PostgreSQL advisory lock, SQLite one
+  writer). The open events are fixed items of the reservation plan (`EventHolds.PlanItemsAsync`), so reservations, the
+  public page and events see each other.
+- Hold: `EventHolds.ActiveAsync` (from the hold time before the start until the end) blocks session starts
+  (`SessionService.CheckHoldAsync`) and player logins; the heartbeat sends it as `reservation` with `isEvent = true`.
+- Start: one prepaid session per seated player with `SessionService.Event` (common end, free or fixed price, no loyalty
+  discount, no hold check); each seat in its own transaction with the player row; errors stay on the seat.
+- Money: `event_fee_hold` / `event_fee_release` / `event_fee_kept`; `Billing/Holds.EventFeesAsync`; `LedgerTotals` counts a
+  kept fee like a kept deposit.
+- Bracket: `Events/Bracket` (pure: standard seeding, byes for the best seeds, results move the winner on).
+- Lock screen: `ClientSessionInfo.Event` and `ClientReservationInfo.IsEvent/EndUtc`; texts and logic in
+  `Cms.Client/EventNotice`.
+
 ## Communication Flow
 
 ### Device Registration

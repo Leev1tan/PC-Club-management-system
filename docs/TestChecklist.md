@@ -359,6 +359,23 @@ the cashier signed in on the admin PC with the sound on; an open shift.
 - [ ] Owner → Замовлення → settings: orders off → the button disappears from the lock screens within 30 s
 - [ ] UA / EN: the panel, the status line and the errors are in the club language
 
+### Test 22: Event on the Lock Screen (phase 8)
+Prepare: two PCs of one zone with the agent and the lock screen, locked without a session; two players with PINs and
+150 ₴ each; a Manager and a Cashier account; the club time zone right.
+- [ ] Manager → Події → "+ Нова подія": the two PCs, start in 20 minutes, 30 min, teams of 1, PC time 20 ₴, entry fee
+      50 ₴ → the event card says "Заплановано"; a reservation on one of the PCs at that time is refused
+- [ ] Cashier → the event → register player A and player B: each player card shows −50 ₴ ("Внесок за участь")
+- [ ] 15 minutes before the start the lock screens show "ПОДІЯ «name» О HH:MM" (EN: "EVENT «name» AT HH:MM")
+- [ ] Player A logs in on the PC: "Цей ПК зайнятий для події ..."; the PC stays locked
+- [ ] At the start both PCs unlock within 10 s; the session panel shows "🏆 Подія: name" and the time left counts down
+      to the common end; each player card shows −20 ₴ for the PC time
+- [ ] Manager → "Сітка за реєстрацією" → one match (the final); Cashier clicks it, chooses player B → "Переможець: B"
+- [ ] At the end both PCs lock; the event is "Завершено"; the Z-report shows "Внески за участь у подіях: залишено
+      клубу 100.00 ₴"; `GET /api/ledger/holds` says `eventFees.ok = true`
+- [ ] A second event with an entry fee, one player registered, cancelled by the Manager: the fee is back on the
+      balance; the audit log has `event.cancelled` without the event name
+- [ ] UA / EN: the lock screen texts, the tab, the dialogs and the errors are in one language
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`
