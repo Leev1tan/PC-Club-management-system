@@ -54,7 +54,23 @@ public sealed class LauncherTextsTests
     public void Placeholders_are_filled_with_the_invariant_culture()
     {
         Assert.Equal("Залишилось: 01:05:09", LauncherTexts.Format(LauncherTexts.Uk.LockedTimeLeft, LauncherFormat.Clock(3909)));
-        Assert.Equal("Server error (500)", LauncherTexts.Format(LauncherTexts.En.ServerError, 500));
+        Assert.Equal("Server error (500)", LauncherTexts.Format("Server error ({0})", 500));
+    }
+
+    /// <summary>Windows test 2026-11-27, defect 9: one language on every screen, and no raw number or code for the player.</summary>
+    [Fact]
+    public void The_own_dialog_and_the_error_texts_are_in_the_club_language()
+    {
+        Assert.Equal(("[ ТАК ]", "[ НІ ]"), (LauncherTexts.Uk.Yes, LauncherTexts.Uk.No));
+        Assert.Equal(("[ YES ]", "[ NO ]"), (LauncherTexts.En.Yes, LauncherTexts.En.No));
+        foreach (var t in new[] { LauncherTexts.Uk, LauncherTexts.En })
+        {
+            Assert.DoesNotContain("{0}", t.ServerError);
+            Assert.DoesNotContain("{0}", t.NoConnection);
+            Assert.DoesNotContain("{0}", t.AccountFailed);
+            Assert.Equal(t.ServerError, LoginMessages.For(new PipeResponse(500, "{\"code\":\"something_new\"}"), t));
+            Assert.Equal(t.NoConnection, LoginMessages.For(new PipeResponse(503, "{\"code\":\"server_unreachable\"}"), t));
+        }
     }
 
     [Theory]

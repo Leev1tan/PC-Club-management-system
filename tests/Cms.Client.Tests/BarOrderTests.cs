@@ -59,4 +59,32 @@ public sealed class BarOrderTests
         Assert.NotNull(AgentPipe.ParseRequest("{\"op\":\"menu\"}"));
         Assert.NotNull(AgentPipe.ParseRequest("{\"op\":\"order_cancel\"}"));
     }
+
+    /// <summary>Windows test 2026-11-27, defect 9: "+" at the stock limit said "at most 500.00 ₴ per order" (the total was 90).</summary>
+    [Fact]
+    public void A_refused_plus_names_the_limit_that_stopped_it()
+    {
+        var menu = Menu(max: 500m);
+        var cart = new BarCart(menu);
+        var uah = ClientSettings.Default;
+        Assert.Equal(BarCartLimit.None, cart.TryAdd(Cola));
+        Assert.Equal(BarCartLimit.None, cart.TryAdd(Cola));
+        Assert.Equal(BarCartLimit.None, cart.TryAdd(Cola));
+        Assert.Equal(BarCartLimit.Product, cart.TryAdd(Cola));                        // stock 3, total 135
+        Assert.Equal("No more of this product in one order", OrderNotice.LimitText(BarCartLimit.Product, menu, LauncherTexts.En, uah));
+        Assert.Equal("Більше цього товару в одному замовленні не можна", OrderNotice.LimitText(BarCartLimit.Product, menu, LauncherTexts.Uk, uah));
+        Assert.Equal(BarCartLimit.None, cart.TryAdd(Chips));
+        Assert.Equal(BarCartLimit.Lines, cart.TryAdd(Coffee));                         // 2 different products at most
+        Assert.Equal("At most 2 different products per order", OrderNotice.LimitText(BarCartLimit.Lines, menu, LauncherTexts.En, uah));
+        Assert.Equal(BarCartLimit.UnknownProduct, cart.TryAdd(Guid.NewGuid()));
+        Assert.Equal(LauncherTexts.En.OrderSoldOut, OrderNotice.LimitText(BarCartLimit.UnknownProduct, menu, LauncherTexts.En, uah));
+        Assert.Null(OrderNotice.LimitText(BarCartLimit.None, menu, LauncherTexts.En, uah));
+
+        var small = new BarCart(Menu(max: 100m));
+        Assert.Equal(BarCartLimit.None, small.TryAdd(Cola));
+        Assert.Equal(BarCartLimit.None, small.TryAdd(Cola));                           // 90
+        Assert.Equal(BarCartLimit.Amount, small.TryAdd(Cola));                         // 135 > 100 (the stock allows 3)
+        Assert.Equal(BarCartLimit.Amount, small.TryAdd(Chips));                        // 150 > 100
+        Assert.Equal("At most 100.00 ₴ per order", OrderNotice.LimitText(BarCartLimit.Amount, Menu(max: 100m), LauncherTexts.En, uah));
+    }
 }

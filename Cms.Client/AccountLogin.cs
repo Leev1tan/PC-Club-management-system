@@ -88,13 +88,26 @@ public static class AccountMessages
         _ => platform ?? "?"
     };
 
-    /// <summary>The text for a refused "account" request (busy pool, no session, the agent refused the client ...).</summary>
+    /// <summary>
+    /// The text for a refused "account" request (busy pool, no session, the agent refused the client ...). A code is never
+    /// shown raw (Windows test 2026-11-27, defect 9): the agent log has it for the staff.
+    /// </summary>
     public static string For(PipeResponse r, string platform, LauncherTexts t) => r.Code switch
     {
         "no_free_account" => LauncherTexts.Format(t.AccountBusy, PlatformName(platform)),
         "account_needs_session" or "session_not_found" => t.SessionGone,
+        "pipe_client_untrusted" => t.AccountUntrusted,
         "agent_unavailable" or "agent_untrusted" or "agent_not_ready" or "agent_error" => t.AgentUnavailable,
-        "server_unreachable" => LauncherTexts.Format(t.NoConnection, "—"),
-        _ => LauncherTexts.Format(t.AccountFailed, r.Code ?? r.Status.ToString(System.Globalization.CultureInfo.InvariantCulture))
+        "server_unreachable" => t.NoConnection,
+        _ => t.AccountFailed
+    };
+
+    /// <summary>Why a program did not start, from the Win32 error of the start (never the Windows text of the error).</summary>
+    public static string StartError(int? win32Error, LauncherTexts t) => win32Error switch
+    {
+        2 or 3 or 267 => t.GameNotFound,  // file or folder not found, bad folder name
+        5 => t.GameNoAccess,
+        740 => t.GameNeedsAdmin,          // the program asks for elevation
+        _ => t.GameStartError
     };
 }

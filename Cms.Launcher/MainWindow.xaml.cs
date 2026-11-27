@@ -115,15 +115,14 @@ public partial class MainWindow : Window
         var wait = _pinLimiter.WaitTime(DateTimeOffset.UtcNow);
         if (wait is { } w)
         {
-            MessageBox.Show(this, LauncherTexts.Format(_texts.PinWait, Math.Ceiling(w.TotalSeconds)),
-                _texts.UnlockTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            ClubDialog.Show(this, _texts, _texts.UnlockTitle, LauncherTexts.Format(_texts.PinWait, Math.Ceiling(w.TotalSeconds)), warning: true);
             return;
         }
 
         var hash = ReadStaffPinHash();
         if (hash == null)
         {
-            MessageBox.Show(this, _texts.PinNotSet, _texts.UnlockTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+            ClubDialog.Show(this, _texts, _texts.UnlockTitle, _texts.PinNotSet);
             return;
         }
 
@@ -140,12 +139,12 @@ public partial class MainWindow : Window
                 _pinLimiter.RecordSuccess();
                 ReportStaffUnlock();
                 _lock.BeginStaffOverride(Snapshot(_lastState));
-                MessageBox.Show(this, _texts.PinUnlocked, _texts.Done, MessageBoxButton.OK, MessageBoxImage.Information);
+                ClubDialog.Show(this, _texts, _texts.Done, _texts.PinUnlocked);
             }
             else
             {
                 _pinLimiter.RecordFailure(DateTimeOffset.UtcNow);
-                MessageBox.Show(this, _texts.PinWrong, _texts.Error, MessageBoxButton.OK, MessageBoxImage.Warning);
+                ClubDialog.Show(this, _texts, _texts.Error, _texts.PinWrong, warning: true);
             }
         }
         finally
@@ -218,7 +217,7 @@ public partial class MainWindow : Window
     // ──── EXTEND SESSION ────
     private void OnExtendClick(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(this, _texts.ExtendHint, _texts.ExtendTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+        ClubDialog.Show(this, _texts, _texts.ExtendTitle, _texts.ExtendHint);
     }
 
     // ──── LANGUAGE ────

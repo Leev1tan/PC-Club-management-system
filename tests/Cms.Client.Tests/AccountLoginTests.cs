@@ -95,6 +95,20 @@ public sealed class AccountLoginTests
         Assert.Equal(trusted, AgentPipeClient.IsTrustedLauncher(client, "c:/clublauncher/./Cms.Launcher.exe"));
     }
 
+    [Theory]
+    [InlineData(2, "GameNotFound")]
+    [InlineData(3, "GameNotFound")]
+    [InlineData(267, "GameNotFound")]
+    [InlineData(5, "GameNoAccess")]
+    [InlineData(740, "GameNeedsAdmin")]
+    [InlineData(1155, "GameStartError")]
+    [InlineData(null, "GameStartError")]
+    public void A_program_that_did_not_start_gets_a_reason_in_the_club_language(int? win32Error, string text)
+    {
+        foreach (var t in new[] { LauncherTexts.Uk, LauncherTexts.En })
+            Assert.Equal(t.All()[text], AccountMessages.StartError(win32Error, t));
+    }
+
     [Fact]
     public void A_club_account_goes_only_to_the_installed_lock_screen_in_the_console_session()
     {
@@ -122,8 +136,17 @@ public sealed class AccountLoginTests
         Assert.Equal("All club accounts of Steam are in use now. Ask the staff.", AccountMessages.For(busy, "steam", LauncherTexts.En));
         Assert.StartsWith("Усі клубні акаунти Steam", AccountMessages.For(busy, "steam", LauncherTexts.Uk));
         Assert.Equal(LauncherTexts.En.SessionGone, AccountMessages.For(new PipeResponse(409, "{\"code\":\"account_needs_session\"}"), "steam", LauncherTexts.En));
-        Assert.Equal("The club account could not be given (pipe_client_untrusted). Ask the staff.",
+        // Windows test 2026-11-27, defect 9: no raw code on the screen of the player
+        Assert.Equal("A club account goes only to the installed lock screen of this PC. Ask the staff.",
             AccountMessages.For(new PipeResponse(403, "{\"code\":\"pipe_client_untrusted\"}"), "steam", LauncherTexts.En));
+        foreach (var code in new[] { "credential_unreadable", "credential_delivered", "lease_not_found", "bad_answer", "something_new" })
+            foreach (var t in new[] { LauncherTexts.Uk, LauncherTexts.En })
+            {
+                var text = AccountMessages.For(new PipeResponse(409, $"{{\"code\":\"{code}\"}}"), "steam", t);
+                Assert.Equal(t.AccountFailed, text);
+                Assert.DoesNotContain(code, text);
+            }
+        Assert.Equal(LauncherTexts.Uk.NoConnection, AccountMessages.For(new PipeResponse(503, "{\"code\":\"server_unreachable\"}"), "steam", LauncherTexts.Uk));
         Assert.Equal("Battle.net", AccountMessages.PlatformName("battlenet"));
         Assert.All(AccountPlatforms.All, p => Assert.False(string.IsNullOrEmpty(AccountMessages.PlatformName(p))));
     }

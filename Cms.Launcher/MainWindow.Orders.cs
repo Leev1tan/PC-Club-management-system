@@ -58,7 +58,8 @@ public partial class MainWindow
                     _orderTitle,
                     new ScrollViewer { MaxHeight = 330, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _orderProducts },
                     _orderTotal, _payBalance, _payDesk, _orderMessage,
-                    new StackPanel { Orientation = Orientation.Horizontal, Children = { _orderPlace, _orderCancel, _orderClose } }
+                    // A WrapPanel: with "[ CANCEL THE ORDER ]" the "[ CLOSE ]" button goes to the next line, never past the edge
+                    new WrapPanel { Orientation = Orientation.Horizontal, Children = { _orderPlace, _orderCancel, _orderClose } }
                 }
             }
         };
@@ -106,10 +107,18 @@ public partial class MainWindow
             foreach (var p in _menu.Products)
             {
                 var row = new DockPanel { Margin = new Thickness(0, 3, 0, 3) };
-                var plus = new Button { Content = "+", Width = 34, Style = (Style)FindResource("CyberButton") };
-                var minus = new Button { Content = "−", Width = 34, Style = (Style)FindResource("CyberButton") };
-                var count = new TextBlock { Text = _cart.Count(p.Id).ToString(), Width = 30, TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center }.Text("Brush.Text", "Font.Mono");
-                plus.Click += (_, _) => { if (!_cart.Add(p.Id)) _orderMessage!.Text = LauncherTexts.Format(_texts.OrderMax, Money(_menu.MaxAmount)); RenderOrder(); };
+                // The CyberButton padding (24,12) left no room for the sign in a narrow button: a small padding here
+                var plus = new Button { Content = "+", Width = 40, Height = 34, Padding = new Thickness(0), FontSize = 18, Style = (Style)FindResource("CyberButton") };
+                var minus = new Button { Content = "−", Width = 40, Height = 34, Padding = new Thickness(0), FontSize = 18, Style = (Style)FindResource("CyberButton") };
+                var count = new TextBlock { Text = _cart.Count(p.Id).ToString(), Width = 34, TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center }.Text("Brush.Text", "Font.Mono");
+                // The text says which limit stopped "+" (lines, this product, or the amount)
+                plus.Click += (_, _) =>
+                {
+                    var limit = OrderNotice.LimitText(_cart.TryAdd(p.Id), _menu, _texts, settings);
+                    _orderMessage!.SetResourceReference(TextBlock.ForegroundProperty, "Brush.Danger");
+                    _orderMessage.Text = limit ?? string.Empty;
+                    RenderOrder();
+                };
                 minus.Click += (_, _) => { _cart.Remove(p.Id); RenderOrder(); };
                 var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { minus, count, plus } };
                 DockPanel.SetDock(buttons, Dock.Right);

@@ -177,14 +177,13 @@ public partial class MainWindow
         var session = _lastState?.Session;
         if (session?.Username == null) return;
         var question = session.FromBalance || !session.Prepaid ? _texts.EndSessionBalance : _texts.EndSessionPrepaid;
-        if (MessageBox.Show(this, question, _texts.EndSessionTitle, MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (!ClubDialog.Ask(this, _texts, _texts.EndSessionTitle, question)) return; // own dialog: Yes / No in the club language
         EndSessionButton.IsEnabled = false;
         try
         {
             var res = await AskAgentAsync(new PipeRequest(PipeOps.Logout));
             if (!res.Ok)
-                MessageBox.Show(this, LauncherTexts.Format(_texts.EndSessionFailed, LoginMessages.For(res, _texts)), _texts.EndSessionTitle,
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                ClubDialog.Show(this, _texts, _texts.EndSessionTitle, LauncherTexts.Format(_texts.EndSessionFailed, LoginMessages.For(res, _texts)), warning: true);
         }
         finally
         {

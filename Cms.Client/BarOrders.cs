@@ -19,6 +19,20 @@ public sealed class BarMenu
 
 public sealed record BarMenuProduct(Guid Id, string Name, string Category, decimal Price, int MaxQuantity);
 
+/// <summary>Why "+" did not add one more of a product (Windows test 2026-11-27, defect 9: every refusal said "at most 500 ₴").</summary>
+public enum BarCartLimit
+{
+    None,
+    /// <summary>The product is not on the menu (any more).</summary>
+    UnknownProduct,
+    /// <summary>The order has the most different products (MaxLines).</summary>
+    Lines,
+    /// <summary>No more of this product: its stock, or the most of one product per order.</summary>
+    Product,
+    /// <summary>The order would cost more than the most per order (MaxAmount).</summary>
+    Amount
+}
+
 public static class OrderPayments
 {
     public const string Balance = "balance";
@@ -44,16 +58,19 @@ public sealed class BarCart
     public bool IsEmpty => _quantities.Count == 0;
 
     /// <summary>One more of the product; false when a limit stops it (stock, 10 of one, 10 lines, the most per order).</summary>
-    public bool Add(Guid productId)
+    public bool Add(Guid productId) => TryAdd(productId) == BarCartLimit.None;
+
+    /// <summary>One more of the product, or the limit that stops it (BarCartLimit.None when it was added).</summary>
+    public BarCartLimit TryAdd(Guid productId)
     {
         var product = _menu.Products.FirstOrDefault(p => p.Id == productId);
-        if (product == null) return false;
+        if (product == null) return BarCartLimit.UnknownProduct;
         var now = Count(productId);
-        if (now == 0 && _quantities.Count >= _menu.MaxLines) return false;
-        if (now + 1 > Math.Min(product.MaxQuantity, _menu.MaxQuantity)) return false;
-        if (_menu.MaxAmount > 0 && Total + product.Price > _menu.MaxAmount) return false;
+        if (now == 0 && _quantities.Count >= _menu.MaxLines) return BarCartLimit.Lines;
+        if (now + 1 > Math.Min(product.MaxQuantity, _menu.MaxQuantity)) return BarCartLimit.Product;
+        if (_menu.MaxAmount > 0 && Total + product.Price > _menu.MaxAmount) return BarCartLimit.Amount;
         _quantities[productId] = now + 1;
-        return true;
+        return BarCartLimit.None;
     }
 
     public void Remove(Guid productId)
@@ -92,4 +109,14 @@ public static class OrderNotice
 
     /// <summary>The player may cancel only a new order (the bar has not started it).</summary>
     public static bool CanCancel(ClientOrderInfo? order) => order?.Status == "new";
+
+    /// <summary>The text for a refused "+" (null when it was added).</summary>
+    public static string? LimitText(BarCartLimit limit, BarMenu menu, LauncherTexts t, ClientSettings settings) => limit switch
+    {
+        BarCartLimit.None => null,
+        BarCartLimit.Lines => LauncherTexts.Format(t.OrderMaxLines, menu.MaxLines),
+        BarCartLimit.Product => t.OrderMaxProduct,
+        BarCartLimit.Amount => LauncherTexts.Format(t.OrderMax, LauncherFormat.Money(menu.MaxAmount, settings)),
+        _ => t.OrderSoldOut
+    };
 }

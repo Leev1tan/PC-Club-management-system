@@ -153,19 +153,19 @@ public partial class MainWindow
         var login = ReadAccountPoolSettings().For(platform);
         if (!AccountLogin.IsUsable(login))
         {
-            MessageBox.Show(this, LauncherTexts.Format(_texts.AccountNotConfigured, name), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+            ClubDialog.Show(this, _texts, _texts.AccountTitle, LauncherTexts.Format(_texts.AccountNotConfigured, name));
             return false;
         }
         var res = await AskAgentAsync(new PipeRequest(PipeOps.Account, GameId: game.Id));
         if (!res.Ok)
         {
-            MessageBox.Show(this, AccountMessages.For(res, platform, _texts), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            ClubDialog.Show(this, _texts, _texts.AccountTitle, AccountMessages.For(res, platform, _texts), warning: true);
             return false;
         }
         var lease = res.As<AccountLease>();
         if (lease == null)
         {
-            MessageBox.Show(this, LauncherTexts.Format(_texts.AccountFailed, "—"), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            ClubDialog.Show(this, _texts, _texts.AccountTitle, _texts.AccountFailed, warning: true);
             return false;
         }
         if (lease.Delivered) return true;
@@ -173,7 +173,7 @@ public partial class MainWindow
         lease = lease with { Login = null, Secret = null };
         if (plan == null)
         {
-            MessageBox.Show(this, LauncherTexts.Format(_texts.AccountFailed, "—"), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            ClubDialog.Show(this, _texts, _texts.AccountTitle, _texts.AccountFailed, warning: true);
             return false;
         }
         GameNowText.Text = LauncherTexts.Format(_texts.AccountLoggingIn, lease.LoginMask, name);
@@ -189,7 +189,8 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or FileNotFoundException)
         {
-            MessageBox.Show(this, LauncherTexts.Format(_texts.AccountFailed, ex.GetType().Name), _texts.AccountTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            ClubDialog.Show(this, _texts, _texts.AccountTitle, LauncherTexts.Format(_texts.GameStartFailed, name,
+                AccountMessages.StartError((ex as System.ComponentModel.Win32Exception)?.NativeErrorCode, _texts)), warning: true);
             return false;
         }
         // The client logs in before the game asks it to start
@@ -218,7 +219,7 @@ public partial class MainWindow
         var plan = GameStarter.Plan(game, Environment.ExpandEnvironmentVariables);
         if (plan == null)
         {
-            MessageBox.Show(this, LauncherTexts.Format(_texts.GameStartFailed, game.Name, "—"), _texts.GameStartTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            ClubDialog.Show(this, _texts, _texts.GameStartTitle, LauncherTexts.Format(_texts.GameStartFailed, game.Name, _texts.GameStartError), warning: true);
             return;
         }
         try
@@ -238,8 +239,9 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, LauncherTexts.Format(_texts.GameStartFailed, game.Name, ex.Message), _texts.GameStartTitle,
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            // The reason in the club language, never the Windows text of the error (it is in the Windows language)
+            ClubDialog.Show(this, _texts, _texts.GameStartTitle, LauncherTexts.Format(_texts.GameStartFailed, game.Name,
+                AccountMessages.StartError((ex as System.ComponentModel.Win32Exception)?.NativeErrorCode, _texts)), warning: true);
         }
     }
 

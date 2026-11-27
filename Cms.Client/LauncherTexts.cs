@@ -91,6 +91,10 @@ public sealed class LauncherTexts
     public required string OrderEmptyMenu { get; init; }
     public required string OrderTotal { get; init; }
     public required string OrderMax { get; init; }
+    /// <summary>"+" refused: the order has the most different products (MaxLines).</summary>
+    public required string OrderMaxLines { get; init; }
+    /// <summary>"+" refused: no more of this product (the stock, or the most of one product per order).</summary>
+    public required string OrderMaxProduct { get; init; }
     public required string OrderPayBalance { get; init; }
     public required string OrderPayDesk { get; init; }
     public required string OrderPlace { get; init; }
@@ -119,6 +123,11 @@ public sealed class LauncherTexts
     public required string GameStarting { get; init; }
     public required string GameStartFailed { get; init; }
     public required string GameNow { get; init; }
+    /// <summary>Why a program did not start (instead of the Windows text of the error, which is in the Windows language).</summary>
+    public required string GameNotFound { get; init; }
+    public required string GameNoAccess { get; init; }
+    public required string GameNeedsAdmin { get; init; }
+    public required string GameStartError { get; init; }
 
     // Club accounts (account pool)
     public required string AccountTitle { get; init; }
@@ -126,6 +135,8 @@ public sealed class LauncherTexts
     public required string AccountNotConfigured { get; init; }
     public required string AccountFailed { get; init; }
     public required string AccountLoggingIn { get; init; }
+    /// <summary>The agent gives a club account only to the installed lock screen (pipe_client_untrusted).</summary>
+    public required string AccountUntrusted { get; init; }
 
     // Staff PIN unlock (Ctrl+Shift+U)
     public required string UnlockTitle { get; init; }
@@ -140,6 +151,9 @@ public sealed class LauncherTexts
     public required string Error { get; init; }
     public required string Ok { get; init; }
     public required string Cancel { get; init; }
+    /// <summary>The buttons of a question of the lock screen (its own dialog, in the club language and theme).</summary>
+    public required string Yes { get; init; }
+    public required string No { get; init; }
 
     public static readonly LauncherTexts Uk = new()
     {
@@ -160,8 +174,8 @@ public sealed class LauncherTexts
         LoginBusy = "Вхід...",
         EnterUsername = "Введіть логін",
         WrongLogin = "Невірний логін або пароль",
-        ServerError = "Помилка сервера ({0})",
-        NoConnection = "Немає зв'язку з сервером: {0}",
+        ServerError = "Сервер не виконав запит. Спробуйте ще раз або зверніться до адміністратора.",
+        NoConnection = "Немає зв'язку з сервером. Спробуйте за хвилину або зверніться до адміністратора.",
         EnterSecret = "Введіть PIN або пароль",
         LoginLocked = "Забагато невдалих спроб. Спробуйте через {0} хв або зверніться до адміністратора.",
         LoginStarting = "Вхід виконано. Сесія починається…",
@@ -212,6 +226,8 @@ public sealed class LauncherTexts
         OrderEmptyMenu = "Зараз у барі немає товарів для замовлення.",
         OrderTotal = "Разом: {0}",
         OrderMax = "Не більше {0} за одне замовлення",
+        OrderMaxLines = "Не більше {0} різних товарів в одному замовленні",
+        OrderMaxProduct = "Більше цього товару в одному замовленні не можна",
         OrderPayBalance = "З мого балансу ({0})",
         OrderPayDesk = "Оплачу на касі",
         OrderPlace = "[ ЗАМОВИТИ ]",
@@ -239,11 +255,16 @@ public sealed class LauncherTexts
         GameStarting = "Запуск: {0}",
         GameStartFailed = "Не вдалося запустити «{0}»: {1}",
         GameNow = "Зараз: {0}",
+        GameNotFound = "програму не знайдено на цьому ПК",
+        GameNoAccess = "немає доступу до програми",
+        GameNeedsAdmin = "програма потребує прав адміністратора",
+        GameStartError = "Windows не запустив програму",
         AccountTitle = "Клубний акаунт",
         AccountBusy = "Усі клубні акаунти {0} зараз зайняті. Зверніться до адміністратора.",
         AccountNotConfigured = "Цей ПК не налаштовано для входу в {0} клубним акаунтом. Зверніться до адміністратора.",
-        AccountFailed = "Не вдалося отримати клубний акаунт ({0}). Зверніться до адміністратора.",
+        AccountFailed = "Не вдалося отримати клубний акаунт. Зверніться до адміністратора.",
         AccountLoggingIn = "Клубний акаунт {0}: вхід у {1}…",
+        AccountUntrusted = "Клубний акаунт видається лише встановленому екрану блокування цього ПК. Зверніться до адміністратора.",
 
         UnlockTitle = "Розблокування",
         PinWait = "Забагато невірних спроб. Зачекайте {0} с.",
@@ -257,6 +278,8 @@ public sealed class LauncherTexts
         Error = "Помилка",
         Ok = "[ OK ]",
         Cancel = "[ СКАСУВАТИ ]",
+        Yes = "[ ТАК ]",
+        No = "[ НІ ]",
     };
 
     public static readonly LauncherTexts En = new()
@@ -278,8 +301,8 @@ public sealed class LauncherTexts
         LoginBusy = "Logging in...",
         EnterUsername = "Enter your username",
         WrongLogin = "Wrong username or password",
-        ServerError = "Server error ({0})",
-        NoConnection = "No connection to the server: {0}",
+        ServerError = "The server could not do this. Try again or ask the staff.",
+        NoConnection = "No connection to the server. Try again in a minute or ask the staff.",
         EnterSecret = "Enter your PIN or password",
         LoginLocked = "Too many failed attempts. Try again in {0} min or ask the staff.",
         LoginStarting = "Logged in. The session starts…",
@@ -330,6 +353,8 @@ public sealed class LauncherTexts
         OrderEmptyMenu = "The bar has nothing to order right now.",
         OrderTotal = "Total: {0}",
         OrderMax = "At most {0} per order",
+        OrderMaxLines = "At most {0} different products per order",
+        OrderMaxProduct = "No more of this product in one order",
         OrderPayBalance = "From my balance ({0})",
         OrderPayDesk = "I pay at the desk",
         OrderPlace = "[ ORDER ]",
@@ -357,11 +382,16 @@ public sealed class LauncherTexts
         GameStarting = "Starting: {0}",
         GameStartFailed = "Could not start {0}: {1}",
         GameNow = "Now: {0}",
+        GameNotFound = "the program is not on this PC",
+        GameNoAccess = "no access to the program",
+        GameNeedsAdmin = "the program needs administrator rights",
+        GameStartError = "Windows did not start the program",
         AccountTitle = "Club account",
         AccountBusy = "All club accounts of {0} are in use now. Ask the staff.",
         AccountNotConfigured = "This PC is not set up to log in to {0} with a club account. Ask the staff.",
-        AccountFailed = "The club account could not be given ({0}). Ask the staff.",
+        AccountFailed = "The club account could not be given. Ask the staff.",
         AccountLoggingIn = "Club account {0}: logging in to {1}…",
+        AccountUntrusted = "A club account goes only to the installed lock screen of this PC. Ask the staff.",
 
         UnlockTitle = "Unlock",
         PinWait = "Too many wrong attempts. Wait {0} s.",
@@ -375,6 +405,8 @@ public sealed class LauncherTexts
         Error = "Error",
         Ok = "[ OK ]",
         Cancel = "[ CANCEL ]",
+        Yes = "[ YES ]",
+        No = "[ NO ]",
     };
 
     /// <summary>The texts of a language code (uk or en); Ukrainian for anything else.</summary>
