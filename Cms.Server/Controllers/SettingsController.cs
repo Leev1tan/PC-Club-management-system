@@ -43,8 +43,27 @@ public class SettingsController : ControllerBase
             _enrollment.AllowPendingRegistration)
         {
             Currency = CurrencyView.From(await _db.CurrencyAsync()),
-            Currencies = ClubCurrency.All.Select(CurrencyView.From).ToList()
+            Currencies = ClubCurrency.All.Select(CurrencyView.From).ToList(),
+            Language = await Cms.Server.Devices.ClubLanguage.LoadAsync(_db),
+            Languages = ClientLanguages.All
         });
+    }
+
+    /// <summary>
+    /// Language of the lock screens on the club PCs: uk or en. The PCs get it with the next heartbeat
+    /// (within 5 s); a PC that never reached the server shows Ukrainian. Audited.
+    /// </summary>
+    [HttpPut("language")]
+    public async Task<ActionResult<LanguageView>> SetLanguage([FromBody] SetLanguageRequest req)
+    {
+        var language = ClientLanguages.Find(req.Code);
+        if (language == null)
+            return BadRequest(new { error = "Language must be uk or en.", code = "bad_language" });
+        var before = await Cms.Server.Devices.ClubLanguage.SaveAsync(_db, language, User.Identity?.Name, _clock.UtcNow);
+        if (before != language)
+            await _audit.WriteAsync(AuditActions.LanguageChanged, "setting", ClubSettingKeys.Language,
+                $"Lock screen language changed: {before} -> {language}", new { before, after = language });
+        return Ok(new LanguageView(language));
     }
 
     /// <summary>
@@ -110,8 +129,13 @@ public static class KioskSettings
 
 public record SetStaffPinRequest(string? Pin);
 public record SetCurrencyRequest(string? Code);
+public record SetLanguageRequest(string? Code);
+public record LanguageView(string Code);
 public record SettingsView(bool StaffPinConfigured, DateTimeOffset? StaffPinUpdatedUtc, bool EnrollmentTokenConfigured, bool AllowPendingRegistration)
 {
     public CurrencyView? Currency { get; init; }
     public IReadOnlyList<CurrencyView> Currencies { get; init; } = Array.Empty<CurrencyView>();
+    /// <summary>Lock screen language of the club PCs: uk or en.</summary>
+    public string Language { get; init; } = ClientLanguages.Ukrainian;
+    public IReadOnlyList<string> Languages { get; init; } = Array.Empty<string>();
 }

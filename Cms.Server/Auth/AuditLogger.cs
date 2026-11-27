@@ -21,6 +21,7 @@ public static class AuditActions
     public const string StaffPinChanged = "settings.staff_pin_changed";
     public const string StaffPinRemoved = "settings.staff_pin_removed";
     public const string CurrencyChanged = "settings.currency_changed";
+    public const string LanguageChanged = "settings.language_changed";
 
     public const string DeviceRegistered = "device.registered";
     public const string DeviceApproved = "device.approved";

@@ -69,8 +69,13 @@ public class DevicesController : ControllerBase
         var status = _devices.Heartbeat(key, request);
         if (status == null) return Unauthorized();
         // Approved PCs get the hash of the staff PIN for the offline emergency unlock (null = no PIN set)
-        var pinHash = status == DeviceStatuses.Approved ? await KioskSettings.GetStaffPinHashAsync(_db) : null;
-        return Ok(new DeviceHeartbeatResponse(status, pinHash));
+        // and the club settings of the lock screen (language, currency)
+        if (status != DeviceStatuses.Approved) return Ok(new DeviceHeartbeatResponse(status, null));
+        var pinHash = await KioskSettings.GetStaffPinHashAsync(_db);
+        return Ok(new DeviceHeartbeatResponse(status, pinHash)
+        {
+            Client = await Cms.Server.Devices.ClubLanguage.ClientSettingsAsync(_db)
+        });
     }
 
     [HttpGet]
@@ -284,7 +289,11 @@ public class DevicesController : ControllerBase
 public record DeviceRegistrationRequest(string Hostname, string OsVersion, string AgentVersion, string? Token, Guid? DeviceId = null, string? DeviceKey = null);
 public record DeviceRegistrationResponse(Guid DeviceId, string DeviceKey, string Status);
 /// <summary>StaffPinHash: see Cms.Shared.StaffPinHash; only for approved PCs, null when no PIN is set.</summary>
-public record DeviceHeartbeatResponse(string Status, string? StaffPinHash);
+public record DeviceHeartbeatResponse(string Status, string? StaffPinHash)
+{
+    /// <summary>Approved PCs: lock screen language and club currency (Cms.Shared.ClientSettings).</summary>
+    public ClientSettings? Client { get; init; }
+}
 
 public enum DeviceRegistrationKind { ReRegistered, Enrolled, ReEnrolled, Pending, Unauthorized, Invalid }
 

@@ -81,6 +81,8 @@ public static class AgentFiles
     public const string HeartbeatFile = "agent_heartbeat.txt";
     public const string ConfigFile = "config.json";
     public const string StaffPinFile = "staff-pin.json";
+    /// <summary>Club settings for the lock screen: language and currency (Cms.Shared.ClientSettings).</summary>
+    public const string ClientSettingsFile = "client-settings.json";
     public const string DeviceFile = "device.json";
     public const string EnrollmentTokenFile = "enrollment-token.txt";
     /// <summary>

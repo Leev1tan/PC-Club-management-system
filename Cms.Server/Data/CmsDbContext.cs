@@ -779,6 +779,8 @@ public static class ClubSettingKeys
     public const string AuditChainSealed = "audit.chain_sealed";
     /// <summary>Club currency, ISO code UAH (default), EUR, USD or PLN (Billing/ClubCurrency). Display only.</summary>
     public const string Currency = "club.currency";
+    /// <summary>Language of the lock screens on the club PCs: uk (default) or en (Devices/ClubLanguage).</summary>
+    public const string Language = "club.language";
 }
 
 /// <summary>Shifts:RequireOpenShift (default true): cash and card payments need an open shift.</summary>
