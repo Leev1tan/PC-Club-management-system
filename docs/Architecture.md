@@ -458,7 +458,9 @@ erDiagram
   so its anchor is the last row before its `shift.closed` row, exactly as a real close stores it. The rows are
   written with `BulkInsert` (PostgreSQL: one TRUNCATE of the big tables, binary COPY, the foreign keys of the bulk
   tables dropped and added back with their saved definitions inside the reset transaction, sequences set after the
-  seeded ids; SQLite: prepared single-row inserts). A reset takes about 0.7 s on PostgreSQL and 1 s on SQLite.
+  seeded ids; SQLite: prepared single-row inserts). Then about 15 reservations and two booking requests go through
+  `ReservationService` (deposits in the ledger, audit rows at the head of the chain). A reset takes about 1.1 s on
+  PostgreSQL and 0.7 s on SQLite (phase 7 measurement; the first one after a start 2 to 4 s).
 
 ## Reservations (phase 7)
 
