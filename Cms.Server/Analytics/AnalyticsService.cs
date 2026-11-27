@@ -368,10 +368,11 @@ public static class AnalyticsService
         var ids = inside.ToList();
         var shiftRows = ids.Count == 0 ? new List<LedgerEntryEntity>()
             : await db.Ledger.AsNoTracking().Where(l => l.ShiftId != null && ids.Contains(l.ShiftId.Value)).ToListAsync(ct);
-        // A shift with a row at the end of the period or later is not fully inside: at the exact instant of a shift
-        // change (now = the close of one shift and the open of the next) a row written at "now" is not a row of the
-        // period [from, end), so its shift counts with the rows outside the shifts
-        foreach (var id in shiftRows.Where(r => r.CreatedUtc >= period.EndUtc || r.CreatedUtc < period.FromUtc).Select(r => r.ShiftId!.Value).Distinct().ToList())
+        // A shift with a row that is not a row of the period is not fully inside: at the exact instant of a shift
+        // change (now = the close of one shift and the open of the next) a row written at "now" is not in [from, end),
+        // so its shift counts with the rows outside the shifts. Compared by id: PostgreSQL rounds times to microseconds
+        var periodIds = rows.Select(r => r.Id).ToHashSet();
+        foreach (var id in shiftRows.Where(r => !periodIds.Contains(r.Id)).Select(r => r.ShiftId!.Value).Distinct().ToList())
             inside.Remove(id);
         shiftRows = shiftRows.Where(r => inside.Contains(r.ShiftId!.Value)).ToList();
         var z = LedgerTotals.Of(shiftRows);
