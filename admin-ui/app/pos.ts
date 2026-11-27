@@ -44,7 +44,7 @@ export type ZReport = {
     topUps: number; refunds: number; payouts: number; debtRecorded: number }[];
   ledger: { rows: number; firstId: number | null; lastId: number | null; reconciled: boolean };
   /** Reservation deposits of the shift (a kept deposit is in the PC time too). */
-  holds?: { depositsHeld: number; depositsReleased: number; depositsKept: number };
+  holds?: { depositsHeld: number; depositsReleased: number; depositsKept: number; ordersHeld: number; ordersReleased: number };
 };
 
 export type AuditVerify = {

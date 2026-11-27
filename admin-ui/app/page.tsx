@@ -13,6 +13,7 @@ import { GamesTab } from './games-tab';
 import { LoginLockouts } from './lockouts';
 import { CheckInDialog, ReservationsTab } from './reservations-tab';
 import { PcReservation } from './reservations';
+import { OrderQueue, OrdersTab, orderChime } from './orders-tab';
 import { PowerAction, PowerDialog, PowerTarget } from './power-dialog';
 import { ShiftTab } from './shift-tab';
 import { StockTab } from './stock-tab';
@@ -50,7 +51,7 @@ type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' }
 type DemoInfo = { enabled: boolean; resetIntervalHours: number | null; lastResetUtc: string | null; nextResetUtc: string | null };
 
 // ===== Tab IDs =====
-type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'reservations' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'games' | 'analytics' | 'audit' | 'staff' | 'settings';
+type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'reservations' | 'orders' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'games' | 'analytics' | 'audit' | 'staff' | 'settings';
 type Need = 'any' | 'frontDesk' | 'management' | 'owner';
 
 // Each tab is shown only to the roles that may use it (the server checks every request again)
@@ -60,6 +61,7 @@ const allTabs: { id: Tab; label: string; icon: string; section?: string; need: N
   { id: 'sessions', label: t.nav.sessions, icon: '⏱️', need: 'frontDesk' },
   { id: 'reservations', label: t.nav.reservations, icon: '📅', need: 'frontDesk' },
   { id: 'pos', label: t.nav.pos, icon: '🛒', section: t.nav.sectionDesk, need: 'frontDesk' },
+  { id: 'orders', label: t.nav.orders, icon: '🥤', need: 'frontDesk' },
   { id: 'shift', label: t.nav.shift, icon: '🧾', need: 'frontDesk' },
   { id: 'stock', label: t.nav.stock, icon: '📦', need: 'frontDesk' },
   { id: 'devices', label: t.nav.devices, icon: '🖥️', section: t.nav.sectionManage, need: 'any' },
@@ -166,6 +168,9 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // Billing dialogs (top-level components: background refreshes do not reset them)
   const [startDialog, setStartDialog] = useState<{ id: string; hostname: string; zoneId: string | null; reservation?: PcReservation | null } | null>(null);
   const [checkInId, setCheckInId] = useState<number | null>(null);
+  // New bar orders from the PCs: a badge on the tab and a short tone when one more arrives
+  const [newOrders, setNewOrders] = useState(0);
+  const lastNewOrders = useRef<number | null>(null);
   const [transferTarget, setTransferTarget] = useState<Session | null>(null);
   const [endTarget, setEndTarget] = useState<Session | null>(null);
   const [playerCard, setPlayerCard] = useState<{ user: User; form?: 'topup' } | null>(null);
@@ -180,6 +185,14 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   // Only what the role may read (Tech: PCs and zones; Cashier: no revenue)
   const fetchAll = useCallback(async () => {
+    if (can.frontDesk) {
+      getJson<OrderQueue>('/api/orders').then(q => {
+        if (!q) return;
+        if (lastNewOrders.current !== null && q.newCount > lastNewOrders.current) orderChime();
+        lastNewOrders.current = q.newCount;
+        setNewOrders(q.newCount);
+      });
+    }
     const [d, z, t, u, s, r, who] = await Promise.all([
       getJson<Device[]>('/api/devices'),
       getJson<Zone[]>('/api/zones'),
@@ -347,6 +360,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'devices': return <DevicesTab />;
       case 'sessions': return <SessionsTab />;
       case 'reservations': return <ReservationsTab players={users} toast={toast} management={can.management} onChanged={fetchAll} />;
+      case 'orders': return <OrdersTab toast={toast} management={can.management} onChanged={fetchAll} />;
       case 'users': return <>{can.management && <LoginLockouts toast={toast} />}<UsersTab /></>;
       case 'tariffs': return <TariffsTab can={can} zones={zones} devices={devices} tariffs={tariffs} toast={toast}
         onChanged={fetchAll} onAddZone={() => setZoneModal(true)} onDeleteZone={deleteZone} />;
@@ -867,6 +881,9 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 <span>{tab.label}</span>
                 {tab.id === 'sessions' && activeSessions.length > 0 && (
                   <span className="nav-badge">{activeSessions.length}</span>
+                )}
+                {tab.id === 'orders' && newOrders > 0 && (
+                  <span className="nav-badge nav-badge-alert" aria-label={fmtText(t.orders.newCount, { n: newOrders })}>{newOrders}</span>
                 )}
               </button>
             </div>

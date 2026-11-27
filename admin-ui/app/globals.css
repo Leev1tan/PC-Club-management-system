@@ -1863,3 +1863,18 @@ body::after {
 .book-submit { min-height: 48px; font-size: 16px; }
 .book-done { align-items: center; text-align: center; }
 .book-done-icon { font-size: 44px; color: var(--green); }
+
+/* ===== Bar orders from the PCs (phase 7) ===== */
+.order-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.order-card { background: var(--bg-card); border: 1px solid var(--border-hard); border-left: 3px solid var(--neon-yellow); border-radius: 8px; padding: 12px; }
+.order-card.status-preparing { border-left-color: var(--neon-cyan); }
+.order-card.status-delivered { border-left-color: var(--neon-green); opacity: 0.85; }
+.order-card.status-cancelled { border-left-color: var(--neon-magenta); opacity: 0.7; }
+.order-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.order-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.order-items { list-style: none; margin: 8px 0; padding: 0; font-size: 13px; }
+.order-items li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.order-total { display: flex; justify-content: space-between; border-top: 1px solid var(--border-hard); padding-top: 6px; font-size: 13px; color: var(--text-secondary); }
+.order-total strong { color: var(--text-primary); }
+.order-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.nav-badge-alert { background: var(--neon-yellow); color: #050508; }

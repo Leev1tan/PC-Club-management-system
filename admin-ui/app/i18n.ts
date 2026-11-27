@@ -34,7 +34,7 @@ export const uk = {
 
   nav: {
     dashboard: 'Дашборд', map: 'Карта ПК', sessions: 'Сесії', devices: 'Пристрої', users: 'Гравці', tariffs: 'Тарифи',
-    pos: 'Каса / Бар', shift: 'Зміна', stock: 'Склад', finance: 'Фінанси', audit: 'Журнал дій', staff: 'Персонал', settings: 'Налаштування', games: 'Ігри', reservations: 'Бронювання',
+    pos: 'Каса / Бар', shift: 'Зміна', stock: 'Склад', finance: 'Фінанси', audit: 'Журнал дій', staff: 'Персонал', settings: 'Налаштування', games: 'Ігри', reservations: 'Бронювання', orders: 'Замовлення',
     sectionMain: 'ОСНОВНЕ', sectionDesk: 'КАСА', sectionManage: 'УПРАВЛІННЯ', sectionAnalytics: 'АНАЛІТИКА', sectionAdmin: 'АДМІНІСТРУВАННЯ',
     logout: 'Вийти',
   },
@@ -247,6 +247,8 @@ export const uk = {
     deposit_hold: 'Депозит броні',
     deposit_release: 'Депозит броні на баланс',
     deposit_kept: 'Депозит броні утримано (неявка)',
+    order_hold: 'Замовлення бару (утримано)',
+    order_release: 'Замовлення бару: зняття утримання',
   } as Record<string, string>,
 
   audit: {
@@ -417,6 +419,7 @@ export const uk = {
     csvEn: '⬇️ CSV (EN)',
     notAllowed: 'Касир бачить Z-звіт своєї зміни після її закриття.',
     other: 'Інші операції',
+    orders: 'Замовлення бару з ПК (передоплата)', ordersHeld: 'Утримано з балансів', ordersReleased: 'Знято з утримання (видано або скасовано)',
     deposits: 'Депозити броні', depositsHeld: 'Утримано з балансів', depositsReleased: 'Повернуто на баланси (вхід, скасування)', depositsKept: 'Залишено клубу (неявка; у виручці за час)',
     count: 'шт.',
   },
@@ -623,6 +626,17 @@ export const uk = {
     cleared: 'Блокування знято ✓',
   },
 
+  orders: {
+    title: 'Замовлення з ПК',
+    hint: 'Гравці замовляють з екрана ПК. Продаж бару записується, коли замовлення видано: передоплачене — з балансу гравця, решта — готівкою або карткою.',
+    newCount: 'нових: {n}', empty: 'Відкритих замовлень немає', recent: 'Останні закриті',
+    status: { new: 'Нове', preparing: 'Готується', delivered: 'Видано', cancelled: 'Скасовано' },
+    minutesAgo: '{n} хв тому', prepaid: 'Оплачено з балансу', atDesk: 'Оплата на касі',
+    toPreparing: 'Готується', deliver: 'Видано', deliverCash: 'Видано: готівка', deliverCard: 'Видано: картка', cancel: 'Скасувати',
+    cancelPrompt: 'Причина скасування (необов\'язково):', cancelPromptRefund: 'Причина скасування (гроші повернуться на баланс гравця):',
+    preparing: 'Замовлення №{id} готується', delivered: 'Замовлення №{id} видано ✓', cancelled: 'Замовлення №{id} скасовано',
+    settings: 'Налаштування замовлень', enabled: 'Замовлення з екранів ПК увімкнено', maxAmount: 'Найбільша сума одного замовлення', settingsSaved: 'Налаштування замовлень збережено ✓',
+  },
   book: {
     title: 'Бронювання місця',
     demoBanner: 'ДЕМО: дані видаляються під час наступного скидання демо. Не вводьте справжні ім\'я й телефон.',
@@ -848,6 +862,11 @@ export const uk = {
     booking_phone_limit: 'Забагато запитів з цього номера. Спробуйте завтра або зателефонуйте в клуб.',
     booking_bad_name: 'Введіть ім\'я: від 2 до 60 літер.',
     booking_bad_phone: 'Введіть номер телефону: від 9 до 15 цифр.',
+    order_not_found: 'Замовлення не знайдено', orders_disabled: 'Замовлення з ПК вимкнено.', order_needs_session: 'Замовлення можливі лише під час сесії.',
+    order_already_open: 'На цьому ПК уже є відкрите замовлення.', order_bad_lines: 'Від 1 до 10 товарів, від 1 до 10 кожного.', order_too_much: 'Замовлення — не більше {0}.',
+    order_balance_needs_player: 'З балансу платить лише гравець; оплата на касі.', order_bad_payment: 'Оплата: з балансу або на касі.',
+    order_not_open: 'Замовлення вже видано або скасовано.', order_preparing: 'Замовлення вже готується.', order_desk_method: 'Оберіть, як гість платить на касі: готівка або картка.',
+    bad_order_settings: 'Найбільша сума замовлення — від 10 до 10000.',
     bad_power_action: 'Невідома дія живлення',
     balance_limit_needs_player: 'Час з балансу — лише для гравця, без передоплати, з оплатою з балансу',
     game_not_found: 'Гру не знайдено',
@@ -965,7 +984,7 @@ export const en: typeof uk = {
 
   nav: {
     dashboard: 'Dashboard', map: 'PC map', sessions: 'Sessions', devices: 'Devices', users: 'Players', tariffs: 'Tariffs',
-    pos: 'Checkout / Bar', shift: 'Shift', stock: 'Stock', finance: 'Finance', audit: 'Audit log', staff: 'Staff', settings: 'Settings', games: 'Games', reservations: 'Reservations',
+    pos: 'Checkout / Bar', shift: 'Shift', stock: 'Stock', finance: 'Finance', audit: 'Audit log', staff: 'Staff', settings: 'Settings', games: 'Games', reservations: 'Reservations', orders: 'Orders',
     sectionMain: 'MAIN', sectionDesk: 'DESK', sectionManage: 'MANAGEMENT', sectionAnalytics: 'ANALYTICS', sectionAdmin: 'ADMINISTRATION',
     logout: 'Sign out',
   },
@@ -1178,6 +1197,8 @@ export const en: typeof uk = {
     deposit_hold: 'Reservation deposit',
     deposit_release: 'Reservation deposit back on the balance',
     deposit_kept: 'Reservation deposit kept (no-show)',
+    order_hold: 'Bar order (held)',
+    order_release: 'Bar order: hold released',
   } as Record<string, string>,
 
   audit: {
@@ -1348,6 +1369,7 @@ export const en: typeof uk = {
     csvEn: '⬇️ CSV (EN)',
     notAllowed: 'A cashier sees the Z-report of an own shift after the close.',
     other: 'Other rows',
+    orders: 'Bar orders from the PCs (prepaid)', ordersHeld: 'Held from balances', ordersReleased: 'Released (delivered or cancelled)',
     deposits: 'Reservation deposits', depositsHeld: 'Held from balances', depositsReleased: 'Back on balances (check-in, cancel)', depositsKept: 'Kept for no-shows (in PC time revenue)',
     count: 'pcs',
   },
@@ -1554,6 +1576,17 @@ export const en: typeof uk = {
     cleared: 'Lockout cleared ✓',
   },
 
+  orders: {
+    title: 'Orders from the PCs',
+    hint: 'Players order on the screen of their PC. The bar sale is recorded when the order is delivered: a prepaid one from the player\'s balance, the others in cash or by card.',
+    newCount: 'new: {n}', empty: 'No open orders', recent: 'Recently closed',
+    status: { new: 'New', preparing: 'Preparing', delivered: 'Delivered', cancelled: 'Cancelled' },
+    minutesAgo: '{n} min ago', prepaid: 'Paid from the balance', atDesk: 'Pay at the desk',
+    toPreparing: 'Preparing', deliver: 'Delivered', deliverCash: 'Delivered: cash', deliverCard: 'Delivered: card', cancel: 'Cancel',
+    cancelPrompt: 'Reason for the cancel (optional):', cancelPromptRefund: 'Reason for the cancel (the money goes back to the player\'s balance):',
+    preparing: 'Order #{id} is being prepared', delivered: 'Order #{id} delivered ✓', cancelled: 'Order #{id} cancelled',
+    settings: 'Order settings', enabled: 'Orders from the PC screens are on', maxAmount: 'The most one order may cost', settingsSaved: 'Order settings saved ✓',
+  },
   book: {
     title: 'Book a seat',
     demoBanner: 'DEMO: the data is deleted at the next demo reset. Do not enter a real name or phone number.',
@@ -1779,6 +1812,11 @@ export const en: typeof uk = {
     booking_phone_limit: 'Too many requests from this number. Try again tomorrow or call the club.',
     booking_bad_name: 'Enter your name: 2 to 60 letters.',
     booking_bad_phone: 'Enter a phone number with 9 to 15 digits.',
+    order_not_found: 'Order not found', orders_disabled: 'Orders from the PCs are off.', order_needs_session: 'Orders are possible only during a session.',
+    order_already_open: 'This PC already has an open order.', order_bad_lines: '1 to 10 products, 1 to 10 of each.', order_too_much: 'An order may cost at most {0}.',
+    order_balance_needs_player: 'Only a player pays from the balance; pay at the desk.', order_bad_payment: 'Payment: from the balance or at the desk.',
+    order_not_open: 'The order is already delivered or cancelled.', order_preparing: 'The order is already being prepared.', order_desk_method: 'Choose how the guest pays at the desk: cash or card.',
+    bad_order_settings: 'The most an order may cost: 10 to 10000.',
     bad_power_action: 'Unknown power action',
     balance_limit_needs_player: 'Time from the balance needs a player, no prepaid time and payment from the balance',
     game_not_found: 'Game not found',

@@ -33,6 +33,7 @@ const auditFilters = (): { prefix: string; label: string }[] => [
   { prefix: 'player.', label: t.auditPage.balances },
   { prefix: 'session.', label: t.auditPage.sessions },
   { prefix: 'reservation.', label: '📅 ' + t.resv.title },
+  { prefix: 'order.', label: '🥤 ' + t.nav.orders },
   { prefix: 'tariff.', label: t.auditPage.tariffs },
   { prefix: 'package.', label: t.audit.packages },
   { prefix: 'billing.', label: t.audit.billing },
