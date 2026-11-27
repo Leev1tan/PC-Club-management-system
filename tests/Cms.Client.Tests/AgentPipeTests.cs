@@ -61,11 +61,19 @@ public sealed class AgentPipeTests
         {
             await using var raw = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
             await raw.ConnectAsync(5000);
-            await raw.WriteAsync(Encoding.UTF8.GetBytes(payload));
-            await raw.FlushAsync();
             var buffer = new byte[256];
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            var n = await raw.ReadAsync(buffer, cts.Token);
+            int n;
+            try
+            {
+                await raw.WriteAsync(Encoding.UTF8.GetBytes(payload));
+                await raw.FlushAsync();
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                n = await raw.ReadAsync(buffer, cts.Token);
+            }
+            catch (IOException)
+            {
+                n = 0; // the server closed with unread data: a reset is "no answer" too
+            }
             var answer = Encoding.UTF8.GetString(buffer, 0, n);
             Assert.True(n == 0 || answer.Contains("bad_request"), answer);
         }
