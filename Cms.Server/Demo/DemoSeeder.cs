@@ -137,6 +137,7 @@ public static class DemoSeeder
         }
         await BonusRules.SaveAsync(db, BonusTiers, "demo", now, ct);
         db.ClubSettings.Add(new ClubSettingEntity { Key = ClubSettingKeys.LedgerBackfilled, Value = "demo", UpdatedUtc = now, UpdatedBy = "demo" });
+        db.ClubSettings.Add(new ClubSettingEntity { Key = ClubSettingKeys.AuditChainSealed, Value = "demo", UpdatedUtc = now, UpdatedBy = "demo" });
         // The shift of the demo cashier is open, so walk-in guests can pay at the desk
         var cashier = await db.StaffUsers.AsNoTracking().FirstAsync(s => s.Role == StaffRoles.Cashier, ct);
         db.Shifts.Add(new ShiftEntity

@@ -121,6 +121,9 @@ public sealed class ShiftService
         shift.ExpectedCash = expected;
         shift.Variance = countedCash - expected;
         shift.CloseNote = Clean(note);
+        // Anchor: the last audit row and its hash, printed on the Z-report; a later rewrite of the chain shows
+        await AuditChain.LockAsync(_db);
+        (shift.AuditHeadId, shift.AuditHeadHash) = await AuditChain.HeadAsync(_db);
         await _db.SaveChangesAsync();
 
         await AuditAsync(AuditActions.ShiftClosed, shift.Id,

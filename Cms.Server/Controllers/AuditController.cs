@@ -37,9 +37,22 @@ public class AuditController : ControllerBase
         }
         var entries = await q.OrderByDescending(e => e.Id).Take(Math.Clamp(take, 1, 500)).ToListAsync();
         return Ok(entries.Select(e => new AuditEntryView(e.Id, e.CreatedUtc, e.ActorUsername, e.ActorRole, e.Action,
-            e.TargetType, e.TargetId, e.Summary, e.DetailsJson, e.Ip)));
+            e.TargetType, e.TargetId, e.Summary, e.DetailsJson, e.Ip) { Hash = e.Hash, PrevHash = e.PrevHash }));
     }
+
+    /// <summary>
+    /// Owner: recomputes the hash chain of the whole log and reports the first broken row (changed,
+    /// removed or inserted rows) and the head hash. Also checks the head hashes stored by closed shifts.
+    /// </summary>
+    [HttpGet("verify")]
+    [Authorize(Policy = Policies.OwnerOnly)]
+    public async Task<ActionResult<AuditChain.VerifyResult>> Verify() => Ok(await AuditChain.VerifyAsync(_db, HttpContext.RequestAborted));
 }
 
 public record AuditEntryView(long Id, DateTimeOffset CreatedUtc, string? ActorUsername, string? ActorRole, string Action,
-    string? TargetType, string? TargetId, string? Summary, string? DetailsJson, string? Ip);
+    string? TargetType, string? TargetId, string? Summary, string? DetailsJson, string? Ip)
+{
+    /// <summary>SHA-256 link of the hash chain (see Auth/AuditChain).</summary>
+    public string? Hash { get; init; }
+    public string? PrevHash { get; init; }
+}

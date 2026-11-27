@@ -74,6 +74,7 @@ public static class AuditActions
 /// <summary>
 /// Writes audit entries. The actor is the signed-in staff member of the current request (or the one
 /// given). WriteAsync saves at once; inside an open transaction the entry commits with the action.
+/// Each entry is a link of the hash chain (AuditChain), so write it as the last step of a transaction.
 /// </summary>
 public sealed class AuditLogger
 {
@@ -111,8 +112,7 @@ public sealed class AuditLogger
             DetailsJson = details == null ? null : Truncate(JsonSerializer.Serialize(details, Json), 4000),
             Ip = Truncate(http?.ClientIp(), 64)
         };
-        _db.AuditLog.Add(entry);
-        await _db.SaveChangesAsync(ct);
+        await AuditChain.AppendAsync(_db, entry, ct); // with its hash (tamper-evident chain)
     }
 
     private static string? Truncate(string? value, int max) =>
