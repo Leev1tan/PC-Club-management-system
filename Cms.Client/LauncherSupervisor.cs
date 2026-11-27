@@ -20,6 +20,8 @@ public static class LauncherModes
     public const string LockScreenMutex = @"Local\ClubLauncher.LockScreen";
     /// <summary>Exit code of a lock screen that found another one in its session.</summary>
     public const int ExitAlreadyRunning = 3;
+    /// <summary>Exit code in kiosk mode when the Windows user is not the kiosk user (KioskAccount): an administrator's desktop.</summary>
+    public const int ExitNotKioskUser = 4;
 
     public static bool IsWatchdog(IEnumerable<string>? args) =>
         args?.Any(a => string.Equals(a?.Trim(), WatchdogArg, StringComparison.OrdinalIgnoreCase)) == true;

@@ -4,13 +4,15 @@ namespace Cms.Launcher;
 
 /// <summary>
 /// Entry point. "Cms.Launcher.exe --watchdog" is the supervisor of the kiosk session (no window, see Watchdog); without
-/// arguments it is the lock screen, one per Windows session (a second one ends at once with exit code 3).
+/// arguments it is the lock screen, one per Windows session (a second one ends at once with exit code 3). On a kiosk PC
+/// both end at once (exit code 4) for every account except the kiosk user (KioskAccount): ClubAdmin gets its desktop.
 /// </summary>
 internal static class Program
 {
     [STAThread]
     public static int Main(string[] args)
     {
+        if (!KioskAccount.RunsFor(AppContext.BaseDirectory, Environment.UserName)) return LauncherModes.ExitNotKioskUser;
         if (LauncherModes.IsWatchdog(args)) return Watchdog.Run();
 
         using var single = new Mutex(false, LauncherModes.LockScreenMutex);
