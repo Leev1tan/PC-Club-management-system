@@ -40,6 +40,8 @@ public partial class Worker : BackgroundService
     private ClientSessionInfo? _session;
     /// <summary>"Log off" of the staff, for the lock screen (a service in session 0 cannot log off the player).</summary>
     private LogoffRequest? _logoff;
+    /// <summary>The reservation that holds this PC now (heartbeat), for the lock screen.</summary>
+    private ClientReservationInfo? _reservation;
     private bool _manualLockRequested;
     private bool? _lastLocked;
     private DateTimeOffset _lockChangedUtc = DateTimeOffset.UtcNow;
@@ -143,7 +145,8 @@ public partial class Worker : BackgroundService
                 {
                     AgentPid = Environment.ProcessId,
                     Session = _session,
-                    Logoff = _logoff
+                    Logoff = _logoff,
+                    Reservation = _reservation
                 };
             }
 
@@ -793,6 +796,11 @@ public partial class Worker : BackgroundService
                     var info = session.ValueKind == JsonValueKind.Object ? session.Deserialize<ClientSessionInfo>(JsonOptions) : null;
                     lock (_gate) _session = info;
                 }
+                if (_enrollmentStatus == "approved" && root.TryGetProperty("reservation", out var reservation))
+                {
+                    var hold = reservation.ValueKind == JsonValueKind.Object ? reservation.Deserialize<ClientReservationInfo>(JsonOptions) : null;
+                    lock (_gate) _reservation = hold;
+                }
             }
         }
         catch (JsonException ex)
@@ -1090,6 +1098,8 @@ public partial class Worker : BackgroundService
         public ClientSessionInfo? Session { get; init; }
         /// <summary>A "log off" of the staff for the lock screen (one minute).</summary>
         public LogoffRequest? Logoff { get; init; }
+        /// <summary>The reservation that holds the PC now ("Reserved for ... at HH:mm").</summary>
+        public ClientReservationInfo? Reservation { get; init; }
     }
 
     private sealed record LauncherConfig(string ServerUrl);

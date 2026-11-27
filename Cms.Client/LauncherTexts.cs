@@ -44,6 +44,9 @@ public sealed class LauncherTexts
     public required string NoTariff { get; init; }
     public required string AgentUnavailable { get; init; }
     public required string SessionGone { get; init; }
+    public required string PcReserved { get; init; }
+    /// <summary>On the lock screen while the PC is held for a reservation: name, club time.</summary>
+    public required string ReservedFor { get; init; }
 
     // How the player pays (offers of the PC's zone)
     public required string OffersTitle { get; init; }
@@ -131,6 +134,8 @@ public sealed class LauncherTexts
         NoTariff = "Для цього ПК не задано тариф. Зверніться до адміністратора.",
         AgentUnavailable = "Агент ПК не відповідає. Вхід зараз неможливий, зверніться до адміністратора.",
         SessionGone = "Сесію вже завершено.",
+        PcReserved = "Цей ПК заброньовано для {0} на {1}. Увійти може лише гравець броні; зверніться до адміністратора.",
+        ReservedFor = "> ЗАБРОНЬОВАНО ДЛЯ {0} НА {1}",
 
         OffersTitle = "> ЯК ОПЛАТИТИ",
         OfferBalance = "З балансу, поки вистачить коштів",
@@ -215,6 +220,8 @@ public sealed class LauncherTexts
         NoTariff = "This PC has no tariff. Ask the staff.",
         AgentUnavailable = "The PC agent does not answer. Login is not possible now; ask the staff.",
         SessionGone = "The session has already ended.",
+        PcReserved = "This PC is reserved for {0} at {1}. Only the player of the reservation can log in; ask the staff.",
+        ReservedFor = "> RESERVED FOR {0} AT {1}",
 
         OffersTitle = "> HOW TO PAY",
         OfferBalance = "From my balance while the money lasts",

@@ -30,18 +30,18 @@ public sealed record PipeResponse(int Status, string? Body)
     public string? Code => Field("code");
 
     /// <summary>The first of the "args" of an error body, if any.</summary>
-    public string? FirstArg
+    public string? FirstArg => Arg(0);
+
+    /// <summary>One of the "args" of an error body, if any.</summary>
+    public string? Arg(int index)
     {
-        get
+        try
         {
-            try
-            {
-                using var doc = JsonDocument.Parse(Body ?? "{}");
-                return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("args", out var a) &&
-                       a.ValueKind == JsonValueKind.Array && a.GetArrayLength() > 0 ? a[0].ToString() : null;
-            }
-            catch (JsonException) { return null; }
+            using var doc = JsonDocument.Parse(Body ?? "{}");
+            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("args", out var a) &&
+                   a.ValueKind == JsonValueKind.Array && a.GetArrayLength() > index ? a[index].ToString() : null;
         }
+        catch (JsonException) { return null; }
     }
 
     private string? Field(string name)

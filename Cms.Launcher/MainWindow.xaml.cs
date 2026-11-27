@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private Border? _lockOverlay;
     private TextBlock? _lockCountdown;
     private TextBlock? _lockReasonText;
+    private TextBlock? _lockReservedText;
     private TextBlock? _lockTitle;
     private TextBlock? _lockHint;
     private TextBlock? _lockStaffHint;
@@ -327,6 +328,18 @@ public partial class MainWindow : Window
             FontFamily = monoFont
         };
 
+        _lockReservedText = new TextBlock
+        {
+            Text = string.Empty,
+            Foreground = new SolidColorBrush(Color.FromRgb(255, 224, 25)),
+            FontSize = 18,
+            FontWeight = FontWeights.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 14, 0, 0),
+            FontFamily = monoFont,
+            Visibility = Visibility.Collapsed
+        };
+
         _lockReasonText = new TextBlock
         {
             Text = string.Empty,
@@ -352,6 +365,7 @@ public partial class MainWindow : Window
                     lockIcon,
                     lockTitle,
                     _lockCountdown,
+                    _lockReservedText,
                     _lockReasonText,
                     (_lockHint = new TextBlock
                     {
@@ -507,6 +521,13 @@ public partial class MainWindow : Window
         };
         _lockReasonText.Text = text;
         _lockReasonText.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (_lockReservedText != null)
+        {
+            // "Reserved for <nickname or first name> at HH:MM" while the server holds the PC for a reservation
+            var reserved = ReservationNotice.LockLine(_lastState?.Reservation, _texts);
+            _lockReservedText.Text = reserved ?? string.Empty;
+            _lockReservedText.Visibility = reserved != null ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     private void UpdateCountdowns(long remaining)
@@ -589,4 +610,6 @@ internal record LauncherState(
     public ClientSessionInfo? Session { get; init; }
     /// <summary>"Log off" of the staff, forwarded by the agent.</summary>
     public LogoffRequest? Logoff { get; init; }
+    /// <summary>The reservation that holds the PC now.</summary>
+    public ClientReservationInfo? Reservation { get; init; }
 }

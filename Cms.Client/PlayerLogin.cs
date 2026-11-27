@@ -32,6 +32,7 @@ public static class LoginMessages
             "insufficient_balance" or "balance_too_low" => t.InsufficientBalance,
             "player_has_debt" => t.PlayerHasDebt,
             "player_busy" => LauncherTexts.Format(t.PlayerBusy, r.FirstArg ?? "?"),
+            "pc_reserved" => LauncherTexts.Format(t.PcReserved, ReservationNotice.CleanName(r.Arg(0)), r.Arg(1) ?? "?"),
             "device_busy" => t.DeviceBusy,
             "no_tariff" => t.NoTariff,
             "bad_offer" or "package_not_found" or "package_inactive" or "package_other_zone" or "package_outside_window"
@@ -77,5 +78,26 @@ public sealed class LowTimeWarnings
         if (due == int.MaxValue || due >= _done) return null;
         _done = due;
         return due;
+    }
+}
+
+/// <summary>The line of the lock screen while the PC is held for a reservation ("Reserved for Taras at 18:00").</summary>
+public static class ReservationNotice
+{
+    public const int MaxName = 20;
+
+    /// <summary>The text, or null when the PC is not held.</summary>
+    public static string? LockLine(ClientReservationInfo? info, LauncherTexts t)
+    {
+        if (info == null || string.IsNullOrWhiteSpace(info.StartLocal)) return null;
+        return LauncherTexts.Format(t.ReservedFor, CleanName(info.Name), info.StartLocal.Trim());
+    }
+
+    /// <summary>A short name for the screen: no control characters, at most 20 characters, "?" when empty.</summary>
+    public static string CleanName(string? name)
+    {
+        var clean = new string((name ?? string.Empty).Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (clean.Length == 0) return "?";
+        return clean.Length > MaxName ? clean[..MaxName] : clean;
     }
 }
