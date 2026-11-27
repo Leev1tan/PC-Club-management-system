@@ -229,6 +229,125 @@ namespace Cms.Server.Migrations
                     b.ToTable("Heartbeats");
                 });
 
+            modelBuilder.Entity("Cms.Server.Data.LedgerEntryEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActorUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<decimal?>("BalanceAfter")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<decimal>("BalanceDelta")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<decimal?>("BonusAfter")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<decimal>("BonusDelta")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<decimal>("DeskAmount")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid?>("PackageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedUtc");
+
+                    b.HasIndex("SessionId");
+
+                    b.HasIndex("UserId", "Id");
+
+                    b.ToTable("LedgerEntries", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.PackageEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("DaysMask")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("DurationMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("WindowEndMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("WindowStartMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ZoneId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ZoneId");
+
+                    b.ToTable("Packages", (string)null);
+                });
+
             modelBuilder.Entity("Cms.Server.Data.SessionEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -239,6 +358,9 @@ namespace Cms.Server.Migrations
                         .IsConcurrencyToken()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("CutoffUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("DeviceId")
                         .HasColumnType("uuid");
 
@@ -247,6 +369,19 @@ namespace Cms.Server.Migrations
 
                     b.Property<bool>("IsPrepaid")
                         .HasColumnType("boolean");
+
+                    b.Property<Guid?>("PackageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("PaidMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("PausedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PaymentMethod")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<DateTimeOffset>("StartUtc")
                         .HasColumnType("timestamp with time zone");
@@ -272,6 +407,8 @@ namespace Cms.Server.Migrations
                         .HasDatabaseName("IX_Sessions_DeviceId_Active")
                         .HasFilter("\"Status\" = 'active'");
 
+                    b.HasIndex("PackageId");
+
                     b.HasIndex("TariffId");
 
                     b.HasIndex("UserId");
@@ -279,6 +416,34 @@ namespace Cms.Server.Migrations
                     b.HasIndex("DeviceId", "Status");
 
                     b.ToTable("Sessions");
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.SessionSegmentEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("EndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("StartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("TariffId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionId");
+
+                    b.ToTable("SessionSegments", (string)null);
                 });
 
             modelBuilder.Entity("Cms.Server.Data.StaffUserEntity", b =>
@@ -335,8 +500,14 @@ namespace Cms.Server.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("BillingStepMinutes")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("IsDefault")
                         .HasColumnType("boolean");
+
+                    b.Property<decimal>("MinimumCharge")
+                        .HasColumnType("decimal(10,2)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -354,6 +525,42 @@ namespace Cms.Server.Migrations
                     b.HasIndex("ZoneId");
 
                     b.ToTable("Tariffs");
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.TariffRuleEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("DaysMask")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("EndMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("PricePerHour")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("StartMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TariffId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TariffId", "SortOrder");
+
+                    b.ToTable("TariffRules", (string)null);
                 });
 
             modelBuilder.Entity("Cms.Server.Data.TransactionEntity", b =>
@@ -476,6 +683,22 @@ namespace Cms.Server.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Cms.Server.Data.LedgerEntryEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.UserEntity", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.PackageEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.ZoneEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ZoneId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("Cms.Server.Data.SessionEntity", b =>
                 {
                     b.HasOne("Cms.Server.Data.DeviceEntity", null)
@@ -483,6 +706,11 @@ namespace Cms.Server.Migrations
                         .HasForeignKey("DeviceId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Cms.Server.Data.PackageEntity", null)
+                        .WithMany()
+                        .HasForeignKey("PackageId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("Cms.Server.Data.TariffEntity", null)
                         .WithMany()
@@ -495,12 +723,30 @@ namespace Cms.Server.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 
+            modelBuilder.Entity("Cms.Server.Data.SessionSegmentEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.SessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Cms.Server.Data.TariffEntity", b =>
                 {
                     b.HasOne("Cms.Server.Data.ZoneEntity", null)
                         .WithMany()
                         .HasForeignKey("ZoneId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.TariffRuleEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.TariffEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TariffId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Cms.Server.Data.TransactionEntity", b =>

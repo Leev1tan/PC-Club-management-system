@@ -17,6 +17,10 @@ public class CmsDbContext : DbContext
     public DbSet<StaffUserEntity> StaffUsers => Set<StaffUserEntity>();
     public DbSet<ClubSettingEntity> ClubSettings => Set<ClubSettingEntity>();
     public DbSet<AuditLogEntity> AuditLog => Set<AuditLogEntity>();
+    public DbSet<TariffRuleEntity> TariffRules => Set<TariffRuleEntity>();
+    public DbSet<PackageEntity> Packages => Set<PackageEntity>();
+    public DbSet<SessionSegmentEntity> SessionSegments => Set<SessionSegmentEntity>();
+    public DbSet<LedgerEntryEntity> Ledger => Set<LedgerEntryEntity>();
 
     public const string ActiveSessionIndex = "IX_Sessions_DeviceId_Active";
 
@@ -48,6 +52,13 @@ public class CmsDbContext : DbContext
         {
             if (entry.State is EntityState.Modified or EntityState.Deleted)
                 throw new InvalidOperationException("The audit log is append-only: entries cannot be changed or deleted.");
+        }
+
+        // The money ledger is append-only too (database trigger as well); corrections are new rows
+        foreach (var entry in ChangeTracker.Entries<LedgerEntryEntity>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("The ledger is append-only: entries cannot be changed or deleted.");
         }
 
         // Every change of a session gets a new stamp; EF checks the old one in the UPDATE
@@ -84,7 +95,59 @@ public class CmsDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.PricePerHour).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.MinimumCharge).HasColumnType("decimal(10,2)");
             entity.HasOne<ZoneEntity>().WithMany().HasForeignKey(e => e.ZoneId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<TariffRuleEntity>(entity =>
+        {
+            entity.ToTable("TariffRules");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.PricePerHour).HasColumnType("decimal(10,2)");
+            entity.HasOne<TariffEntity>().WithMany().HasForeignKey(e => e.TariffId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.TariffId, e.SortOrder });
+        });
+
+        modelBuilder.Entity<PackageEntity>(entity =>
+        {
+            entity.ToTable("Packages");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Price).HasColumnType("decimal(10,2)");
+            entity.HasOne<ZoneEntity>().WithMany().HasForeignKey(e => e.ZoneId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(e => e.ZoneId);
+        });
+
+        modelBuilder.Entity<SessionSegmentEntity>(entity =>
+        {
+            entity.ToTable("SessionSegments");
+            entity.HasKey(e => e.Id);
+            entity.HasOne<SessionEntity>().WithMany().HasForeignKey(e => e.SessionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.SessionId);
+        });
+
+        modelBuilder.Entity<LedgerEntryEntity>(entity =>
+        {
+            entity.ToTable("LedgerEntries");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Type).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Method).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Amount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.BalanceDelta).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.BonusDelta).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.DeskAmount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.BalanceAfter).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.BonusAfter).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.Reason).HasMaxLength(300);
+            entity.Property(e => e.ActorUsername).HasMaxLength(64);
+            // Restrict: a player with money history cannot be deleted (rows are never changed: no SET NULL / CASCADE)
+            entity.HasOne<UserEntity>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.UserId, e.Id });
+            entity.HasIndex(e => e.CreatedUtc);
+            entity.HasIndex(e => e.SessionId);
         });
 
         modelBuilder.Entity<UserEntity>(entity =>
@@ -107,6 +170,8 @@ public class CmsDbContext : DbContext
             entity.HasOne<DeviceEntity>().WithMany().HasForeignKey(e => e.DeviceId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<TariffEntity>().WithMany().HasForeignKey(e => e.TariffId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne<UserEntity>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<PackageEntity>().WithMany().HasForeignKey(e => e.PackageId).OnDelete(DeleteBehavior.SetNull);
+            entity.Property(e => e.PaymentMethod).HasMaxLength(16);
             entity.HasIndex(e => new { e.DeviceId, e.Status });
             // At most ONE active session per PC, enforced by the database (partial unique index)
             entity.HasIndex(e => e.DeviceId)
@@ -216,9 +281,51 @@ public class TariffEntity
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    /// <summary>Base price; applies when no time-of-day rule matches (see TariffRuleEntity).</summary>
     public decimal PricePerHour { get; set; }
     public bool IsDefault { get; set; }
     public Guid? ZoneId { get; set; }  // Optional: zone-specific tariff
+    /// <summary>Post-paid time is rounded up to this many minutes (1 = per minute; 0 in old databases = 1).</summary>
+    public int BillingStepMinutes { get; set; } = 1;
+    /// <summary>Smallest amount charged for a session that ran at all (0 = none).</summary>
+    public decimal MinimumCharge { get; set; }
+}
+
+/// <summary>
+/// Time-of-day / weekday price of a tariff, in club local time. Start and end are minutes after
+/// midnight; End &lt;= Start means the window runs past midnight (22:00-08:00). Days is a bit mask
+/// of the day the window STARTS on (bit 0 = Monday ... bit 6 = Sunday). The first matching rule
+/// (lowest SortOrder) wins; without a match the tariff base price applies.
+/// </summary>
+public class TariffRuleEntity
+{
+    public Guid Id { get; set; }
+    public Guid TariffId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int DaysMask { get; set; } = 127;
+    public int StartMinute { get; set; }
+    public int EndMinute { get; set; }
+    public decimal PricePerHour { get; set; }
+    public int SortOrder { get; set; }
+}
+
+/// <summary>
+/// Fixed-price package bound to a zone: a fixed duration (3 h, 5 h), a time window with a cut-off
+/// (night pack 22:00-08:00), or both (morning pack: 3 h, sold 08:00-12:00, ends by 12:00 at the latest).
+/// Window minutes as in TariffRuleEntity; DaysMask = days on which the window starts.
+/// </summary>
+public class PackageEntity
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public Guid? ZoneId { get; set; }
+    public decimal Price { get; set; }
+    public int? DurationMinutes { get; set; }
+    public int? WindowStartMinute { get; set; }
+    public int? WindowEndMinute { get; set; }
+    public int DaysMask { get; set; } = 127;
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
 }
 
 public class UserEntity
@@ -227,7 +334,9 @@ public class UserEntity
     public string Username { get; set; } = string.Empty;
     public string? PasswordHash { get; set; }
     public string DisplayName { get; set; } = string.Empty;
+    /// <summary>Real money balance. Changed only together with a LedgerEntries row (see Billing/Wallet).</summary>
     public decimal Balance { get; set; }
+    /// <summary>Bonus balance (cashback, promo): spendable on PC time only, never paid out or spent at the bar.</summary>
     public decimal BonusPoints { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
@@ -240,11 +349,69 @@ public class SessionEntity
     public Guid? UserId { get; set; }
     public DateTimeOffset StartUtc { get; set; }
     public DateTimeOffset? EndUtc { get; set; }
-    public string Status { get; set; } = "active"; // active, paused, ended
+    /// <summary>active or ended. A paused session stays "active" (it keeps the PC) and has PausedUtc set.</summary>
+    public string Status { get; set; } = "active";
     public decimal TotalCost { get; set; }
-    public bool IsPrepaid { get; set; }  // true = fixed duration, false = open-ended (pay on exit)
+    public bool IsPrepaid { get; set; }  // true = fixed duration or package, false = open-ended (pay on exit)
     /// <summary>Concurrency token; changes on every update (see CmsDbContext.BeforeSave).</summary>
     public Guid ConcurrencyStamp { get; set; } = Guid.NewGuid();
+    /// <summary>Package bought for this session (null = tariff time).</summary>
+    public Guid? PackageId { get; set; }
+    /// <summary>Set while the session is paused: time stops, the PC is locked.</summary>
+    public DateTimeOffset? PausedUtc { get; set; }
+    /// <summary>Hard end of a package window (night pack 08:00): pause, transfer and extend never go past it.</summary>
+    public DateTimeOffset? CutoffUtc { get; set; }
+    /// <summary>How the session was paid: balance, cash, card (null for open-ended until it ends).</summary>
+    public string? PaymentMethod { get; set; }
+    /// <summary>Minutes paid in advance (prepaid and package sessions, including extensions).</summary>
+    public int? PaidMinutes { get; set; }
+}
+
+/// <summary>
+/// One stretch of play time of a session on one PC with one tariff. Pause closes a segment, resume
+/// opens a new one, a transfer closes it on the old PC and opens one on the new PC. Post-paid
+/// sessions are billed per segment (and per time-of-day rule inside each segment).
+/// </summary>
+public class SessionSegmentEntity
+{
+    public Guid Id { get; set; }
+    public Guid SessionId { get; set; }
+    public Guid DeviceId { get; set; }
+    public Guid? TariffId { get; set; }
+    public DateTimeOffset StartUtc { get; set; }
+    public DateTimeOffset? EndUtc { get; set; }
+}
+
+/// <summary>
+/// Append-only money ledger: every money movement is one row (no API changes or deletes rows,
+/// SaveChanges refuses it, a database trigger blocks UPDATE and DELETE). A player's Balance and
+/// BonusPoints always equal the sum of BalanceDelta / BonusDelta of their rows; BalanceAfter and
+/// BonusAfter are the balances right after the row. DeskAmount is money taken (+) or paid out (-)
+/// in cash or by card at the desk; rows with UserId null are walk-in guest payments.
+/// </summary>
+public class LedgerEntryEntity
+{
+    public long Id { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; }
+    public Guid? UserId { get; set; }
+    /// <summary>See Billing/LedgerTypes.</summary>
+    public string Type { get; set; } = string.Empty;
+    /// <summary>cash, card, balance (player balances) or none (bonus accrual, adjustment).</summary>
+    public string Method { get; set; } = string.Empty;
+    /// <summary>Value of the operation (always positive).</summary>
+    public decimal Amount { get; set; }
+    public decimal BalanceDelta { get; set; }
+    public decimal BonusDelta { get; set; }
+    public decimal DeskAmount { get; set; }
+    public decimal? BalanceAfter { get; set; }
+    public decimal? BonusAfter { get; set; }
+    public Guid? SessionId { get; set; }
+    public Guid? PackageId { get; set; }
+    public Guid? DeviceId { get; set; }
+    public string? Description { get; set; }
+    public string? Reason { get; set; }
+    public Guid? ActorId { get; set; }
+    public string? ActorUsername { get; set; }
 }
 
 public class HeartbeatEntity
@@ -269,6 +436,10 @@ public class CommandEntity
     public string? Result { get; set; }
 }
 
+/// <summary>
+/// Balance history of versions before the ledger (phase 1-2). Not written any more: the rows are
+/// copied once into LedgerEntries (Billing/LedgerBackfill) and the table is kept read-only.
+/// </summary>
 public class TransactionEntity
 {
     public Guid Id { get; set; }
@@ -327,4 +498,8 @@ public static class ClubSettingKeys
 {
     /// <summary>Written once when the first owner account is created (guards the setup screen).</summary>
     public const string SetupCompleted = "setup.completed";
+    /// <summary>Cashback on top-ups: JSON list of {minAmount, percent} (Billing/BonusRules).</summary>
+    public const string BonusTopUpRules = "billing.bonus_topup_rules";
+    /// <summary>Written once the balances of an older version are copied into the ledger.</summary>
+    public const string LedgerBackfilled = "ledger.backfilled";
 }
