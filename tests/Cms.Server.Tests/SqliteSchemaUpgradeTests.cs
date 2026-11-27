@@ -22,6 +22,7 @@ public sealed class SqliteSchemaUpgradeTests : IDisposable
             await db.Database.ExecuteSqlRawAsync("DROP TABLE \"Transactions\"");
             await db.Database.ExecuteSqlRawAsync("DROP INDEX \"IX_Commands_DeviceId_Status\"");
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Devices\" DROP COLUMN \"PositionY\"");
+            await db.Database.ExecuteSqlRawAsync("DROP INDEX \"IX_SessionSegments_EndUtc\""); // phase 5 (analytics)
         }
 
         IReadOnlyList<string> changes;
@@ -31,6 +32,7 @@ public sealed class SqliteSchemaUpgradeTests : IDisposable
         Assert.Contains("table Transactions", changes);
         Assert.Contains("index IX_Commands_DeviceId_Status", changes);
         Assert.Contains("column Devices.PositionY", changes);
+        Assert.Contains("index IX_SessionSegments_EndUtc", changes);
 
         await using (var db = _testDb.NewContext())
         {

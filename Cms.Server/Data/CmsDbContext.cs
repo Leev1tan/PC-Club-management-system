@@ -183,6 +183,8 @@ public class CmsDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.HasOne<SessionEntity>().WithMany().HasForeignKey(e => e.SessionId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => e.SessionId);
+            // Analytics: the segments that end in a period (or are still open)
+            entity.HasIndex(e => e.EndUtc);
         });
 
         modelBuilder.Entity<LedgerEntryEntity>(entity =>

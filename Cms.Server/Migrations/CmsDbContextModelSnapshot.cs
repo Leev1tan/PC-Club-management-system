@@ -609,6 +609,8 @@ namespace Cms.Server.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("EndUtc");
+
                     b.HasIndex("SessionId");
 
                     b.ToTable("SessionSegments", (string)null);

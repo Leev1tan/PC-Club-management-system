@@ -143,27 +143,15 @@ public class SessionsController : ControllerBase
     }
 
     /// <summary>
-    /// Revenue summary for the finance tab
+    /// Revenue (PC time + bar net, from the ledger) of today, the last 7 and the last 30 club days: the
+    /// same numbers as the analytics (GET /api/analytics). Until phase 4 it was the cost of the ended
+    /// sessions per UTC day, week and calendar month.
     /// </summary>
     [HttpGet("revenue")]
     [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<RevenueSummary>> Revenue()
     {
-        var now = _clock.UtcNow;
-        var todayStart = new DateTimeOffset(now.Date, TimeSpan.Zero);
-        var weekStart = todayStart.AddDays(-(int)now.DayOfWeek);
-        var monthStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-
-        // SQLite cannot compare DateTimeOffset in WHERE — filter in memory
-        var allEnded = await _db.Sessions.AsNoTracking()
-            .Where(s => s.Status == "ended")
-            .ToListAsync();
-        var sessions = allEnded.Where(s => s.StartUtc >= monthStart).ToList();
-
-        var today = sessions.Where(s => s.StartUtc >= todayStart).Sum(s => s.TotalCost);
-        var week = sessions.Where(s => s.StartUtc >= weekStart).Sum(s => s.TotalCost);
-        var month = sessions.Sum(s => s.TotalCost);
-
+        var (today, week, month) = await Cms.Server.Analytics.AnalyticsService.RevenueAsync(_db, _clock, HttpContext?.RequestAborted ?? CancellationToken.None);
         return Ok(new RevenueSummary(today, week, month, await _db.CurrencySymbolAsync()));
     }
 
@@ -251,4 +239,5 @@ public record SessionDetailView(
     public decimal DebtRecorded { get; init; }
 }
 
+/// <summary>Today, Week = the last 7 club days, Month = the last 30 club days; Currency = the symbol.</summary>
 public record RevenueSummary(decimal Today, decimal Week, decimal Month, string Currency);
