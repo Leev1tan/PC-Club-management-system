@@ -12,7 +12,9 @@ Install
    Options: -HttpPort 5081 -DataPath C:\ProgramData\PCClub -EnrollmentToken <token> -TimeZone Europe/Kyiv
             -PostgresConnectionString "Host=...;Database=cms;Username=...;Password=..."
    Default database: SQLite in C:\ProgramData\PCClub\cms.db.
-4. At the end the installer shows the one-time setup code and the enrollment token for the club PCs.
+4. At the end the installer shows the one-time setup code and, on the first install, the new enrollment
+   token for the club PCs. An update keeps the token and shows "<enrollment token>" in its place: the
+   token is Devices:EnrollmentToken in C:\ClubServer\appsettings.json (Administrators only).
 5. Open http://localhost:5081, enter the setup code and create the Owner account.
    Then set the staff PIN for the lock screens (Settings).
 

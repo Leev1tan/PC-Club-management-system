@@ -247,6 +247,15 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
 ### Kiosk mode (`-KioskMode`)
 
 - The players use the Windows account `ClubUser`. It signs in automatically, and the lock screen is its shell.
+- The automatic sign-in (`AutoAdminLogon`) works at the start of the PC and after a sign-out of `ClubUser` (the
+  staff "Log off", an update). The installer does not set `ForceAutoLogon` and removes it when an older version set
+  it: that value also signed `ClubUser` in again on "Switch user", so `ClubAdmin` could never sign in at the screen.
+  Windows writes the last user of the screen into `DefaultUserName`. The scheduled task `ClubKioskAutoLogon`
+  (SYSTEM: at the start, at every sign-in and every 5 minutes; only `reg.exe` with fixed values) writes the values of
+  `ClubUser` again, so `ClubUser` signs in at the next start also after `ClubAdmin` was there.
+- Only `ClubUser` gets the lock screen. A kiosk PC has no shortcut in the common Startup folder (the installer
+  removes an old one), and `Cms.Launcher.exe` ends at once for every other account when `kiosk.json` names
+  `ClubUser`.
 - The password of `ClubUser` is random (32 characters). The installer makes a new one on every run, never
   prints it and never writes it to a file. Windows keeps it for the automatic sign-in as the LSA secret
   `DefaultPassword`, not as the registry value `DefaultPassword` (local users can read that value).
@@ -257,9 +266,18 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
   removes the machine-wide values of older versions (shell, `DisableTaskMgr`, `DisableContextMenusInStart`).
 - If the installer cannot load the registry hive of `ClubUser`, it stops with exit code 1 and changes no
   machine-wide setting. Sign out `ClubUser` or restart the PC, then run the installer again.
-- `ClubAdmin` is the recovery account of the staff (Administrators): Ctrl+Alt+Del > Switch user > `ClubAdmin`.
-  When it does not exist, the installer asks for its password in a console. For a run without a console, give
-  the password as a SecureString, for example from PowerShell:
+- `ClubAdmin` is the recovery account of the staff (Administrators). To work on a kiosk PC:
+  1. Press Ctrl+Alt+Del on the PC, select **Switch user**, then sign in as `ClubAdmin`. The session of `ClubUser`
+     stays (disconnected), with its lock screen. `ClubAdmin` gets `explorer.exe`, Task Manager and no lock screen.
+  2. When you are done, sign out of `ClubAdmin` (Start > `ClubAdmin` > Sign out). Windows signs `ClubUser` in
+     again and its session comes back.
+  3. If the Windows sign-in screen stays, select the power icon > **Restart**: `ClubUser` signs in at the start.
+
+  A player can also select "Switch user" (Ctrl+Alt+Del cannot be blocked). Then the PC shows the Windows sign-in
+  screen and nobody can sign in as `ClubUser` (nobody knows its password): restart the PC, or sign in as `ClubAdmin`
+  and sign out. From another PC, an RMM tool or the guest agent runs as SYSTEM and needs no sign-in.
+  When `ClubAdmin` does not exist, the installer asks for its password in a console. For a run without a console,
+  give the password as a SecureString, for example from PowerShell:
 
   ```powershell
   .\install-client.ps1 -ServerUrl "http://10.3.3.1:5081" -EnrollmentToken "<token>" -KioskMode -AdminPassword (Read-Host -AsSecureString)
@@ -273,9 +291,16 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
   `ClubUser` (at sign-in and every minute) starts the watchdog when both were ended. The agent logs a warning when
   the lock screen does not answer while the PC must be locked, and the admin UI shows ⚠️ on the PC.
 - While the PC is locked, the lock screen stays on top: every second it takes the foreground back and pushes down
-  the top-most windows of other programs (for example the Windows "Open with" dialog).
-- `uninstall-kiosk.ps1` removes the kiosk shell, the policies of `ClubUser`, the automatic sign-in and its LSA
-  secret, and the scheduled task `ClubLauncherWatchdog`.
+  the top-most windows of other programs. A window in a band above the normal desktop windows (for example the
+  "Open with" dialog of Windows 11, which no top-most window can cover) gets a close request at once, and its
+  program is ended 2 s later when the window is still there. Programs of other Windows users, of other sessions and
+  the Windows parts (shell, touch keyboard, accessibility tools, by full path) are never touched.
+- `uninstall-kiosk.ps1` removes the kiosk shell, the policies of `ClubUser`, the automatic sign-in, its LSA secret
+  and the task `ClubKioskAutoLogon`, and the scheduled task `ClubLauncherWatchdog`. When you answer `y`, it signs
+  `ClubUser` out of every session (also a disconnected one after "Switch user") and waits up to 60 s until Windows
+  has released the profile; then it deletes the account and `C:\Users\ClubUser` (also the read-only folders of the
+  profile; a junction inside is removed as a link, its target stays). If `ClubUser` does not go, the account and
+  the profile stay, and the script ends with exit code 1: restart the PC and run it again.
 
 ## Session teardown
 
@@ -324,7 +349,9 @@ on each PC (only administrators can change the folder; the installer keeps the s
 - A newly installed PC shows the locked lock screen (no session, no game grid) after the first start.
 - A staff unlock of a PC without a session unlocks it; after `Restart-Service ClubAgent` the PC is locked again.
 - Kiosk mode: `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword` finds
-  no value; ClubUser signs in automatically after a restart; ClubAdmin gets `explorer.exe` and can open Task Manager.
+  no value; ClubUser signs in automatically after a restart; ClubAdmin (Ctrl+Alt+Del > Switch user) gets
+  `explorer.exe` without the lock screen and can open Task Manager; after ClubAdmin signs out and the PC restarts,
+  ClubUser signs in automatically again.
 - Ctrl+Shift+U on a locked PC asks for the staff PIN; the correct PIN unlocks it.
 - Stopping the ClubAgent service (as admin) keeps the PC locked after 15 s; the staff PIN still unlocks it.
 - Unlocking a PC without a session appears in the audit log as `device.unlock_without_session`.

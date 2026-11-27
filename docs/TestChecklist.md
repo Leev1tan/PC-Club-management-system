@@ -609,13 +609,92 @@ Prepare these catalog entries (zone of the club PC):
 - [ ] During the run a folder `ccms-update-<random>` exists in the TEMP folder of SYSTEM (`C:\Windows\SystemTemp` or
       `C:\Windows\Temp`); `icacls` shows only SYSTEM and Administrators; it is gone after the run.
 2. A PC without the club software: as a standard user `mkdir C:\ClubAgent`, then run `Install.cmd` as administrator.
-- [ ] Exit code 1: "C:\ClubAgent cannot be used: its owner (...) is not SYSTEM or an administrator ... Nothing was
-      changed". The same with `mklink /J C:\ProgramData\ClubAgent C:\Users\Public\victim` instead: "it is a junction".
+- [ ] Exit code 1: "C:\ClubAgent cannot be used: its owner (...) is not SYSTEM or an administrator ...". The same with
+      `mklink /J C:\ProgramData\ClubAgent C:\Users\Public\victim` instead: "is a junction or a symbolic link" (the
+      texts since v0.9.2: 27.5 step 2).
 3. As administrator create `mklink /J C:\Users\ClubUser\AppData\Local\jump C:\Users\Public\victim`. Run
    `uninstall-kiosk.ps1` and delete the ClubUser account and profile.
 - [ ] The profile folder is gone; `C:\Users\Public\victim\keep.txt` is still there.
 4. Server PC: run the server update (`Install.cmd`).
 - [ ] `icacls C:\ClubServer` lists only SYSTEM (F), Administrators (F) and Users (RX); the server runs.
+
+### Test 27: Fixes of the Windows Re-test of 2026-11-27 Late (v0.9.2)
+Bench as in Test 26 (kiosk mode, the agent as LocalService, the catalog entries "Calc", "Topmost test" and Notepad).
+Version: the release of the tag `v0.9.2` shows `0.9.2.0`; a dry-run build shows `0.0.0.0`. Update the server and the
+club PC first (25.4 with `-KioskMode`): the update ends with "RESULT: OK" and shows no warning "did not sign in again".
+
+**27.1 No "Open with" dialog above the paused or locked screen (re-test defect 1, HIGH)**
+1. Start a session; start "Calc" (the Windows 11 "Open with" dialog opens) and Notepad (type a line). Pause the session.
+- [ ] Within 3 s the "Open with" dialog is gone. In the admin session
+      `Get-Process OpenWith -ErrorAction SilentlyContinue | Where-Object SessionId -eq <session of ClubUser>` finds
+      nothing within 5 s (WM_CLOSE at once; the process is ended 2 s later when the window stays).
+- [ ] Without a click, Ctrl+Shift+U opens the PIN dialog in front; type 3 digits: they arrive in the PIN box; Esc
+      closes the PIN dialog (not another window).
+- [ ] Notepad still runs with its line. Resume: "Зараз: Notepad" is on the top bar.
+2. Resume, start "Calc" again, then end the session in the admin UI.
+- [ ] Within 3 s after the end the "Open with" dialog is gone, and it does not come back (100 s, every 5 s).
+3. Start a session and start "Calc". Do not pause.
+- [ ] The "Open with" dialog stays open in the running session (the guard is off while unlocked).
+4. Regression: repeat 26.2 steps 2 and 4 ("TOPMOST TEST" is pushed down in a pause, Notepad stays when the agent stops).
+5. Regression: on the locked screen tap or click into the user name box with the touch keyboard on (Settings > Time &
+   language > Typing > Touch keyboard): the touch keyboard opens and types.
+
+**27.2 The uninstaller deletes the profile of ClubUser (re-test defects 2 and 4)**
+1. The PC is locked, ClubUser is signed in. Press Ctrl+Alt+Del > Switch user > ClubAdmin (27.3). In ClubAdmin,
+   `query user` shows ClubUser as "Disc" (no SESSIONNAME). As administrator create the junction
+   `mklink /J C:\Users\ClubUser\AppData\Local\jump C:\Users\Public\victim` (with `keep.txt` in `victim`).
+2. Run `uninstall-kiosk.ps1` in an elevated PowerShell of ClubAdmin and answer `y`.
+- [ ] Step 4 shows "Signed out the session <id> of ClubUser" and "User 'ClubUser' removed"; no "Could not remove" and
+      no "was not removed completely". `$LASTEXITCODE` is 0.
+- [ ] `query user` lists no ClubUser; `Test-Path C:\Users\ClubUser` is False; `C:\Users\Public\victim\keep.txt`
+      is still there; `Get-ScheduledTask ClubKioskAutoLogon, ClubLauncherWatchdog -ErrorAction SilentlyContinue`
+      finds nothing; `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon` = 0.
+3. Install the kiosk again (Test 13 / 25.4 with `-KioskMode`) for the next steps.
+
+**27.3 The admin route works (re-test defect 3)**
+1. After the kiosk install, in the admin session (or as SYSTEM):
+- [ ] `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v ForceAutoLogon` finds no value;
+      `AutoAdminLogon` = 1, `DefaultUserName` = ClubUser.
+- [ ] `Get-ScheduledTask ClubKioskAutoLogon` is Ready; its principal is SYSTEM; its 3 actions run `reg.exe add`.
+- [ ] `Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\ClubLauncher.lnk"` is False.
+2. On the locked PC press Ctrl+Alt+Del > Switch user.
+- [ ] The Windows sign-in screen stays (ClubUser does not come back by itself). Sign in as ClubAdmin.
+- [ ] ClubAdmin gets the normal desktop: no lock screen, Alt+Tab and the Windows key work, Task Manager opens.
+      `Get-Process Cms.Launcher | Select-Object Id, SessionId` shows only processes in the session of ClubUser.
+- [ ] `(Start-Process C:\ClubLauncher\Cms.Launcher.exe -PassThru -Wait).ExitCode` is 4 (it ends at once for ClubAdmin);
+      the same with `-ArgumentList '--watchdog'`.
+- [ ] `reg query ... /v DefaultUserName` shows ClubUser (the task wrote it back after the sign-in of ClubAdmin).
+3. Sign out of ClubAdmin (Start > ClubAdmin > Sign out).
+- [ ] ClubUser signs in again within 30 s and its locked screen is back (`query user`: ClubUser Active). If the Windows
+      sign-in screen stays instead, write it down (the documented way then is step 4).
+4. Restart the PC.
+- [ ] ClubUser signs in automatically and the lock screen starts.
+5. Regression: Test 19 step 1 (staff "Log off") and 26.1 step 1 (`logoff <session id of ClubUser>`): within 10 s a new
+   ClubUser session with the locked screen.
+6. Player side: in the session of ClubUser press Ctrl+Alt+Del > Switch user.
+- [ ] The Windows sign-in screen stays (known: ForceAutoLogon is off). The power icon > Restart brings ClubUser back.
+
+**27.4 No stale message or PIN dialog (re-test defects 5 and 6)**
+1. The PC is locked and has no session. Staff PIN unlock; the message "Готово / Розблоковано персоналом" opens. Do not
+   press OK. Lock the PC in the admin UI.
+- [ ] Within 3 s the message is gone. The player login form takes keys; Ctrl+Shift+U opens the PIN dialog.
+2. Start a session and pause it. Press Ctrl+Shift+U (the PIN dialog opens). Resume in the admin UI; type nothing.
+- [ ] Within 3 s the PIN dialog is gone and the session view is in front.
+3. In a session of a player press "End session" (the question opens). Lock the PC in the admin UI.
+- [ ] The question is gone (it counts as "No"): unlock the PC, the session goes on with its time.
+
+**27.5 Texts (re-test LOW 7, 8, 9)**
+1. Server update without `-EnrollmentToken` (25.4 server step).
+- [ ] The end shows `-EnrollmentToken "<enrollment token>"` and "The enrollment token did not change. It is
+      Devices:EnrollmentToken in C:\ClubServer\appsettings.json"; the token itself is not in the output.
+2. Repeat 26.7 step 2 with the junction `C:\ProgramData\ClubAgent`.
+- [ ] Exit code 1. The text says "A player may have made it" once, advises `cmd /c rmdir "C:\ProgramData\ClubAgent"`,
+      has no `icacls ... /setowner`, and ends with "The old version (if any) runs as before. Only new, empty program
+      folders or stricter permissions of C:\ClubAgent and C:\ClubLauncher can stay." The owner case of 26.7 step 2
+      still advises `icacls "C:\ClubAgent" /setowner *S-1-5-32-544`.
+3. The PC is locked, no session: staff PIN unlock, then lock it in the admin UI. Then a session: start, end.
+- [ ] agent.log has "Reported the teardown at the end of a staff unlock without a session at ... (N program(s)
+      closed)" for the first lock and "Reported the teardown of the ended session at ..." for the session.
 
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates and

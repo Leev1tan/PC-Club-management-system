@@ -15,7 +15,7 @@ Install (on every gaming PC, as Administrator)
    The enrollment token is printed by the server installer (Docker: CMS_ENROLLMENT_TOKEN).
    Without the token the PC waits for approval in the admin UI (Devices).
    -KioskMode makes the lock screen the shell of the player account ClubUser (only of this account:
-   ClubAdmin and the other administrators keep explorer.exe and Task Manager).
+   ClubAdmin and the other administrators keep explorer.exe and Task Manager, and get no lock screen).
 4. Check: Get-Service ClubAgent shows Running; the PC is online in the admin UI. The PC is locked
    until a session starts or staff unlock it.
 
@@ -23,6 +23,9 @@ Kiosk password: the password of ClubUser is random (32 characters) and new on ev
 installer. Nobody sees it: the installer never prints it and never writes it to a file. Windows keeps
 it for the automatic sign-in as an LSA secret, not in the registry. To reset it, run Install.cmd again
 with the same options.
+
+Admin access on a kiosk PC: Ctrl+Alt+Del > Switch user > ClubAdmin. When you are done, sign out of
+ClubAdmin: ClubUser signs in again. If the Windows sign-in screen stays, restart the PC.
 
 Recovery account ClubAdmin: when it does not exist, the installer asks for its password. A run without
 a console (as SYSTEM: RMM tools, Intune) asks nothing and creates no ClubAdmin; give the password from
@@ -40,6 +43,9 @@ automatic sign-in starts the new lock screen ("RESULT: OK"). No restart of the P
 The agent log is C:\ProgramData\ClubAgent\logs\agent.log (Administrators only).
 Remove the kiosk shell: uninstall-kiosk.ps1. Guide: docs/ClubDeployment.md in the source repository.
 
+Доступ адміністратора на ПК у режимі кіоску: Ctrl+Alt+Del > Змінити користувача > ClubAdmin. Коли
+закінчите, вийдіть із ClubAdmin: ClubUser увійде знову. Якщо залишився екран входу Windows,
+перезапустіть ПК.
 Українською: розпакуйте цей архів і архів launcher в одну папку та запустіть від імені адміністратора
 Install.cmd -ServerUrl "http://<сервер>:5081" -EnrollmentToken "<токен>" -KioskMode.
 Пароль облікового запису ClubUser випадковий і новий після кожного запуску інсталятора; щоб скинути
