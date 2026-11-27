@@ -99,6 +99,22 @@ public sealed class AgentPipeTests
     }
 
     [Fact]
+    public async Task Many_requests_in_a_row_all_get_their_answer()
+    {
+        // A handler that answers at once: the server serves the connection synchronously, the client asks again at once.
+        // The next instance must listen before the served one closes, or the name of the pipe goes away for a moment
+        // (on Unix its socket closes with its last instance) and a client that connected then gets a reset.
+        var name = NewName();
+        var (run, stop) = Serve(name, (req, _) => Task.FromResult(new PipeResponse(200, "{\"n\":1}")));
+        var failed = 0;
+        for (var i = 0; i < 300; i++)
+            if (!(await AgentPipeClient.SendAsync(name, new PipeRequest(PipeOps.Offers), TimeSpan.FromSeconds(5))).Ok) failed++;
+        Assert.Equal(0, failed);
+        stop.Cancel();
+        await run;
+    }
+
+    [Fact]
     public void Requests_are_parsed_strictly()
     {
         Assert.Null(AgentPipe.ParseRequest(null));

@@ -158,40 +158,66 @@ public sealed class AgentPipeServer
         _authorize = authorize;
     }
 
+    /// <summary>
+    /// Accepts connections until cancelled. The next instance listens BEFORE the connected one is answered: if the answered
+    /// instance were the last one, its end would close the name for a moment (on Unix the socket of the name closes with its
+    /// last instance; on Windows a client gets "busy"), and a client that connected in that moment was reset.
+    /// </summary>
     public async Task RunAsync(CancellationToken ct)
     {
         var first = true;
-        while (!ct.IsCancellationRequested)
+        NamedPipeServerStream? listening = null;
+        try
         {
-            NamedPipeServerStream server;
-            try
+            while (!ct.IsCancellationRequested)
             {
-                server = _create(first);
-                first = false;
+                if (listening == null)
+                {
+                    try
+                    {
+                        listening = _create(first);
+                        first = false;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        _log?.Invoke(ex); // another process holds the name, or the pipe limit is reached
+                        try { await Task.Delay(TimeSpan.FromSeconds(2), ct); } catch (OperationCanceledException) { return; }
+                        continue;
+                    }
+                }
+                try
+                {
+                    await listening.WaitForConnectionAsync(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (IOException ex)
+                {
+                    _log?.Invoke(ex);
+                    await listening.DisposeAsync();
+                    listening = null;
+                    continue;
+                }
+                var connected = listening;
+                listening = null;
+                try
+                {
+                    listening = _create(false); // the next instance listens before this one closes
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _log?.Invoke(ex); // all instances busy: the loop tries again
+                }
+                // Answered in the background, never inside the accept loop (a handler that completes at once would otherwise
+                // close this instance before the next one exists)
+                _ = Task.Run(() => ServeAsync(connected, ct), CancellationToken.None);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                _log?.Invoke(ex); // another process holds the name, or the pipe limit is reached
-                try { await Task.Delay(TimeSpan.FromSeconds(2), ct); } catch (OperationCanceledException) { return; }
-                continue;
-            }
-            try
-            {
-                await server.WaitForConnectionAsync(ct);
-            }
-            catch (OperationCanceledException)
-            {
-                await server.DisposeAsync();
-                return;
-            }
-            catch (IOException ex)
-            {
-                _log?.Invoke(ex);
-                await server.DisposeAsync();
-                continue;
-            }
-            // A new instance listens at once (loop); this one is answered in the background
-            _ = ServeAsync(server, ct);
+        }
+        finally
+        {
+            if (listening != null) await listening.DisposeAsync();
         }
     }
 
