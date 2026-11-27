@@ -327,6 +327,20 @@ Prepare: a player with a PIN; the PC locked without a session; a second Windows 
       (never the typed text); clear the PC → logins work on it again
 - [ ] A cashier has no lockout list (and the API answers 403)
 
+### Test 20: Reservation Hold on the Lock Screen (phase 7)
+Prepare: two players with PINs and 200 ₴ each; the PC locked without a session; the club time zone right.
+- [ ] Cashier → Бронювання → click the row of the PC 10 minutes from now → player A, 1 h, deposit 50 ₴ → the bar is
+      amber ("ПК утримується"); the player card shows −50 ₴ with "Депозит броні"
+- [ ] Within 10 s the lock screen shows "ЗАБРОНЬОВАНО ДЛЯ <A's nickname> НА HH:MM" (club time); EN: "RESERVED FOR ...";
+      no phone, no surname
+- [ ] Player B logs in on the PC: "Цей ПК заброньовано для A на HH:MM ..."; the PC stays locked
+- [ ] The cashier starts a session on the PC: refused; the dialog shows the hold; a Manager ticks the override and
+      starts it → the audit log has `reservation.hold_overridden`; end that session
+- [ ] Player A logs in with "1 h": the PC unlocks; the reservation is "Прийшов", the deposit "зараховано на сесію"
+- [ ] A second reservation 10 minutes from now for a walk-in name; nobody comes: 15 minutes after the start it is
+      "Не прийшов" and the PC map shows no reservation any more
+- [ ] UA / EN: the lock screen texts, the timeline, the dialogs and the errors are in one language
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

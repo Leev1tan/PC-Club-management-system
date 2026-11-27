@@ -149,6 +149,13 @@ POST /api/products/{id}/correction → Stock count with a reason                
 GET  /api/products/stock/check   → Stock against the stock log                                  [Owner, Manager]
 POST /api/sales, GET /api/sales[/{id}] → Bar checkout (cash | card | balance), receipt log      [front desk]
 POST /api/sales/{id}/refund      → Refund of a receipt with a reason                            [Owner, Manager]
+GET  /api/reservations?date=     → The club day: zones with their PCs, the reservations that touch the day, open requests  [front desk]
+POST /api/reservations           → Book {deviceId | zoneId, date, time (club), durationMinutes, userId | guestName, deposit, note}  [front desk]
+PUT  /api/reservations/{id}      → Move (PC or zone, date, time, duration, note)                         [front desk]
+POST /api/reservations/{id}/confirm | decline | cancel | check-in  → requests; cancel returns a deposit;
+                                   check-in starts the session (mode minutes | package | open | balance)  [front desk]
+GET/PUT /api/reservations/settings → hold, grace period, deposit of a no-show (PUT: Owner, Manager; audited)
+GET  /api/ledger/holds           → reservation deposits against their ledger rows                [Owner, Manager]
 POST /api/users/login            → Check a player password or PIN (older launchers; starts nothing)   [public, rate limited]
 GET  /api/devices/{id}/login-offers → Zone tariff now, 1 / 2 / 3 h prices, packages on sale    [X-Device-Key, approved, own PC]
 POST /api/devices/{id}/player-login → Player login on the lock screen + session start, paid from the balance:
@@ -442,6 +449,30 @@ erDiagram
   written with `BulkInsert` (PostgreSQL: one TRUNCATE of the big tables, binary COPY, the foreign keys of the bulk
   tables dropped and added back with their saved definitions inside the reset transaction, sequences set after the
   seeded ids; SQLite: prepared single-row inserts). A reset takes about 0.7 s on PostgreSQL and 1 s on SQLite.
+
+## Reservations (phase 7)
+
+- **Model.** `Reservations`: status (requested, confirmed, checked_in, cancelled, declined, no_show, expired), the PC
+  (`DeviceId`) or the zone (`ZoneId`, any PC; `AssignedDeviceId` = the PC held at the hold or used at check-in), start,
+  end, `StartDay` (club date as a day number: SQLite cannot compare `DateTimeOffset` in SQL), the player or a name
+  (personal data), deposit and its state, the session after check-in, a concurrency stamp.
+- **No double booking.** Every change takes the reservation lock (PostgreSQL `pg_advisory_xact_lock`; SQLite: one
+  writer) and checks the PC and the zone plan (`Reservations/ReservationPlan`): reservations on one PC never overlap,
+  and every any-PC reservation keeps one PC of its zone for its whole time (greedy, best fit; it may refuse a rare
+  set, it never over-books). A checked-in reservation occupies the PC of its session until the session ended.
+- **Hold.** `ReservationHolds.ActiveAsync`: a confirmed reservation of the PC from `HoldMinutes` before the start
+  until `GraceMinutes` after it. `SessionService.StartAsync` and `TransferAsync` refuse another session there
+  (`pc_reserved`) unless the Owner or a Manager overrides it; the check-in of the reservation passes
+  (`CheckInReservationId`). The heartbeat carries the hold (`ClientReservationInfo`: id, nickname or first name, club
+  time) for the lock screen; the player login of the reserved player checks in, others get `pc_reserved`.
+- **Check-in** runs in the reservation transaction; `SessionService.StartAsync` joins it (`Data/JoinedTransaction`),
+  so a failed start leaves the reservation and the deposit unchanged.
+- **Jobs** (`ReservationJobService`, every 15 s): no-show after the grace period, expired requests, a PC for an
+  any-PC reservation when its hold begins.
+- **Deposit in the ledger.** `deposit_hold` (−balance), `deposit_release` (+balance: applied at check-in or returned),
+  `deposit_kept` (no balance change; PC time revenue paid from the balance). `LedgerTotals` has the three sums (the
+  Z-report, the analytics and both CSVs show them); the average session leaves kept deposits out. `Billing/Holds`
+  checks every reservation: hold − release − kept = the deposit while held, else 0.
 
 ## Communication Flow
 
