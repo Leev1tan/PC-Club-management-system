@@ -31,6 +31,16 @@ public static class LockScreenTheme
         ["Rubik"] = new[] { "Rubik-Regular.ttf", "Rubik-Bold.ttf" },
     };
 
+    /// <summary>
+    /// DecodePixelWidth / DecodePixelHeight for a logo of this pixel size: it fits a box of 640 x 192 and is never
+    /// scaled up (null = decode as it is). Only one side is set, so the decoder keeps the aspect ratio.
+    /// </summary>
+    public static (int? Width, int? Height) LogoDecodeSize(int width, int height, int maxWidth = 640, int maxHeight = 192)
+    {
+        if (width <= maxWidth && height <= maxHeight) return (null, null);
+        return (double)width / maxWidth > (double)height / maxHeight ? (maxWidth, null) : (null, maxHeight);
+    }
+
     public static bool TryAccent(string? accent, out (byte R, byte G, byte B) rgb)
     {
         rgb = default;

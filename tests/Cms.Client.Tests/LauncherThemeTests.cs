@@ -204,4 +204,96 @@ public sealed class LauncherThemeTests
         Assert.Equal(ClubLogoSync.Result.Unchanged, await ClubLogoSync.SyncAsync(http, dir.Path, null, default));
         Assert.Empty(Directory.GetFiles(dir.Path));
     }
+
+    // ── Review fixes: a stalled download, an undecodable logo, the decode size ──
+
+    private sealed class StalledStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            await Task.Delay(Timeout.Infinite, ct); // a half-open connection: no byte, no end
+            return 0;
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class StalledServer : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream()) });
+    }
+
+    [Fact]
+    public async Task A_stalled_logo_download_gives_up_after_the_time_limit()
+    {
+        using var dir = new TempDir();
+        using var http = new HttpClient(new StalledServer()) { BaseAddress = new Uri("http://club-server:5081/"), Timeout = Timeout.InfiniteTimeSpan };
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await ClubLogoSync.SyncAsync(http, dir.Path, Sha(Png), default, TimeSpan.FromMilliseconds(300));
+        Assert.Equal(ClubLogoSync.Result.Failed, result);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+        Assert.Empty(Directory.GetFiles(dir.Path));
+        Assert.Equal(TimeSpan.FromSeconds(30), ClubLogoSync.DefaultTimeLimit);
+        // The service stop token still stops it as a cancellation
+        using var stop = new CancellationTokenSource(200);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ClubLogoSync.SyncAsync(http, dir.Path, Sha(Png), stop.Token, TimeSpan.FromSeconds(30)));
+    }
+
+    [Theory]
+    [InlineData(null, null, false, false, LogoDisplay.Action.Keep)]
+    [InlineData(null, "a", false, false, LogoDisplay.Action.ShowText)]      // the club removed the logo
+    [InlineData("a", "a", true, true, LogoDisplay.Action.Keep)]
+    [InlineData("b", "a", false, false, LogoDisplay.Action.Keep)]          // the agent still downloads: the old logo stays
+    [InlineData("b", "a", true, true, LogoDisplay.Action.ShowImage)]
+    [InlineData("b", "a", true, false, LogoDisplay.Action.ShowText)]       // the right bytes, but Windows cannot decode them
+    [InlineData("b", null, true, false, LogoDisplay.Action.ShowText)]
+    public void The_lock_screen_never_keeps_a_replaced_logo_that_cannot_be_decoded(string? wanted, string? shown, bool trusted, bool decoded, LogoDisplay.Action action) =>
+        Assert.Equal(action, LogoDisplay.Decide(wanted, shown, trusted, decoded));
+
+    private static byte[] PngHeader(int w, int h)
+    {
+        var b = new byte[33];
+        new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, (byte)'I', (byte)'H', (byte)'D', (byte)'R' }.CopyTo(b, 0);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(16), w);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(20), h);
+        return b;
+    }
+
+    private static byte[] JpegHeader(int w, int h) => new byte[]
+    {
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46,
+        0xFF, 0xC0, 0x00, 0x11, 0x08, (byte)(h >> 8), (byte)h, (byte)(w >> 8), (byte)w, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xFF, 0xD9,
+    };
+
+    [Fact]
+    public void LogoLoader_reads_the_pixel_size_from_the_header()
+    {
+        Assert.True(LogoLoader.TryReadSize(PngHeader(300, 120), out var w, out var h));
+        Assert.Equal((300, 120), (w, h));
+        Assert.True(LogoLoader.TryReadSize(JpegHeader(1024, 768), out w, out h));
+        Assert.Equal((1024, 768), (w, h));
+        Assert.False(LogoLoader.TryReadSize(Encoding.UTF8.GetBytes("<svg/>"), out _, out _));
+        Assert.False(LogoLoader.TryReadSize(PngHeader(0, 10), out _, out _));
+        Assert.False(LogoLoader.TryReadSize(PngHeader(300, 120)[..20], out _, out _));
+    }
+
+    [Theory]
+    [InlineData(300, 120, null, null)]   // fits the box: decoded as it is, never scaled up
+    [InlineData(20, 20, null, null)]
+    [InlineData(1000, 400, null, 192)]
+    [InlineData(1024, 1024, null, 192)]
+    [InlineData(1024, 1, 640, null)]     // a very wide logo: limited by the width, not blown up to 192 px high
+    [InlineData(640, 192, null, null)]
+    public void The_lock_screen_decodes_the_logo_at_most_640_x_192(int w, int h, int? decodeWidth, int? decodeHeight) =>
+        Assert.Equal((decodeWidth, decodeHeight), LockScreenTheme.LogoDecodeSize(w, h));
 }

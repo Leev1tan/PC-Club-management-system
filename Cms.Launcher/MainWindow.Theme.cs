@@ -5,6 +5,7 @@ using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
+using Cms.Client;
 using Cms.Shared;
 
 namespace Cms.Launcher;
@@ -82,12 +83,21 @@ public partial class MainWindow
         _logoTriedUtc = now;
         var path = Path.Combine(AgentFiles.Directory, AgentFiles.ClubLogoFile);
         var bytes = File.Exists(path) && IsTrustedAgentFile(path) ? LogoLoader.ReadTrusted(path, sha256) : null;
-        var image = bytes == null ? null : Decode(bytes);
-        if (image != null) ShowLogo(image, sha256);
+        var image = bytes != null && LogoLoader.TryReadSize(bytes, out var width, out var height)
+            ? Decode(bytes, LockScreenTheme.LogoDecodeSize(width, height))
+            : null;
+        // The right bytes that Windows cannot decode: the club name text, never the replaced logo
+        switch (LogoDisplay.Decide(sha256, _logoShown, bytes != null, image != null))
+        {
+            case LogoDisplay.Action.ShowImage: ShowLogo(image, sha256); break;
+            case LogoDisplay.Action.ShowText: ShowLogo(null, sha256); break;
+        }
     }
 
-    /// <summary>The image, or null when Windows cannot decode the bytes (then the club name text stays).</summary>
-    private static BitmapSource? Decode(byte[] bytes)
+    /// <summary>
+    /// The image at a bounded size (at most 640 x 192, never scaled up), or null when Windows cannot decode the bytes.
+    /// </summary>
+    private static BitmapSource? Decode(byte[] bytes, (int? Width, int? Height) size)
     {
         try
         {
@@ -95,7 +105,8 @@ public partial class MainWindow
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
-            image.DecodePixelHeight = 192;
+            if (size.Width is { } w) image.DecodePixelWidth = w;
+            if (size.Height is { } h) image.DecodePixelHeight = h;
             image.StreamSource = stream;
             image.EndInit();
             image.Freeze();
