@@ -39,7 +39,8 @@ graph TB
 | [Cms.Server](../Cms.Server) | ASP.NET Core Web API | Central management server with REST endpoints |
 | [Cms.Agent.Service](../Cms.Agent.Service) | .NET Worker Service | Windows background service running on each PC |
 | [Cms.Launcher](../Cms.Launcher) | WPF Application | Kiosk UI with lock screen overlay |
-| [Cms.Shared](../Cms.Shared) | Class Library | Shared contracts (currently minimal) |
+| [Cms.Shared](../Cms.Shared) | Class Library | Shared contracts: lock decision, staff PIN hash, agent files, client settings |
+| [Cms.Client](../Cms.Client) | Class Library (net8.0) | Logic of the agent and the lock screen that is tested on Linux: launcher texts (UA / EN), and more in later parts |
 | [admin-ui](../admin-ui) | Next.js | Web dashboard for administrators |
 
 ---
@@ -87,13 +88,15 @@ POST /api/auth/login | logout | setup | password, GET /api/auth/me | status   �
 GET/POST/PUT /api/staff                     → staff accounts                  [Owner]
 GET/PUT/DELETE /api/settings[/staff-pin]    → lock-screen staff PIN; GET lists the currencies  [Owner]
 PUT  /api/settings/currency                 → club currency UAH | EUR | USD | PLN, display only, audited  [Owner; allowed in the demo]
+PUT  /api/settings/language                 → lock screen language uk | en, audited; sent to the PCs with the heartbeat  [Owner; allowed in the demo]
 GET  /api/analytics?period=today|7d|30d (or from=&to=)  → owner analytics of club days  [Owner, Manager]
 GET  /api/analytics/export.csv?period=&lang=&sep=       → the same period as CSV (UTF-8 BOM)  [Owner, Manager]
 GET  /api/audit                             → audit log, read-only, with the hash of each row  [Owner, Manager]
 GET  /api/audit/verify                      → recompute the hash chain, first broken row         [Owner]
 
 POST /api/devices/register       → Register a PC: enrollment token, current key, or "pending"   [agent]
-POST /api/devices/heartbeat      → Agent heartbeat; returns status + staff PIN hash             [X-Device-Key]
+POST /api/devices/heartbeat      → Agent heartbeat; returns status, staff PIN hash and the club settings
+                                   of the lock screen (client: language, currency)              [X-Device-Key]
 GET  /api/devices/{id}/commands  → Poll pending commands                          [X-Device-Key, approved]
 POST /api/devices/{id}/commands/{cmdId}/ack → Acknowledge command                 [X-Device-Key, approved]
 GET  /api/devices                → List all devices                               [all staff]
@@ -174,6 +177,7 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 ├── state.json           # Lock state, remaining seconds, time of the last lock change
 ├── agent_heartbeat.txt  # Agent liveness marker (the launcher locks when it is older than 15 s)
 ├── staff-pin.json       # PBKDF2 hash of the staff PIN (from the server)
+├── client-settings.json # club settings for the lock screen: language (uk, en), currency (from the heartbeat)
 ├── inbox\               # players: create files only (no read, change, delete)
 │   └── event-*.json     # note of an emergency PIN unlock (launcher); the agent sends it, then deletes it
 └── private\             # SYSTEM, Administrators, agent only
@@ -198,6 +202,11 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 - Fail closed: stays locked when the agent heartbeat is older than 15 s or `state.json` is missing
 - Every successful staff PIN unlock leaves a note in `ClubAgent\inbox`; the agent sends it to
   `POST /api/devices/{id}/events` (audit `device.emergency_unlock`), also later when it was down
+
+**Languages**: every text is in `Cms.Client/LauncherTexts.cs` (Ukrainian and English, each text a required
+member, so a text missing in one language does not compile). The language and the currency come from
+`client-settings.json`; without it the lock screen is Ukrainian with ₴. The UA / EN button on the lock screen
+switches the language until the PC locks again.
 
 **State Polling**:
 - Reads `state.json` every 2 seconds

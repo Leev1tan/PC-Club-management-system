@@ -214,6 +214,19 @@ On GitHub: Actions → Release → Run workflow (branch main). On a clean Window
 - [ ] A pushed tag `v0.0.1-test` (in a fork) creates a pre-release with the three zips and `SHA256SUMS`;
       the agent of that build reports the version `0.0.1.0` (Devices: agent version)
 
+### Test 14: Lock Screen in Ukrainian and English (phase 6)
+- [ ] Before the PC ever reaches the server (new install, server off): the lock screen is Ukrainian; no
+      `C:\ProgramData\ClubAgent\client-settings.json`
+- [ ] Start the server: within 10 s `client-settings.json` exists (`"language": "uk"`, `"currency": "UAH"`)
+- [ ] Owner → Налаштування → Мова екранів блокування → English → within 10 s the lock screen is English
+      (title, hint, staff hint, UA button); the audit log has `settings.language_changed`
+- [ ] Owner → currency EUR: a player balance on the session screen shows `€`; set UAH again
+- [ ] Press the UA / EN button on the lock screen: the texts switch at once; start and end a session: the PC
+      locks again in the club language
+- [ ] Ctrl+Shift+U: the PIN dialog, its buttons and its messages are in the current language
+- [ ] Stop the server (not the agent): the lock screen keeps the last club language
+- [ ] Every text on every screen is in one language (no Ukrainian word on the English screen and back)
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

@@ -105,7 +105,7 @@ Status of each product area. "Partial" means a basic version works and more is p
 | 9 | Tournaments | Planned | – | Batch unlock of a zone for a match |
 | 10 | Analytics and reports | Done (MVP) | Owner analytics (today / 7 / 30 days): revenue split PC time vs bar and by payment method, refunds, bonus issued and spent, average ticket, occupancy per zone, heatmap weekday × hour, cash variance of the shifts, checked against the ledger and the Z-reports; CSV of the period; Z-report per shift; ledger export of a date range as CSV (UTF-8 with BOM) | Excel (.xlsx) files, multi-club totals |
 | 11 | Deployment | Partial | Windows installers, Docker compose, demo mode, CI; GitHub releases with ready Windows packages (server, agent, launcher) and SHA-256 sums | Signed installers, multi-club (public live demo: done) |
-| 12 | Languages and currency | Done (admin UI) | Every admin UI screen in Ukrainian and English (switch in the top bar and on the login page; dictionaries in `admin-ui/app/i18n.ts`); club currency UAH / EUR / USD / PLN (Owner setting, display only); club time zone setting | Lock screen (launcher) in English |
+| 12 | Languages and currency | Done (MVP) | Every admin UI screen in Ukrainian and English (switch in the top bar and on the login page; dictionaries in `admin-ui/app/i18n.ts`); the lock screen (launcher) in Ukrainian and English, the language and the currency from the club settings (Owner, Settings), a UA / EN switch on the lock screen; club currency UAH / EUR / USD / PLN (display only); club time zone setting | More languages |
 
 Every admin page and API call needs a staff login with a role; club PCs authenticate with their own device key. Read [Security](#security) before you install the system in a club.
 
@@ -301,7 +301,7 @@ Server settings (environment variables; in `appsettings.json` use `:` instead of
 | `Cors__AllowedOrigins` | empty | Comma-separated origins, only if the UI is served from another origin (same origin only by default). |
 | `Discovery__Enabled` | `true` (`false` in the image) | UDP LAN discovery on port 5082. |
 
-The club currency (UAH, EUR, USD, PLN) is not an environment variable: the Owner sets it in the admin UI (Settings), it is stored in the database (`ClubSettings`, key `club.currency`) and audited.
+The club currency (UAH, EUR, USD, PLN) and the lock screen language (Ukrainian, English) are not environment variables: the Owner sets them in the admin UI (Settings); they are stored in the database (`ClubSettings`, keys `club.currency` and `club.language`) and audited. The club PCs get both with every heartbeat; a PC that never reached the server shows Ukrainian and ₴, a PC that lost the server keeps the last values it got.
 
 Admin UI container: `API_UPSTREAM` (default `http://server:8080`) is where `/api`, `/swagger` and `/health` are proxied. The UI always calls the API on its own origin; the build argument `NEXT_PUBLIC_API_URL` can point it to another origin.
 
