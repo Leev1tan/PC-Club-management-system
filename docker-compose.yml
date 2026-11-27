@@ -26,6 +26,7 @@
 #                       without it, new PCs wait for approval in the admin UI (Devices)
 #   DEMO_MODE           true = seed a demo club, demo staff accounts and simulate the PCs (default false)
 #   DEMO_RESET_HOURS    demo wipe + re-seed interval in hours (default 6; 0 = only on restart)
+#   CMS_TIMEZONE        club time zone for tariff rules and packages (default Europe/Kyiv)
 #   CMS_SERVER_IMAGE / CMS_UI_IMAGE   use pre-built images instead of building locally
 
 name: ccms
@@ -64,6 +65,7 @@ services:
       CMS_ENROLLMENT_TOKEN: ${CMS_ENROLLMENT_TOKEN:-}
       DEMO_MODE: ${DEMO_MODE:-false}
       DEMO_RESET_HOURS: ${DEMO_RESET_HOURS:-6}
+      Club__TimeZone: ${CMS_TIMEZONE:-Europe/Kyiv}
     volumes:
       # login cookie keys and the one-time setup code (logins survive a container restart)
       - serverdata:/app/data

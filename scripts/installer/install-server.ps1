@@ -7,6 +7,8 @@
 # First start: the installer shows the one-time setup code; open the admin UI and create the Owner.
 # -EnrollmentToken: secret for the club PC installer. Empty = keep the token of an earlier install,
 # or create a new random one.
+# -TimeZone: club time zone for time-of-day tariff rules and package windows (IANA or Windows id,
+# default: the zone of an earlier install, else Europe/Kyiv).
 
 param(
     [int]$HttpPort = 5081,
@@ -14,7 +16,8 @@ param(
     [string]$InstallPath = "C:\ClubServer",
     [string]$DataPath = (Join-Path $env:ProgramData "PCClub"),
     [string]$PostgresConnectionString = "",
-    [string]$EnrollmentToken = ""
+    [string]$EnrollmentToken = "",
+    [string]$TimeZone = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,13 +47,15 @@ if (!(Test-Path $InstallPath)) {
 
 $appsettings = Join-Path $InstallPath "appsettings.json"
 
-# Keep the enrollment token of an earlier install: the club PCs were installed with it
-if (-not $EnrollmentToken -and (Test-Path $appsettings)) {
+# Keep the enrollment token (the club PCs were installed with it) and the time zone of an earlier install
+if (Test-Path $appsettings) {
     try {
         $previous = Get-Content $appsettings -Raw | ConvertFrom-Json
-        if ($previous.Devices.EnrollmentToken) { $EnrollmentToken = $previous.Devices.EnrollmentToken }
+        if (-not $EnrollmentToken -and $previous.Devices.EnrollmentToken) { $EnrollmentToken = $previous.Devices.EnrollmentToken }
+        if (-not $TimeZone -and $previous.Club.TimeZone) { $TimeZone = $previous.Club.TimeZone }
     } catch {}
 }
+if (-not $TimeZone) { $TimeZone = "Europe/Kyiv" }
 if (-not $EnrollmentToken) {
     $bytes = New-Object byte[] 24
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -93,6 +98,7 @@ $config = [ordered]@{
         }
     }
     Storage = @{ DataDirectory = $DataPath }
+    Club = @{ TimeZone = $TimeZone }
     Devices = @{
         EnrollmentToken = $EnrollmentToken
         AllowPendingRegistration = $true
