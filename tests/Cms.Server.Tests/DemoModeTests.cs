@@ -53,7 +53,7 @@ public sealed class DemoModeTests : IDisposable
         Assert.All(devices, d => Assert.Equal(DemoSeeder.AgentVersion, d.AgentVersion));
         Assert.True(await db.Tariffs.CountAsync() >= 4);
         Assert.Contains(users, u => u.Username == DemoOptions.PlayerLogin &&
-                                    u.PasswordHash == UsersController.HashPassword(DemoOptions.PlayerPassword));
+                                    Cms.Server.Auth.Passwords.Verify(u.PasswordHash, DemoOptions.PlayerPassword) == Cms.Server.Auth.PasswordCheck.Success);
         Assert.All(users, u => Assert.True(u.Balance >= 50m));
         Assert.Contains(sessions, s => s.Status == "active" && !s.IsPrepaid);
         Assert.True(sessions.Count(s => s.Status == "active") >= 8);

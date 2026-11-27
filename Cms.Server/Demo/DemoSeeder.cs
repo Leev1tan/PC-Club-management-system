@@ -150,7 +150,7 @@ public static class DemoSeeder
         db.Tariffs.Add(night);
 
         // Players (password "demo" for all of them; demo data only)
-        var passwordHash = UsersController.HashPassword(DemoOptions.PlayerPassword);
+        var passwordHash = Passwords.Hash(DemoOptions.PlayerPassword);
         var users = Players.Select(p => new UserEntity
         {
             Id = Guid.NewGuid(),

@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Cms.Server.Auth;
 using Cms.Server.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -15,8 +13,13 @@ namespace Cms.Server.Controllers;
 public class UsersController : ControllerBase
 {
     private readonly CmsDbContext _db;
+    private readonly LoginThrottle _throttle;
 
-    public UsersController(CmsDbContext db) => _db = db;
+    public UsersController(CmsDbContext db, LoginThrottle throttle)
+    {
+        _db = db;
+        _throttle = throttle;
+    }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<UserView>>> List()
@@ -34,21 +37,25 @@ public class UsersController : ControllerBase
         return Ok(new UserView(u.Id, u.Username, u.DisplayName, u.Balance, u.BonusPoints, u.CreatedUtc));
     }
 
+    /// <summary>Staff create a player account. A password or PIN is required for the lock-screen login.</summary>
     [HttpPost("register")]
     public async Task<ActionResult<UserView>> Register([FromBody] RegisterUserRequest req)
     {
-        if (string.IsNullOrWhiteSpace(req.Username))
-            return BadRequest("Username is required");
+        var username = (req.Username ?? string.Empty).Trim().ToLowerInvariant();
+        if (username.Length is 0 or > 100)
+            return BadRequest("Username is required (at most 100 characters)");
+        var passwordError = Passwords.ValidatePlayerPassword(req.Password);
+        if (passwordError != null) return BadRequest(passwordError);
 
-        if (await _db.Users.AnyAsync(u => u.Username == req.Username))
+        if (await _db.Users.AnyAsync(u => u.Username == username))
             return Conflict("Username already exists");
 
         var user = new UserEntity
         {
             Id = Guid.NewGuid(),
-            Username = req.Username.Trim().ToLower(),
-            DisplayName = req.DisplayName ?? req.Username,
-            PasswordHash = !string.IsNullOrWhiteSpace(req.Password) ? HashPassword(req.Password) : null,
+            Username = username,
+            DisplayName = string.IsNullOrWhiteSpace(req.DisplayName) ? username : req.DisplayName.Trim(),
+            PasswordHash = Passwords.Hash(req.Password!),
             Balance = 0,
             BonusPoints = 0,
             CreatedUtc = DateTimeOffset.UtcNow
@@ -58,21 +65,55 @@ public class UsersController : ControllerBase
         return Ok(new UserView(user.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc));
     }
 
+    /// <summary>
+    /// Player login on the lock screen. A password or PIN is always required: an account without one
+    /// cannot log in until staff set it (POST /api/users/{id}/password). Old unsalted SHA-256 hashes
+    /// are replaced by a salted hash at the first successful login.
+    /// </summary>
     [HttpPost("login")]
     [AllowAnonymous] // player login on the lock screen (Cms.Launcher)
     [EnableRateLimiting(AuthConstants.AuthRateLimitPolicy)]
     public async Task<ActionResult<UserView>> Login([FromBody] LoginRequest req)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == req.Username.Trim().ToLower());
-        if (user == null) return Unauthorized("Invalid credentials");
+        var username = (req.Username ?? string.Empty).Trim().ToLowerInvariant();
+        var key = LoginThrottle.Key("player", username, HttpContext.ClientIp());
+        var now = DateTimeOffset.UtcNow;
+        if (_throttle.IsLockedOut(key, now))
+            return StatusCode(StatusCodes.Status429TooManyRequests, "Too many failed attempts. Try again in 15 minutes.");
 
-        if (user.PasswordHash != null)
+        var user = username.Length == 0 ? null : await _db.Users.FirstOrDefaultAsync(u => u.Username == username);
+        var check = PasswordCheck.Failed;
+        if (user?.PasswordHash != null)
+            check = Passwords.Verify(user.PasswordHash, req.Password);
+        else
+            Passwords.VerifyDummy(req.Password); // same time for unknown users and users without a password
+
+        if (check == PasswordCheck.Failed)
         {
-            if (string.IsNullOrWhiteSpace(req.Password) || HashPassword(req.Password) != user.PasswordHash)
-                return Unauthorized("Invalid credentials");
+            _throttle.RecordFailure(key, now);
+            return Unauthorized("Invalid credentials");
         }
 
-        return Ok(new UserView(user.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc));
+        _throttle.Reset(key);
+        if (check == PasswordCheck.SuccessRehashNeeded)
+        {
+            user!.PasswordHash = Passwords.Hash(req.Password!);
+            await _db.SaveChangesAsync();
+        }
+        return Ok(new UserView(user!.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc));
+    }
+
+    /// <summary>Set or reset the password / PIN of a player (front desk).</summary>
+    [HttpPost("{id:guid}/password")]
+    public async Task<IActionResult> SetPassword(Guid id, [FromBody] SetPlayerPasswordRequest req)
+    {
+        var error = Passwords.ValidatePlayerPassword(req.Password);
+        if (error != null) return BadRequest(error);
+        var user = await _db.Users.FindAsync(id);
+        if (user == null) return NotFound();
+        user.PasswordHash = Passwords.Hash(req.Password!);
+        await _db.SaveChangesAsync();
+        return NoContent();
     }
 
     [HttpPost("{id:guid}/topup")]
@@ -113,16 +154,11 @@ public class UsersController : ControllerBase
         return Ok(txs.Select(t => new TransactionView(t.Id, t.UserId, t.Amount, t.Type, t.Description, t.CreatedUtc)));
     }
 
-    // NOTE: unsalted SHA-256 (legacy). Replace with a salted KDF when real accounts are added.
-    internal static string HashPassword(string password)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));
-        return Convert.ToBase64String(bytes);
-    }
 }
 
-public record RegisterUserRequest(string Username, string? Password, string? DisplayName);
-public record LoginRequest(string Username, string? Password);
+public record RegisterUserRequest(string? Username, string? Password, string? DisplayName);
+public record LoginRequest(string? Username, string? Password);
+public record SetPlayerPasswordRequest(string? Password);
 public record TopUpRequest(decimal Amount, string? Description);
 public record UserView(Guid Id, string Username, string DisplayName, decimal Balance, decimal BonusPoints, DateTimeOffset CreatedUtc);
 public record TransactionView(Guid Id, Guid UserId, decimal Amount, string Type, string? Description, DateTimeOffset CreatedUtc);
