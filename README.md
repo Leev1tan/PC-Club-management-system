@@ -7,9 +7,9 @@ PC Club Management System is an on-prem management platform for gaming clubs and
 
 Project authorship: created and maintained by Volodymyr Shabat.
 
-**English.** An open-source, self-hosted system to run a computer club: a live map of the PCs, sessions with time-of-day tariffs, packages and night packs, player balances with bonuses and an append-only money ledger, a bar checkout with stock, cashier shifts with blind cash counts and Z-reports, a tamper-evident audit log, a Windows lock-screen shell (kiosk) and remote commands. The server runs inside the club (on a Windows PC or in Docker), so the club keeps working when the internet is down. The gaming PCs are Windows 10/11.
+**English.** An open-source, self-hosted system to run a computer club: a live map of the PCs, sessions with time-of-day tariffs, packages and night packs, player balances with bonuses and an append-only money ledger, a bar checkout with stock, cashier shifts with blind cash counts and Z-reports, owner analytics (revenue, payment methods, occupancy per zone and hour), a tamper-evident audit log, a Windows lock-screen shell (kiosk) and remote commands. Ukrainian or English, money in UAH, EUR, USD or PLN. The server runs inside the club (on a Windows PC or in Docker), so the club keeps working when the internet is down. The gaming PCs are Windows 10/11.
 
-**Українською.** Відкрита система керування комп'ютерним клубом, яка працює локально у вашому клубі: карта ПК, сесії з тарифами за часом доби, пакети й нічні пакети, баланси гравців із бонусами та журналом грошових операцій, каса бару зі складом, зміни касирів зі сліпим перерахунком готівки та Z-звітами, журнал дій, який неможливо непомітно змінити, захищена оболонка блокування для Windows (kiosk) і віддалені команди на ПК. Сервер стоїть у клубі (на Windows-ПК або в Docker), тому клуб працює навіть без інтернету. Ігрові ПК — Windows 10/11.
+**Українською.** Відкрита система керування комп'ютерним клубом, яка працює локально у вашому клубі: карта ПК, сесії з тарифами за часом доби, пакети й нічні пакети, баланси гравців із бонусами та журналом грошових операцій, каса бару зі складом, зміни касирів зі сліпим перерахунком готівки та Z-звітами, аналітика власника (виручка, способи оплати, завантаженість за зонами й годинами), журнал дій, який неможливо непомітно змінити, захищена оболонка блокування для Windows (kiosk) і віддалені команди на ПК. Сервер стоїть у клубі (на Windows-ПК або в Docker), тому клуб працює навіть без інтернету. Ігрові ПК — Windows 10/11.
 
 ## Contents
 
@@ -30,9 +30,18 @@ Project authorship: created and maintained by Volodymyr Shabat.
 **Live demo:** https://club-demo.k3s.ksm.in.ua (demo mode: 20 simulated PCs, data resets every 6 hours, nothing is real).
 You can also run the same [demo mode](#demo-mode) locally: it needs only Docker.
 
-![Dashboard (demo mode)](docs/screenshots/dashboard.png)
+The images below come from demo mode (30 days of simulated history; Ukrainian interface unless marked EN).
 
-Planned images (in `docs/screenshots/`): dashboard, PC map, session dialog, players, tariffs, finance.
+| | |
+| --- | --- |
+| ![Owner analytics, 30 days](docs/screenshots/analytics-uk.png) | ![Owner analytics in English](docs/screenshots/analytics-en.png) |
+| **Owner analytics**: revenue by day (PC time and bar), payment methods, occupancy by zone, heatmap weekday × hour, cash variance of the shifts, check against the ledger and the Z-reports | **The same in English** (UA / EN switch in the top bar) |
+| ![PC map](docs/screenshots/pc-map.png) | ![Bar checkout](docs/screenshots/bar-checkout.png) |
+| **PC map**: the PCs by zone, free / busy / paused / offline, time left, packages | **Bar checkout**: product tiles with stock, receipt, cash / card / player balance |
+| ![Z-report of a shift](docs/screenshots/z-report.png) | ![Analytics on a phone](docs/screenshots/analytics-phone.png) |
+| **Z-report** of a closed shift: variance, reconciled with the ledger, audit anchor | **Analytics on a phone** (390 px wide) |
+
+![Dashboard (demo mode)](docs/screenshots/dashboard.png)
 
 ## How it works
 
@@ -71,6 +80,13 @@ More detail: [docs/Architecture.md](docs/Architecture.md).
 - **Shift**: the cashier opens a shift with a cash float. **Cash and card need an open shift**; balance payments do not (sessions end at any time). The cashier counts the cash at the close without seeing the expected amount (blind close); the server computes *expected = float + cash sales + cash top-ups + cash debt payments − cash refunds − cash payouts* and stores the variance. A closed shift cannot be changed or reopened by anybody.
 - **Z-report** per shift, computed from the ledger rows of the shift: PC time, bar, top-ups, refunds, bonus, debt, payouts, cash and card, variance, and the same per staff member. Printable page and CSV (UTF-8 with BOM for Excel); the ledger of any date range as CSV for accounting.
 
+### Owner analytics and currency in short
+
+- **Analytics** (Owner, Manager; tab "Аналітика / Analytics"): today, 7 or 30 days in club time. **Revenue = PC time + bar (sales − refunds)**, from the ledger rows of the period with the same sums as the Z-report; split by cash, card, player balance, bonus and debt. Top-ups are deposits, not revenue, and are shown apart. Also refunds, bonus issued and spent, average session and bar receipt, top bar products and the cash variance of the closed shifts.
+- **Occupancy** = play time of the PCs (session segments; a pause is not play time) ÷ (approved PCs × hours of the period up to now), per zone, per day or hour, and as a **heatmap weekday × hour** (club time, daylight saving time handled).
+- **Reconciliation**: the page says whether the numbers match the ledger and the Z-reports: the shifts that lie fully in the period, plus the rows outside them, give the totals of the period. CSV of the period (UA for Excel, EN).
+- **Currency** (Owner, Settings): UAH ₴ (default), EUR €, USD $ or PLN zł. It changes **only the display** and the CSV headers. Amounts in the database are **not converted**: after a change, check the prices of the tariffs, packages and bar. New ledger and audit texts take the new symbol; older rows keep theirs.
+
 ## Features: done and planned
 
 Status of each product area. "Partial" means a basic version works and more is planned.
@@ -86,9 +102,9 @@ Status of each product area. "Partial" means a basic version works and more is p
 | 7 | Seat booking | Planned | – | Reservations on the map, no-show auto-cancel, public booking page |
 | 8 | Game launcher and account pool | Planned | – | Game grid in the launcher, club account pool |
 | 9 | Tournaments | Planned | – | Batch unlock of a zone for a match |
-| 10 | Analytics and reports | Partial | Revenue today/week/month, occupancy by zone, Z-report per shift, ledger export of a date range as CSV (UTF-8 with BOM) | Owner dashboard, occupancy heatmap |
+| 10 | Analytics and reports | Done (MVP) | Owner analytics (today / 7 / 30 days): revenue split PC time vs bar and by payment method, refunds, bonus issued and spent, average ticket, occupancy per zone, heatmap weekday × hour, cash variance of the shifts, checked against the ledger and the Z-reports; CSV of the period; Z-report per shift; ledger export of a date range as CSV (UTF-8 with BOM) | Excel (.xlsx) files, multi-club totals |
 | 11 | Deployment | Partial | Windows installers, Docker compose, demo mode, CI | Pre-built release binaries, multi-club (public live demo: done) |
-| 12 | Languages and currency | Partial | Admin UI in Ukrainian and English (switch in the top bar; dictionaries in `admin-ui/app/i18n.ts`), prices in ₴, club time zone setting | English for the older screens (map, devices, sessions, staff, settings), currency setting |
+| 12 | Languages and currency | Done (admin UI) | Every admin UI screen in Ukrainian and English (switch in the top bar and on the login page; dictionaries in `admin-ui/app/i18n.ts`); club currency UAH / EUR / USD / PLN (Owner setting, display only); club time zone setting | Lock screen (launcher) in English |
 
 Every admin page and API call needs a staff login with a role; club PCs authenticate with their own device key. Read [Security](#security) before you install the system in a club.
 
@@ -161,12 +177,12 @@ With the enrollment token the PC is approved at once. Without it, the PC appears
 
 Demo mode shows the system without any Windows PCs. With `DEMO_MODE=true` the server:
 
-- seeds a demo club with typical Ukrainian prices (₴): zones Standard (12 PCs), VIP (6) and Bootcamp/Pro (2); zone tariffs with weekday-day, weekend-day, evening and night prices; 3 h and 5 h packs, a morning pack and a night pack (22:00–08:00) per zone; cashback 5/10/15 % on top-ups; 8 players whose balances and bonuses come from their ledger history (top-ups, cashback, sessions, packages, a refund, a correction); about a week of session history and live sessions (packages, a paused session, an open-ended one);
-- seeds a bar in UAH (energy drinks, coffee, snacks, water; two products low on stock), 12-hour shifts back to back (the demo cashier's shift is open; yesterday's day shift closed 15 ₴ short), receipts, deliveries, a stock count, a refunded receipt, a cash payout, a player with a debt and an audit log with a valid hash chain;
+- seeds a demo club with typical Ukrainian prices (₴): zones Standard (12 PCs), VIP (6) and Bootcamp/Pro (2); zone tariffs with weekday-day, weekend-day, evening and night prices; 3 h and 5 h packs, a morning pack and a night pack (22:00–08:00) per zone; cashback 5/10/15 % on top-ups; 24 regular players whose balances and bonuses come from their ledger history (top-ups, cashback, sessions, packages, a refund, a correction); **30 days of play** that follow the day of a real club (quiet mornings, full evenings, night packs, busier weekends: about 80 sessions a day, 46 % occupancy) and live sessions (packages, a paused session, an open-ended one); no PC and no player has two sessions at once;
+- seeds a bar in UAH (energy drinks, coffee, snacks, water; two products low on stock), 12-hour shifts back to back for the whole history (the demo cashier's shift is open; yesterday's day shift closed 15 ₴ short, four older ones with small differences), receipts, deliveries, a stock count, a refunded receipt, a cash payout, a player with a debt and an audit log with a valid hash chain. **Every seeded shift is closed with the same code as a real close and stores its audit anchor**, so the chain check verifies 60 anchors;
 - simulates the 20 PCs: heartbeats, and it runs queued commands (lock, unlock, session start/extend/end, restart, message, log off) like a real agent, so the PC map changes live; one PC stays offline on purpose; walk-in guests (cash or card) and players (from the balance) start sessions and buy packages now and then, and sessions are paused and resumed; the bar sells something every minute or so; when a visitor closes the shift, the demo cashier opens the next one after three minutes;
-- wipes and re-seeds everything on start and every `DEMO_RESET_HOURS` hours (default 6);
+- wipes and re-seeds everything on start and every `DEMO_RESET_HOURS` hours (default 6), in one transaction and in about 1 s (the first reset after a start takes about 2 s); the log line shows the time;
 - seeds four public demo staff accounts and shows them on the login page (see below);
-- shows a "LIVE DEMO" banner in the admin UI, blocks `DELETE` requests, agent registration and changes of staff accounts, passwords and settings, and never connects to the internet.
+- shows a "LIVE DEMO" banner in the admin UI, blocks `DELETE` requests, agent registration and changes of staff accounts, passwords and settings (the club currency is allowed: it changes only the display), and never connects to the internet.
 
 Run it locally:
 
@@ -197,9 +213,9 @@ What protects a club installation (phase 2). Report security problems to the aut
 
 | Role | May do |
 | --- | --- |
-| Owner | everything, including staff accounts and settings (staff PIN) and the check of the audit hash chain |
-| Manager | sessions, players, refunds and balance/bonus corrections, tariffs and their rules, packages, cashback, zones, deletes, revenue, ledger and its CSV export, audit log; bar products and prices, stock counts, refunds of receipts, cash payouts, debt write-off, free time with a reason; closes any shift and sees the expected cash live |
-| Cashier | sessions (start with a tariff or a package, pause, resume, transfer, extend, end), players, top-ups, debt payments, PC commands; bar checkout and deliveries; opens a shift and closes **own** shift (blind: the expected cash is shown after the count), Z-report of own closed shifts; reads tariffs and packages; **not**: tariff/package/cashback/product changes, zones, deletes, refunds, corrections, stock counts, payouts, free time, revenue, ledger, audit log |
+| Owner | everything, including staff accounts and settings (staff PIN, club currency) and the check of the audit hash chain |
+| Manager | sessions, players, refunds and balance/bonus corrections, tariffs and their rules, packages, cashback, zones, deletes, revenue and the analytics tab (with its CSV), ledger and its CSV export, audit log; bar products and prices, stock counts, refunds of receipts, cash payouts, debt write-off, free time with a reason; closes any shift and sees the expected cash live |
+| Cashier | sessions (start with a tariff or a package, pause, resume, transfer, extend, end), players, top-ups, debt payments, PC commands; bar checkout and deliveries; opens a shift and closes **own** shift (blind: the expected cash is shown after the count), Z-report of own closed shifts; reads tariffs and packages; **not**: tariff/package/cashback/product changes, zones, deletes, refunds, corrections, stock counts, payouts, free time, revenue, analytics, ledger, audit log |
 | Tech | PC map, devices (commands, zones, approval); nothing else |
 
 **First start (no staff account yet).** The server never creates a default account. Either set `CMS_INITIAL_OWNER_USERNAME` and `CMS_INITIAL_OWNER_PASSWORD` (at least 8 characters) for the first start, or use the setup screen of the admin UI with the one-time code in `<data directory>/setup-code.txt`:
@@ -217,7 +233,7 @@ Both work only while no staff account exists; the code is deleted when the Owner
 
 **Money.** Every money movement is one row of an append-only ledger (`LedgerEntries`: top-up, refund, correction, session charge, package purchase, cashback, cashback reversal; walk-in guest payments at the desk too). A database trigger refuses `UPDATE` and `DELETE` on it, and a player with ledger rows cannot be deleted. Balance changes are single conditional database updates in the same transaction as the ledger row, so a balance (real or bonus) cannot go negative and cannot be spent twice; each row stores the balances after it, and `GET /api/ledger/reconcile` checks that every balance equals the sum of its rows. Bonus pays only for PC time and is never paid out; a refund takes back the cashback of the refunded amount. The database allows only one active session per PC. A post-paid session takes at most the balances; the rest is due at the desk (cash or card) or, for a registered player who cannot pay, is recorded as the player's debt (`Users.Debt`, a ledger row with `DebtDelta`; reconciled like the balances); a player with a debt gets no new open-ended session. Every ledger row belongs to the shift that was open; **cash and card rows need an open shift** (`Shifts:RequireOpenShift`, default `true`; the database context refuses such a row and the API answers 409 `shift_required`). Receipts (`Sales`, `SaleItems`) and the stock log (`StockMovements`) are append-only like the ledger; a closed shift cannot be changed, reopened or deleted (trigger). On the first start of phase 3, the balances and the history of an earlier version were copied into the ledger once.
 
-**Audit log.** Logins, failed logins, staff and settings changes, PC approval and commands, unlocks without an active session ("time without payment"), **emergency staff PIN unlocks on the PCs** (the lock screen checks the PIN offline and leaves a note that the agent sends later), **free time** (a free session or extension needs Owner or Manager and a reason; a 0 ₴ price is logged too), sessions (start, extend, pause, resume, transfer, end), top-ups, refunds, balance and bonus corrections, debts (recorded, paid, written off), tariff, package, cashback and **product price** changes, **stock** deliveries and counts, **refunds of receipts**, **shift** open, close and cash payouts are written to an append-only table (a database trigger refuses `UPDATE` and `DELETE`). Owner and Manager see it read-only in the admin UI (Audit log).
+**Audit log.** Logins, failed logins, staff and settings changes (also the club currency), PC approval and commands, unlocks without an active session ("time without payment"), **emergency staff PIN unlocks on the PCs** (the lock screen checks the PIN offline and leaves a note that the agent sends later), **free time** (a free session or extension needs Owner or Manager and a reason; a 0 ₴ price is logged too), sessions (start, extend, pause, resume, transfer, end), top-ups, refunds, balance and bonus corrections, debts (recorded, paid, written off), tariff, package, cashback and **product price** changes, **stock** deliveries and counts, **refunds of receipts**, **shift** open, close and cash payouts are written to an append-only table (a database trigger refuses `UPDATE` and `DELETE`). Owner and Manager see it read-only in the admin UI (Audit log).
 
 **Tamper evidence.** Each audit row stores `Hash = SHA-256(PrevHash + "\n" + canonical content)` (time, actor, role, action, target, summary, details, IP). `GET /api/audit/verify` (Owner; button in the admin UI) recomputes the chain and reports the first broken row: changed content, a removed or inserted row, a row without a hash. Each closed shift stores the last audit row and its hash (printed on the Z-report); verify checks these anchors, so even a rewrite of the whole chain shows. Rows of an earlier version get their hashes once at the first start.
 
@@ -257,6 +273,8 @@ Server settings (environment variables; in `appsettings.json` use `:` instead of
 | `DEMO_RESET_HOURS` | `6` | Demo reset interval; `0` = reset only on start. |
 | `Cors__AllowedOrigins` | empty | Comma-separated origins, only if the UI is served from another origin (same origin only by default). |
 | `Discovery__Enabled` | `true` (`false` in the image) | UDP LAN discovery on port 5082. |
+
+The club currency (UAH, EUR, USD, PLN) is not an environment variable: the Owner sets it in the admin UI (Settings), it is stored in the database (`ClubSettings`, key `club.currency`) and audited.
 
 Admin UI container: `API_UPSTREAM` (default `http://server:8080`) is where `/api`, `/swagger` and `/health` are proxied. The UI always calls the API on its own origin; the build argument `NEXT_PUBLIC_API_URL` can point it to another origin.
 

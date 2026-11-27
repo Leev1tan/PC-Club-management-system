@@ -64,6 +64,12 @@ graph TB
 | [Billing/Wallet.cs](../Cms.Server/Billing/Wallet.cs) | Atomic balance, bonus and debt changes, append-only ledger, reconciliation |
 | [Shifts/ShiftService.cs](../Cms.Server/Shifts/ShiftService.cs) | Open / close a shift, expected cash, cash payouts, the shift lock of ledger rows |
 | [Shifts/ZReport.cs](../Cms.Server/Shifts/ZReport.cs) | Z-report of a shift from its ledger rows |
+| [Shifts/LedgerTotals.cs](../Cms.Server/Shifts/LedgerTotals.cs) | Sums of ledger rows by section, shared by the Z-report and the analytics |
+| [Analytics/AnalyticsService.cs](../Cms.Server/Analytics/AnalyticsService.cs) | Owner analytics of a period: revenue, payment methods, occupancy, heatmap, checks |
+| [Analytics/AnalyticsCsv.cs](../Cms.Server/Analytics/AnalyticsCsv.cs) | CSV of the analytics period |
+| [Billing/ClubCurrency.cs](../Cms.Server/Billing/ClubCurrency.cs) | Club currency (UAH, EUR, USD, PLN), display only |
+| [Data/BulkInsert.cs](../Cms.Server/Data/BulkInsert.cs) | Bulk insert of complete rows from the EF model (demo reset) |
+| [Demo/DemoSeeder.cs](../Cms.Server/Demo/DemoSeeder.cs) | Demo club: 30 days of history, anchored shifts, fast reset |
 | [Shifts/CsvExport.cs](../Cms.Server/Shifts/CsvExport.cs) | CSV (UTF-8 with BOM) of the Z-report and of the ledger for a date range |
 | [Pos/SaleService.cs](../Cms.Server/Pos/SaleService.cs) | Bar checkout and refunds of receipts |
 | [Pos/Stock.cs](../Cms.Server/Pos/Stock.cs) | Atomic stock changes, the stock log, stock reconciliation |
@@ -76,9 +82,13 @@ graph TB
 **REST API Endpoints** (who may call them in brackets; see the README security section):
 
 ```
-POST /api/auth/login | logout | setup | password, GET /api/auth/me | status   → staff login (cookie)
+POST /api/auth/login | logout | setup | password, GET /api/auth/me | status   → staff login (cookie);
+                                              login and me carry the club currency (ISO code)
 GET/POST/PUT /api/staff                     → staff accounts                  [Owner]
-GET/PUT/DELETE /api/settings[/staff-pin]    → lock-screen staff PIN           [Owner]
+GET/PUT/DELETE /api/settings[/staff-pin]    → lock-screen staff PIN; GET lists the currencies  [Owner]
+PUT  /api/settings/currency                 → club currency UAH | EUR | USD | PLN, display only, audited  [Owner; allowed in the demo]
+GET  /api/analytics?period=today|7d|30d (or from=&to=)  → owner analytics of club days  [Owner, Manager]
+GET  /api/analytics/export.csv?period=&lang=&sep=       → the same period as CSV (UTF-8 BOM)  [Owner, Manager]
 GET  /api/audit                             → audit log, read-only, with the hash of each row  [Owner, Manager]
 GET  /api/audit/verify                      → recompute the hash chain, first broken row         [Owner]
 
@@ -99,7 +109,7 @@ POST /api/sessions/{id}/extend   → Add minutes to a prepaid or package session
 POST /api/sessions/{id}/pause | resume            → Stop / restart the time (PC locks / unlocks)
 GET  /api/sessions/{id}/transfer-quote?targetDeviceId= , POST /api/sessions/{id}/transfer → move to a free PC
 GET  /api/sessions               → List all sessions (active open-ended: currentCost)
-GET  /api/sessions/revenue       → Revenue                                        [Owner, Manager]
+GET  /api/sessions/revenue       → Revenue (PC time + bar net) of today, 7 and 30 club days, from the ledger  [Owner, Manager]
 GET  /api/tariffs, POST /api/tariffs/quote        → Tariffs with rules, price of prepaid minutes   [front desk]
 POST/PUT/DELETE /api/tariffs     → Tariff with its rule list                      [Owner, Manager]
 GET  /api/packages[?zoneId|deviceId]              → Package catalog, "on sale now" and end time    [front desk]
@@ -209,7 +219,12 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 - Session duration prompt
 - Desk: bar checkout (touch tiles, cash / card / balance), shift (open, blind close, payouts, ledger CSV),
   stock (deliveries, stock counts, stock log); printable Z-report page `zreport.html?id=N`
-- Ukrainian and English (`app/i18n.ts`, switch in the top bar)
+- Owner analytics (`app/analytics-tab.tsx`): tiles, revenue per day or hour, payment methods, occupancy per
+  zone, heatmap weekday × hour, top products, cash variance, reconciliation line; plain SVG / HTML charts
+- Ukrainian and English on every screen (`app/i18n.ts`, switch in the top bar and on the login page; a switch
+  reloads the page)
+- Club currency: `t` replaces the hryvnia sign in every text with the club symbol (`setCurrency`, from
+  `/api/auth/me`, which the UI polls every 5 s); amounts keep two decimals
 
 ---
 
@@ -323,6 +338,39 @@ erDiagram
   (PostgreSQL `pg_advisory_xact_lock`; SQLite has one writer). A closed shift stores the head
   (`AuditHeadId`, `AuditHeadHash`). `AuditChain.VerifyAsync` reports the first broken row: hash,
   link, missing, anchor. Rows of an older version are hashed once at start (`audit.chain_sealed`).
+
+## Owner analytics, currency and the demo seed (phase 5)
+
+- **One set of sums.** `LedgerTotals` adds up ledger rows by section (PC time by payment method, bar sales and
+  refunds, top-ups, balance refunds, bonus, debt, payouts, corrections, cash and card at the desk). The Z-report
+  uses it for the rows of a shift, the analytics for the rows of a period, so both follow the same rules.
+- **Period.** Club days in the club time zone: today, 7 days (today and 6 before), 30 days, or `from`/`to`
+  (at most 366 days, not in the future). The period ends at the end of its last day or now. SQLite cannot compare
+  `DateTimeOffset` in SQL, so rows are filtered in memory there (PostgreSQL filters in SQL).
+- **Revenue** = PC time (`session_charge`, `package_purchase`: the value sold, whatever paid it: cash, card,
+  balance, bonus, debt) + bar (`bar_sale` − `bar_refund`). By method: cash, card, balance (time and bar), bonus and
+  debt (time only); the methods add up to the revenue. Top-ups are deposits and are shown apart. Average ticket:
+  PC time / paid sessions (sessions with a time row in the period), bar sales / receipts.
+- **Occupancy** from `SessionSegments` joined with `Sessions` (a pause closes a segment; an open segment ends now
+  or at the planned end of a prepaid session). Segments are clipped to the period, merged per PC and split at the
+  club hour boundaries (DST: the skipped hour has no time, the repeated hour has two hours). Busy minutes ÷ (approved
+  PCs × minutes of the period up to now): overall, per zone (PCs without a zone in "no zone"), per chart bar
+  (day, or hour for a one-day period) and per heatmap cell (weekday × hour; `null` = not in the period).
+- **Checks.** `reconciled`: every desk amount is in exactly one section and the methods add up. `zReports`: the
+  sums of ALL ledger rows of the shifts that lie fully in the period (as their Z-reports count them);
+  `outsideShifts`: the other rows of the period; `shiftsAddUp`: the two give the period totals. Tests compare the
+  analytics with `ZReport.BuildAsync` and with sums made directly from the ledger rows.
+- **Index.** Migration `AnalyticsIndexes`: `IX_SessionSegments_EndUtc` (SQLite: added by the schema upgrader).
+- **Currency.** `ClubSettings["club.currency"]` = UAH (default), EUR, USD or PLN; `CmsDbContext.CurrencyAsync()`
+  reads it once per request. New ledger descriptions and audit summaries take its symbol; CSV money headers name it
+  ("Сума, €" / "Amount, EUR"). Amounts are never converted.
+- **Demo seed.** The whole club is planned in memory (30 days of play per PC from an hourly occupancy profile,
+  players never on two PCs at once, the bar, the shifts, the audit log) with ids in date order. The audit chain is
+  computed with `AuditChain.Compute`; each shift is closed with `ShiftService.ApplyClose` at its place in the chain,
+  so its anchor is the last row before its `shift.closed` row, exactly as a real close stores it. The rows are
+  written with `BulkInsert` (PostgreSQL: one TRUNCATE of the big tables, binary COPY, the foreign keys of the bulk
+  tables dropped and added back with their saved definitions inside the reset transaction, sequences set after the
+  seeded ids; SQLite: prepared single-row inserts). A reset takes about 0.7 s on PostgreSQL and 1 s on SQLite.
 
 ## Communication Flow
 

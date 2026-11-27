@@ -160,7 +160,7 @@ Prepare (Owner or Manager, admin UI → Склад / Stock): two products with a
 - [ ] Open-ended session of a player with an empty balance: end it with "У борг" → the player card
       shows the debt; "Сплатити борг" in cash; a new open-ended session is refused while a debt is left
 - [ ] Owner, Журнал дій → 🔗 Перевірити ланцюжок: "Ланцюжок цілий ✓"
-- [ ] UA / EN switch in the top bar: the desk tabs, the player card and the dialogs change language
+- [ ] UA / EN switch in the top bar: the desk tabs, the player card and the dialogs change language (all screens: Test 12)
 
 ### Test 11: Emergency PIN Unlock Is Audited (phase 4)
 On the VM (installed with `install-client.ps1`, so `C:\ProgramData\ClubAgent\inbox` exists):
@@ -171,6 +171,31 @@ On the VM (installed with `install-client.ps1`, so `C:\ProgramData\ClubAgent\inb
 - [ ] Start the agent: within 10 s the file is gone and the audit log has `device.emergency_unlock`
       for this PC with "the agent was not responding"
 - [ ] The same unlock while the agent runs: `device.emergency_unlock` with "the PC was locked"
+
+### Test 12: Owner Analytics, Currency and Languages (phase 5)
+Use the demo (`DEMO_MODE=true docker compose up -d`, 30 days of history) or a club with a few days of data.
+- [ ] Owner or Manager → Аналітика: the period chips Сьогодні / 7 днів / 30 днів; the tiles show revenue,
+      PC time, bar, average session and bar receipt, occupancy, refunds, bonus, top-ups
+- [ ] 30 днів: 30 bars (PC time below, bar on top); hover or tap a bar: the line under the chart shows the day,
+      PC time, bar, total and occupancy; Сьогодні: bars per club hour
+- [ ] Revenue by payment method: cash + card + balance + bonus + debt = the revenue tile
+- [ ] Occupancy by zone: one bar per zone in the zone colour (as on the PC map)
+- [ ] Heatmap: 7 rows (Пн–Нд) × 24 hours; evenings light, early mornings dark; "Показати числа" shows the %;
+      for "Сьогодні" only today's row is filled
+- [ ] The green line under the page: "Збігається з журналом операцій … і з Z-звітами …"; pick a closed shift that
+      lies fully in the period: its Z-report (Зміна → 📄 Z-звіт) adds to the analytics with the rows outside shifts
+- [ ] ⬇️ CSV (UA, Excel) opens in Excel: summary, days, zones, heatmap, top products; ⬇️ CSV (EN) with commas
+- [ ] Cashier and Tech have no analytics tab; `GET /api/analytics` answers 403 for them
+- [ ] Phone (or a browser window 390 px wide): the analytics page has no horizontal scroll; the heatmap scrolls
+      inside its card
+- [ ] Owner → Налаштування → Валюта клубу: EUR → saved; prices, balances, analytics and the Z-report show €;
+      a second browser signed in as a cashier shows € within 5 s; the amounts are the same numbers (no conversion);
+      a new top-up text in the player card says "€", older rows keep "₴"; the audit log has settings.currency_changed;
+      CSV headers say "Сума, €" / "Amount, EUR"; set UAH again
+- [ ] UA / EN switch (top bar or login page): every screen (dashboard, map and its menu, sessions, desk, shift,
+      stock, devices, players, tariffs, analytics, audit log, staff, settings, dialogs, login) is fully in one
+      language; club data (product, tariff, player names) stays as entered
+- [ ] Demo: Owner → Журнал дій → 🔗 Перевірити ланцюжок: "перевірено якорів змін: 60" (every seeded closed shift)
 
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
