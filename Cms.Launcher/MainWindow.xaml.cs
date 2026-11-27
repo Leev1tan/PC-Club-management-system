@@ -451,6 +451,7 @@ public partial class MainWindow : Window
                 _languageOverride = null;
                 _lockedSinceUtc = now; // the guard closes the programs of the player 10 s after a lock without a session
             }
+            if (decision.Locked != _wasLocked) CloseOwnDialogs(_wasLocked, decision.Locked);
             _wasLocked = decision.Locked;
             CheckTeardown(decision, state);
             if (_logoff.ShouldLogOff(state?.Logoff, now)) LogOffWindowsSession();
@@ -580,6 +581,22 @@ public partial class MainWindow : Window
             WarningBanner.Visibility = Visibility.Collapsed;
         }
         if (unlocked) AnnounceLowTime();
+    }
+
+    /// <summary>
+    /// The lock state changed: the own dialogs that belong to the old state close (LockScreenDialogs). A closed message
+    /// counts as OK, a closed question as No, a closed PIN prompt as Cancel. Windows re-test 2026-11-27 late: an old
+    /// "Unlocked by staff" message stayed above a new lock and blocked the login and Ctrl+Shift+U (defect 5); a PIN prompt
+    /// of a pause stayed above the resumed session (defect 6).
+    /// </summary>
+    private void CloseOwnDialogs(bool wasLocked, bool locked)
+    {
+        foreach (var window in OwnedWindows.Cast<Window>().ToList())
+        {
+            if (window is not IOwnDialog dialog || !LockScreenDialogs.CloseOnChange(dialog.Kind, wasLocked, locked)) continue;
+            try { window.Close(); }
+            catch (InvalidOperationException) { /* it closes already */ }
+        }
     }
 
     private void SetLocked()

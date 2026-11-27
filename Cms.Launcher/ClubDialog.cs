@@ -4,15 +4,24 @@ using Cms.Client;
 
 namespace Cms.Launcher;
 
+/// <summary>An own dialog of the lock screen: the lock screen closes it when the lock state changes (LockScreenDialogs).</summary>
+internal interface IOwnDialog
+{
+    OwnDialogKind Kind { get; }
+}
+
 /// <summary>
 /// The message and question window of the lock screen, in the club language and the club theme (Windows test 2026-11-27,
 /// defect 9: a Windows MessageBox showed "Yes" / "No" in the Windows language under a Ukrainian text). It is owned by the
 /// lock screen and top-most, so it stays above the locked screen; Enter is the first button, Esc the last one.
 /// </summary>
-internal sealed class ClubDialog : Window
+internal sealed class ClubDialog : Window, IOwnDialog
 {
+    public OwnDialogKind Kind { get; }
+
     private ClubDialog(Window owner, string title, string message, string okText, string? cancelText, bool warning)
     {
+        Kind = cancelText == null ? OwnDialogKind.Message : OwnDialogKind.Question;
         Owner = owner;
         Title = title;
         WindowStyle = WindowStyle.None;

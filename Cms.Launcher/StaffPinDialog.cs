@@ -11,9 +11,11 @@ namespace Cms.Launcher;
 /// blocker stay active while the dialog is open (the old InputBox showed the PIN in clear text and
 /// removed the lock screen first).
 /// </summary>
-internal sealed class StaffPinDialog : Window
+internal sealed class StaffPinDialog : Window, IOwnDialog
 {
     private readonly PasswordBox _pin;
+
+    public OwnDialogKind Kind => OwnDialogKind.StaffPin;
 
     public string Pin => _pin.Password;
 
