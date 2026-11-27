@@ -34,15 +34,15 @@ public partial class Worker : BackgroundService
     private const int MaxInboxFiles = 500;
     private const int EventsPerHeartbeat = 20;
 
-    // Lock state, shared by the server loop (commands) and the local loop (state.json)
+    // Lock state, shared by the server loop (commands) and the local loop (state.json).
+    // A club PC is locked unless a session runs on it or staff unlocked it (Cms.Client.AgentLock).
     private readonly object _gate = new();
-    private DateTimeOffset? _sessionEndUtc;
+    private AgentLock _lock = AgentLock.Initial;
     private ClientSessionInfo? _session;
     /// <summary>"Log off" of the staff, for the lock screen (a service in session 0 cannot log off the player).</summary>
     private LogoffRequest? _logoff;
     /// <summary>The reservation that holds this PC now (heartbeat), for the lock screen.</summary>
     private ClientReservationInfo? _reservation;
-    private bool _manualLockRequested;
     private bool? _lastLocked;
     private DateTimeOffset _lockChangedUtc = DateTimeOffset.UtcNow;
     private string? _serverUrl;
@@ -125,25 +125,17 @@ public partial class Worker : BackgroundService
             lock (_gate)
             {
                 var now = DateTimeOffset.UtcNow;
-                long remaining = 0;
-                var sessionExpired = false;
-                if (_sessionEndUtc.HasValue)
+                var decision = _lock.Evaluate(now);
+                if (_lastLocked != decision.Locked)
                 {
-                    var left = _sessionEndUtc.Value - now;
-                    if (left <= TimeSpan.Zero) sessionExpired = true;
-                    else remaining = (long)Math.Ceiling(left.TotalSeconds);
-                }
-
-                var locked = _manualLockRequested || sessionExpired;
-                if (_lastLocked != locked)
-                {
-                    _lastLocked = locked;
+                    _lastLocked = decision.Locked;
                     _lockChangedUtc = now;
                 }
-                var reason = _manualLockRequested ? "manual" : sessionExpired ? "session_expired" : "none";
                 if (_logoff != null && now - _logoff.RequestedUtc > LogoffTrigger.MaxAge) _logoff = null;
-                state = new AgentState(locked, remaining, _sessionEndUtc, reason, _serverUrl, _lockChangedUtc, _enrollmentStatus)
+                state = new AgentState(decision.Locked, decision.RemainingSeconds, _lock.SessionEndUtc, decision.Reason, _serverUrl,
+                    _lockChangedUtc, _enrollmentStatus)
                 {
+                    Unlock = _lock.Unlock,
                     AgentPid = Environment.ProcessId,
                     Session = _session,
                     Logoff = _logoff,
@@ -177,27 +169,35 @@ public partial class Worker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// The state of the last run. Without state.json, or when it cannot be read, the PC stays locked. Only an unlock
+    /// for a session survives the restart; a staff unlock without a session does not (Cms.Client.AgentLock.Restore).
+    /// </summary>
     private void LoadRuntimeState()
     {
         try
         {
             var path = Path.Combine(AgentDir, AgentFiles.StateFile);
-            if (!File.Exists(path)) return;
+            if (!File.Exists(path))
+            {
+                _logger.LogInformation("No saved state: the PC is locked until a session starts or staff unlock it");
+                return;
+            }
 
             var state = JsonSerializer.Deserialize<AgentState>(File.ReadAllText(path), JsonOptions);
             if (state == null) return;
 
             lock (_gate)
             {
-                _sessionEndUtc = state.SessionEndUtc;
-                _manualLockRequested = state.IsLocked &&
-                                       string.Equals(state.LockReason, "manual", StringComparison.OrdinalIgnoreCase);
+                _lock = AgentLock.Restore(new SavedAgentLock(state.IsLocked, state.LockReason, state.Unlock, state.SessionEndUtc, state.Session != null));
                 _serverUrl = state.ServerUrl;
             }
+            _logger.LogInformation("Saved state restored: {State}", _lock.Unlock == AgentLock.UnlockSession
+                ? "unlocked for the session (until its end)" : "locked until a session starts or staff unlock the PC");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to load runtime state");
+            _logger.LogWarning(ex, "Failed to load runtime state; the PC stays locked");
         }
     }
 
@@ -795,7 +795,17 @@ public partial class Worker : BackgroundService
                 if (_enrollmentStatus == "approved" && root.TryGetProperty("session", out var session))
                 {
                     var info = session.ValueKind == JsonValueKind.Object ? session.Deserialize<ClientSessionInfo>(JsonOptions) : null;
-                    lock (_gate) _session = info;
+                    bool relocked;
+                    lock (_gate)
+                    {
+                        _session = info;
+                        // No active session on the server: a PC unlocked for a session locks (a staff unlock stays)
+                        var before = _lock;
+                        _lock = _lock.Heartbeat(sessionActive: session.ValueKind == JsonValueKind.Object);
+                        relocked = !ReferenceEquals(before, _lock);
+                    }
+                    if (relocked)
+                        _logger.LogWarning("The server has no active session for this PC: locked");
                 }
                 if (_enrollmentStatus == "approved" && root.TryGetProperty("reservation", out var reservation))
                 {
@@ -963,10 +973,10 @@ public partial class Worker : BackgroundService
                         ExecuteShutdown();
                         break;
                     case CommandTypes.Lock:
-                        SetManualLock(true);
+                        ApplyLock();
                         break;
                     case CommandTypes.Unlock:
-                        SetManualLock(false);
+                        ApplyUnlock(cmd.Payload);
                         break;
                     case CommandTypes.Logoff:
                         result = ForwardLogoff();
@@ -1008,8 +1018,8 @@ public partial class Worker : BackgroundService
 
     /// <summary>
     /// {"endUtc": "..."} sets the session end; {"endUtc": null} clears it (open-ended session, or a
-    /// paused one: the countdown stops). Both clear a manual lock; the server sends "lock" after it
-    /// when the PC must stay locked (pause).
+    /// paused one: the countdown stops). It does not unlock: the server sends "unlock" after it at a
+    /// session start, a resume or a move, and "lock" at the end and at a pause.
     /// </summary>
     private void HandleSessionSet(object? payload)
     {
@@ -1017,11 +1027,7 @@ public partial class Worker : BackgroundService
         {
             if (TryReadEndUtc(payload, out var endUtc))
             {
-                lock (_gate)
-                {
-                    _sessionEndUtc = endUtc;
-                    _manualLockRequested = false;
-                }
+                lock (_gate) _lock = _lock.SessionSet(endUtc);
                 _logger.LogInformation("Session end set to {End}", endUtc?.ToString("O") ?? "none (open-ended or paused)");
             }
         }
@@ -1097,10 +1103,42 @@ public partial class Worker : BackgroundService
         return "Sent to the lock screen: it logs off the player's Windows session";
     }
 
-    private void SetManualLock(bool isLocked)
+    private void ApplyLock()
     {
-        lock (_gate) _manualLockRequested = isLocked;
-        _logger.LogInformation("Manual lock state set to {IsLocked}", isLocked);
+        lock (_gate) _lock = _lock.Lock();
+        _logger.LogInformation("Locked by the server");
+    }
+
+    /// <summary>No payload: unlock for a session. {"reason":"staff"}: staff unlock without a session (until the next agent start).</summary>
+    private void ApplyUnlock(object? payload)
+    {
+        var reason = ReadUnlockReason(payload);
+        AgentLock state;
+        lock (_gate) state = _lock = _lock.UnlockFor(reason);
+        _logger.LogInformation(state.Unlock == AgentLock.UnlockStaff
+            ? "Unlocked by staff without a session (until a lock command or the next start of the agent)"
+            : "Unlocked for the session");
+    }
+
+    private static string? ReadUnlockReason(object? payload)
+    {
+        try
+        {
+            using var doc = payload switch
+            {
+                JsonElement e => JsonDocument.Parse(e.GetRawText()),
+                string s when !string.IsNullOrWhiteSpace(s) => JsonDocument.Parse(s),
+                _ => null
+            };
+            if (doc?.RootElement is { ValueKind: JsonValueKind.Object } root &&
+                root.TryGetProperty("reason", out var reason) && reason.ValueKind == JsonValueKind.String)
+                return reason.GetString();
+        }
+        catch (JsonException)
+        {
+            // not JSON: an unlock for a session
+        }
+        return null;
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -1119,6 +1157,8 @@ public partial class Worker : BackgroundService
         DateTimeOffset? LockChangedUtc,
         string? Enrollment)
     {
+        /// <summary>Why the PC is unlocked: "session", "staff" or "none" (Cms.Client.AgentLock). null = file of an older agent.</summary>
+        public string? Unlock { get; init; }
         /// <summary>Process id of the agent: the lock screen talks only to a pipe server with this id.</summary>
         public int AgentPid { get; init; }
         /// <summary>Active session from the last heartbeat (player, tariff, planned end), for display only.</summary>
