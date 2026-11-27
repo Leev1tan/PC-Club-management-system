@@ -139,7 +139,7 @@ public partial class MainWindow : Window
             {
                 _pinLimiter.RecordSuccess();
                 ReportStaffUnlock();
-                _lock.BeginStaffOverride(_lastState == null ? null : new AgentLockSnapshot(_lastState.IsLocked, _lastState.LockChangedUtc));
+                _lock.BeginStaffOverride(Snapshot(_lastState));
                 MessageBox.Show(this, _texts.PinUnlocked, _texts.Done, MessageBoxButton.OK, MessageBoxImage.Information);
             }
             else
@@ -163,8 +163,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            var reason = _lock.Evaluate(_lastState == null ? null : new AgentLockSnapshot(_lastState.IsLocked, _lastState.LockChangedUtc),
-                ReadAgentHeartbeat(), DateTimeOffset.UtcNow).Reason;
+            var reason = _lock.Evaluate(Snapshot(_lastState), ReadAgentHeartbeat(), DateTimeOffset.UtcNow).Reason;
             WriteInboxEvent(new LauncherEvent { LockReason = reason.ToString(), WindowsUser = Environment.UserName });
         }
         catch
@@ -411,9 +410,7 @@ public partial class MainWindow : Window
             var now = DateTimeOffset.UtcNow;
             var state = ReadAgentState(now);
             var heartbeat = ReadAgentHeartbeat();
-            var decision = _lock.Evaluate(
-                state == null ? null : new AgentLockSnapshot(state.IsLocked, state.LockChangedUtc),
-                heartbeat, now);
+            var decision = _lock.Evaluate(Snapshot(state), heartbeat, now);
             _lastDecision = decision;
 
             // A new lock ends the player's language choice; the teardown runs when the session is over
@@ -440,6 +437,10 @@ public partial class MainWindow : Window
             if (!_lock.StaffOverride) SetLocked(); // fail closed on errors
         }
     }
+
+    /// <summary>The lock state for the decision: the lock generation makes every lock command a new lock event.</summary>
+    private static AgentLockSnapshot? Snapshot(LauncherState? state) =>
+        state == null ? null : new AgentLockSnapshot(state.IsLocked, state.LockChangedUtc, state.LockGeneration);
 
     /// <summary>state.json; a read error keeps the last good state for up to 15 s, then null.</summary>
     private LauncherState? ReadAgentState(DateTimeOffset now)
@@ -583,6 +584,8 @@ internal record LauncherState(
 {
     /// <summary>Process id of the agent (the pipe server must be this process).</summary>
     public int AgentPid { get; init; }
+    /// <summary>The number of lock commands of the agent (0 for an older agent): a new value ends a staff PIN unlock.</summary>
+    public long LockGeneration { get; init; }
     /// <summary>Active session from the server (player, tariff, planned end), for display.</summary>
     public ClientSessionInfo? Session { get; init; }
     /// <summary>"Log off" of the staff, forwarded by the agent.</summary>

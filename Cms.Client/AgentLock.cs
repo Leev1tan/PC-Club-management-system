@@ -12,6 +12,8 @@ namespace Cms.Client;
 ///    session runs); "unlock" with {"reason":"staff"} is a staff unlock without a session (Cms.Shared.UnlockReasons).
 ///  - "session_set" only sets the end time; it never unlocks. "lock" locks.
 ///  - A heartbeat that says "no active session on this PC" locks a PC that is unlocked for a session.
+///  - Every "lock" adds one to Generation, also on a PC that is locked already. The lock screen compares it, so a
+///    local staff PIN unlock always ends at the next lock command (Windows test 2026-11-27, defect 2).
 /// </summary>
 public sealed record AgentLock
 {
@@ -40,6 +42,12 @@ public sealed record AgentLock
     /// <summary>The end of the session from "session_set"; null = open-ended, paused, or no session.</summary>
     public DateTimeOffset? SessionEndUtc { get; init; }
 
+    /// <summary>
+    /// The number of "lock" commands (lockGeneration in state.json): one more with every lock command, also when the PC
+    /// is locked already. It survives an agent restart (saved in state.json), so it only goes up.
+    /// </summary>
+    public long Generation { get; init; }
+
     /// <summary>The state of an agent without state.json: locked.</summary>
     public static AgentLock Initial { get; } = new();
 
@@ -51,19 +59,20 @@ public sealed record AgentLock
     public static AgentLock Restore(SavedAgentLock? saved)
     {
         if (saved == null) return Initial;
+        var generation = Math.Max(0, saved.Generation);
         var forSession = saved.Unlock switch
         {
             UnlockSession => true,
             null => saved.SessionKnown && (!saved.IsLocked || saved.LockReason == SessionExpired),
             _ => false
         };
-        if (forSession) return new AgentLock { Unlock = UnlockSession, SessionEndUtc = saved.SessionEndUtc };
+        if (forSession) return new AgentLock { Unlock = UnlockSession, SessionEndUtc = saved.SessionEndUtc, Generation = generation };
         var manual = saved.IsLocked && saved.LockReason == Manual;
-        return new AgentLock { Unlock = UnlockNone, LockedBy = manual ? Manual : NoSession, SessionEndUtc = saved.SessionEndUtc };
+        return new AgentLock { Unlock = UnlockNone, LockedBy = manual ? Manual : NoSession, SessionEndUtc = saved.SessionEndUtc, Generation = generation };
     }
 
-    /// <summary>The "lock" command.</summary>
-    public AgentLock Lock() => this with { Unlock = UnlockNone, LockedBy = Manual };
+    /// <summary>The "lock" command: a new lock event (Generation + 1), also when the PC is locked already.</summary>
+    public AgentLock Lock() => this with { Unlock = UnlockNone, LockedBy = Manual, Generation = Generation + 1 };
 
     /// <summary>
     /// The "unlock" command with the reason of its payload (null = no payload). A staff unlock without a session has
@@ -101,8 +110,11 @@ public sealed record AgentLock
     }
 }
 
-/// <summary>What the agent read from its state.json at the start. SessionKnown: the last heartbeat had an active session.</summary>
-public sealed record SavedAgentLock(bool IsLocked, string? LockReason, string? Unlock, DateTimeOffset? SessionEndUtc, bool SessionKnown);
+/// <summary>
+/// What the agent read from its state.json at the start. SessionKnown: the last heartbeat had an active session.
+/// Generation: lockGeneration of the file (0 in a file of an older agent).
+/// </summary>
+public sealed record SavedAgentLock(bool IsLocked, string? LockReason, string? Unlock, DateTimeOffset? SessionEndUtc, bool SessionKnown, long Generation = 0);
 
 /// <summary>Reason: "none", "no_session", "manual" or "session_expired" (LockReason in state.json).</summary>
 public sealed record AgentLockDecision(bool Locked, string Reason, long RemainingSeconds);

@@ -48,6 +48,31 @@ public sealed class LockScreenTests
         Assert.False(c.StaffOverride);
     }
 
+    /// <summary>
+    /// Windows test 2026-11-27, defect 2: staff PIN unlock while the agent had locked the PC, then a lock from the admin
+    /// UI. The agent was locked already, so LockChangedUtc stayed; the new lock generation ends the staff unlock.
+    /// </summary>
+    [Fact]
+    public void A_lock_command_ends_the_staff_unlock_although_the_agent_was_locked_already()
+    {
+        var c = new LockScreenController();
+        var locked = Locked with { LockGeneration = 4 };
+        c.BeginStaffOverride(locked);
+        Assert.False(c.Evaluate(locked, Now, Now).Locked);
+        Assert.False(c.Evaluate(locked, Now.AddSeconds(30), Now.AddSeconds(30)).Locked); // nothing new: the staff unlock stays
+
+        var lockCommand = locked with { LockGeneration = 5 };                        // same IsLocked, same LockChangedUtc
+        var d = c.Evaluate(lockCommand, Now.AddSeconds(31), Now.AddSeconds(31));
+        Assert.True(d.Locked);
+        Assert.Equal(LockReason.LockedByAgent, d.Reason);
+        Assert.False(c.StaffOverride);
+
+        // A second staff unlock lasts until the next lock command again
+        c.BeginStaffOverride(lockCommand);
+        Assert.False(c.Evaluate(lockCommand, Now.AddMinutes(1), Now.AddMinutes(1)).Locked);
+        Assert.True(c.Evaluate(lockCommand with { LockGeneration = 6 }, Now.AddMinutes(2), Now.AddMinutes(2)).Locked);
+    }
+
     [Fact]
     public void An_agent_unlock_ends_the_staff_override()
     {

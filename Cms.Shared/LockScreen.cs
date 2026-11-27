@@ -14,17 +14,23 @@ public enum LockReason
 
 public sealed record LockDecision(bool Locked, LockReason Reason, bool StaffOverride);
 
-/// <summary>What the launcher read from state.json.</summary>
-public sealed record AgentLockSnapshot(bool IsLocked, DateTimeOffset? LockChangedUtc);
+/// <summary>
+/// What the launcher read from state.json. LockGeneration: the number of lock commands of the agent (0 for an older
+/// agent); it changes with every lock command, also when the PC was locked already.
+/// </summary>
+public sealed record AgentLockSnapshot(bool IsLocked, DateTimeOffset? LockChangedUtc, long LockGeneration = 0);
 
 /// <summary>
 /// Lock decision of the lock screen (Cms.Launcher). It fails CLOSED: when the agent is silent or
 /// its state cannot be read, the PC stays locked. Only the staff PIN (verified locally, also offline)
-/// unlocks it then. A staff unlock lasts until the agent reports a new lock event or an unlock.
+/// unlocks it then. A staff unlock lasts until the agent reports a new lock event or an unlock. A new lock event is a
+/// new LockChangedUtc or a new LockGeneration: a lock command of the staff on a PC that the agent has locked already
+/// changes only the generation (Windows test 2026-11-27, defect 2).
 /// </summary>
 public sealed class LockScreenController
 {
     private DateTimeOffset? _overrideLockChangedUtc;
+    private long? _overrideLockGeneration;
 
     public bool StaffOverride { get; private set; }
 
@@ -49,8 +55,8 @@ public sealed class LockScreenController
         else
         {
             reason = LockReason.LockedByAgent;
-            if (StaffOverride && state.LockChangedUtc != _overrideLockChangedUtc)
-                StaffOverride = false; // a new lock event after the staff unlock
+            if (StaffOverride && (state.LockChangedUtc != _overrideLockChangedUtc || state.LockGeneration != _overrideLockGeneration))
+                StaffOverride = false; // a new lock event (or a new lock command) after the staff unlock
         }
 
         return StaffOverride
@@ -63,6 +69,7 @@ public sealed class LockScreenController
     {
         StaffOverride = true;
         _overrideLockChangedUtc = state?.LockChangedUtc;
+        _overrideLockGeneration = state?.LockGeneration;
     }
 }
 

@@ -147,6 +147,7 @@ public partial class Worker : BackgroundService
                     _lockChangedUtc, _enrollmentStatus)
                 {
                     Unlock = _lock.Unlock,
+                    LockGeneration = _lock.Generation,
                     AgentPid = Environment.ProcessId,
                     Session = _session,
                     Logoff = _logoff,
@@ -200,7 +201,8 @@ public partial class Worker : BackgroundService
 
             lock (_gate)
             {
-                _lock = AgentLock.Restore(new SavedAgentLock(state.IsLocked, state.LockReason, state.Unlock, state.SessionEndUtc, state.Session != null));
+                _lock = AgentLock.Restore(new SavedAgentLock(state.IsLocked, state.LockReason, state.Unlock, state.SessionEndUtc, state.Session != null,
+                    state.LockGeneration));
                 _serverUrl = state.ServerUrl;
             }
             _logger.LogInformation("Saved state restored: {State}", _lock.Unlock == AgentLock.UnlockSession
@@ -1150,8 +1152,13 @@ public partial class Worker : BackgroundService
 
     private void ApplyLock()
     {
-        lock (_gate) _lock = _lock.Lock();
-        _logger.LogInformation("Locked by the server");
+        long generation;
+        lock (_gate)
+        {
+            _lock = _lock.Lock();
+            generation = _lock.Generation;
+        }
+        _logger.LogInformation("Locked by the server (lock {Generation}; a staff PIN unlock on the lock screen ends)", generation);
     }
 
     /// <summary>No payload: unlock for a session. {"reason":"staff"}: staff unlock without a session (until the next agent start).</summary>
@@ -1204,6 +1211,11 @@ public partial class Worker : BackgroundService
     {
         /// <summary>Why the PC is unlocked: "session", "staff" or "none" (Cms.Client.AgentLock). null = file of an older agent.</summary>
         public string? Unlock { get; init; }
+        /// <summary>
+        /// The number of lock commands (Cms.Client.AgentLock.Generation): it changes with every lock command, also on a locked
+        /// PC, so the lock screen ends a local staff PIN unlock at the next lock command.
+        /// </summary>
+        public long LockGeneration { get; init; }
         /// <summary>Process id of the agent: the lock screen talks only to a pipe server with this id.</summary>
         public int AgentPid { get; init; }
         /// <summary>Active session from the last heartbeat (player, tariff, planned end), for display only.</summary>

@@ -173,4 +173,32 @@ public sealed class AgentLockTests
         var paused = AgentLock.Restore(new SavedAgentLock(true, AgentLock.Manual, null, null, true));
         AssertLocked(paused, AgentLock.Manual);
     }
+
+    /// <summary>Windows test 2026-11-27, defect 2: a lock command on a PC that the agent has locked already is still a new lock event.</summary>
+    [Fact]
+    public void Every_lock_command_is_a_new_lock_event_also_on_a_locked_pc()
+    {
+        var locked = AgentLock.Initial.Lock();
+        Assert.Equal(1, locked.Generation);
+        var again = locked.Lock();
+        Assert.Equal(2, again.Generation);
+        AssertLocked(again, AgentLock.Manual);
+        Assert.Equal(locked.Evaluate(Now), again.Evaluate(Now)); // the agent's decision stays the same: only the generation moves
+
+        // Unlock, session_set and heartbeat do not change it; the next lock does
+        var other = again.UnlockFor(UnlockReasons.Staff).SessionSet(null).Heartbeat(sessionActive: false).UnlockFor(null);
+        Assert.Equal(2, other.Generation);
+        Assert.Equal(3, other.Lock().Generation);
+    }
+
+    [Fact]
+    public void The_lock_generation_survives_an_agent_restart()
+    {
+        var restored = AgentLock.Restore(new SavedAgentLock(true, AgentLock.Manual, AgentLock.UnlockNone, null, false, Generation: 41));
+        Assert.Equal(41, restored.Generation);
+        Assert.Equal(42, restored.Lock().Generation);
+        Assert.Equal(7, AgentLock.Restore(new SavedAgentLock(false, "none", AgentLock.UnlockSession, Now.AddHours(1), true, 7)).Generation);
+        Assert.Equal(0, AgentLock.Restore(new SavedAgentLock(true, AgentLock.Manual, AgentLock.UnlockNone, null, false)).Generation); // older file
+        Assert.Equal(0, AgentLock.Restore(new SavedAgentLock(true, AgentLock.Manual, AgentLock.UnlockNone, null, false, -5)).Generation);
+    }
 }
