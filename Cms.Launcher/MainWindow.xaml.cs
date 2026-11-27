@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Cms.Shared;
 
 namespace Cms.Launcher;
 
@@ -16,7 +17,14 @@ public partial class MainWindow : Window
     private readonly HttpClient _http = new();
     private Border? _lockOverlay;
     private TextBlock? _lockCountdown;
-    private bool _staffUnlocked = false;
+    private TextBlock? _lockReasonText;
+
+    // Fail-closed lock decision and staff PIN (Cms.Shared, unit-tested)
+    private readonly LockScreenController _lock = new();
+    private readonly PinAttemptLimiter _pinLimiter = new();
+    private bool _pinPromptOpen;
+    private LauncherState? _lastState;
+    private DateTimeOffset _lastStateReadUtc = DateTimeOffset.MinValue;
 
     // Kiosk mode
     private bool _kioskMode = false;
@@ -66,7 +74,7 @@ public partial class MainWindow : Window
 
     private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_kioskMode && !_staffUnlocked)
+        if (_kioskMode && !_lock.StaffOverride)
         {
             // Prevent closing in kiosk mode unless staff unlocked
             e.Cancel = true;
@@ -91,27 +99,101 @@ public partial class MainWindow : Window
     }
 
     // ──── STAFF UNLOCK ────
-    private void PromptStaffUnlock()
+    /// <summary>
+    /// Emergency unlock with the staff PIN. The PIN hash comes from the server (set by the owner in
+    /// the admin UI) through the agent (staff-pin.json) and is verified here, so it also works while
+    /// the server or the agent is down. The lock screen and the keyboard blocker stay active.
+    /// </summary>
+    private async void PromptStaffUnlock()
     {
-        if (_lockOverlay != null) _lockOverlay.Visibility = Visibility.Collapsed;
-        KeyboardBlocker.Disable();
-        this.Topmost = false;
+        if (_pinPromptOpen) return;
 
-        var input = Microsoft.VisualBasic.Interaction.InputBox("Введіть PIN персоналу:", "Розблокування", "");
-
-        if (input == "1234")
+        var wait = _pinLimiter.WaitTime(DateTimeOffset.UtcNow);
+        if (wait is { } w)
         {
-            _staffUnlocked = true;
-            MessageBox.Show("Розблоковано персоналом.\n\nЦе перевизначення діятиме до нової команди блокування від сервера.",
-                "Успіх", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, $"Забагато невірних спроб. Зачекайте {Math.Ceiling(w.TotalSeconds)} с.",
+                "Розблокування", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        else if (!string.IsNullOrWhiteSpace(input))
+
+        var hash = ReadStaffPinHash();
+        if (hash == null)
         {
-            MessageBox.Show("Невірний PIN.", "Помилка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "PIN персоналу не налаштовано. Власник задає його в адмін-панелі (Налаштування). " +
+                                  "Staff PIN is not set: the owner sets it in the admin UI (Settings).",
+                "Розблокування", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
         }
 
-        RefreshLockState();
+        _pinPromptOpen = true;
+        try
+        {
+            var dialog = new StaffPinDialog(this, "Введіть PIN персоналу. Розблокування діє до наступного блокування.");
+            if (dialog.ShowDialog() != true || string.IsNullOrEmpty(dialog.Pin)) return;
+
+            var pin = dialog.Pin;
+            var ok = await Task.Run(() => StaffPinHash.Verify(pin, hash)); // PBKDF2 takes a moment
+            if (ok)
+            {
+                _pinLimiter.RecordSuccess();
+                _lock.BeginStaffOverride(_lastState == null ? null : new AgentLockSnapshot(_lastState.IsLocked, _lastState.LockChangedUtc));
+                MessageBox.Show(this, "Розблоковано персоналом.\n\nРозблокування діє до наступного блокування від сервера.",
+                    "Успіх", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                _pinLimiter.RecordFailure(DateTimeOffset.UtcNow);
+                MessageBox.Show(this, "Невірний PIN.", "Помилка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        finally
+        {
+            _pinPromptOpen = false;
+            RefreshLockState();
+        }
+    }
+
+    /// <summary>The PIN hash from staff-pin.json, or null (no PIN, unreadable, or not written by the agent).</summary>
+    private string? ReadStaffPinHash()
+    {
+        try
+        {
+            var path = Path.Combine(AgentFiles.Directory, AgentFiles.StaffPinFile);
+            if (!File.Exists(path) || !IsTrustedAgentFile(path)) return null;
+            var file = JsonSerializer.Deserialize<StaffPinFile>(ReadShared(path), LauncherJson.Options);
+            return StaffPinHash.IsWellFormed(file?.Hash) ? file!.Hash : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// In kiosk mode, ignore agent files that the signed-in (player) account owns: the agent writes
+    /// them as a service account, so a file owned by the player was planted to fake the lock state or PIN.
+    /// </summary>
+    private bool IsTrustedAgentFile(string path)
+    {
+        if (!_kioskMode) return true;
+        try
+        {
+            var owner = new FileInfo(path).GetAccessControl().GetOwner(typeof(System.Security.Principal.SecurityIdentifier));
+            var self = System.Security.Principal.WindowsIdentity.GetCurrent().User;
+            return owner != null && self != null && !owner.Equals(self);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Reads a file that the agent may replace at the same moment.</summary>
+    private static string ReadShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     // ──── LOGIN ────
@@ -259,6 +341,17 @@ public partial class MainWindow : Window
             FontFamily = monoFont
         };
 
+        _lockReasonText = new TextBlock
+        {
+            Text = string.Empty,
+            Foreground = neonMagenta,
+            FontSize = 15,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 14, 0, 0),
+            FontFamily = monoFont,
+            Visibility = Visibility.Collapsed
+        };
+
         _lockOverlay = new Border
         {
             Background = overlayBrush,
@@ -273,6 +366,7 @@ public partial class MainWindow : Window
                     lockIcon,
                     lockTitle,
                     _lockCountdown,
+                    _lockReasonText,
                     new TextBlock
                     {
                         Text = "> АВТОРИЗУЙТЕСЬ АБО ЗВЕРНІТЬСЯ ДО ПЕРСОНАЛУ",
@@ -293,7 +387,7 @@ public partial class MainWindow : Window
                     }
                 }
             },
-            Visibility = Visibility.Collapsed,
+            Visibility = Visibility.Visible, // locked until the first state read says otherwise
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
             IsHitTestVisible = true
@@ -308,8 +402,7 @@ public partial class MainWindow : Window
         // Read server URL from agent config
         try
         {
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var configPath = Path.Combine(programData, "ClubAgent", "config.json");
+            var configPath = Path.Combine(AgentFiles.Directory, AgentFiles.ConfigFile);
             if (File.Exists(configPath))
             {
                 var config = JsonSerializer.Deserialize<LauncherConfig>(File.ReadAllText(configPath), LauncherJson.Options);
@@ -327,137 +420,138 @@ public partial class MainWindow : Window
     }
 
     // ──── LOCK STATE POLLING ────
+    /// <summary>
+    /// Fails CLOSED: the PC stays locked when the agent heartbeat is older than 15 s, when
+    /// state.json is missing or unreadable, or on any error. Only the staff PIN unlocks it then.
+    /// </summary>
     private void RefreshLockState()
     {
         try
         {
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var path = Path.Combine(programData, "ClubAgent", "state.json");
+            var now = DateTimeOffset.UtcNow;
+            var state = ReadAgentState(now);
+            var heartbeat = ReadAgentHeartbeat();
+            var decision = _lock.Evaluate(
+                state == null ? null : new AgentLockSnapshot(state.IsLocked, state.LockChangedUtc),
+                heartbeat, now);
 
-            if (!File.Exists(path))
-            {
-                SetUnlocked();
-                return;
-            }
-
-            var json = File.ReadAllText(path);
-            var state = JsonSerializer.Deserialize<LauncherState>(json, LauncherJson.Options);
-            if (state == null)
-            {
-                SetUnlocked();
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(state.ServerUrl))
+            if (state != null && !string.IsNullOrWhiteSpace(state.ServerUrl))
                 _serverUrl = state.ServerUrl.TrimEnd('/');
 
-            var isLocked = state.IsLocked;
+            UpdateCountdowns(state?.RemainingSeconds ?? 0);
+            UpdateLockReason(decision);
 
-            // If server sent unlock, clear staff override
-            if (!isLocked)
-                _staffUnlocked = false;
-
-            var remaining = state.RemainingSeconds;
-
-            // Update lock overlay countdown
-            if (_lockCountdown != null)
-            {
-                if (remaining > 0)
-                {
-                    var ts = TimeSpan.FromSeconds(remaining);
-                    _lockCountdown.Text = $"Залишилось: {ts:hh\\:mm\\:ss}";
-                    _lockCountdown.Visibility = Visibility.Visible;
-                }
-                else
-                {
-                    _lockCountdown.Text = string.Empty;
-                    _lockCountdown.Visibility = Visibility.Collapsed;
-                }
-            }
-
-            // Update session panel countdown
-            if (SessionPanel.Visibility == Visibility.Visible)
-            {
-                if (remaining > 0)
-                {
-                    var ts = TimeSpan.FromSeconds(remaining);
-                    SessionCountdown.Text = $"{ts:hh\\:mm\\:ss}";
-                    SessionTimeLabel.Text = "Залишилось часу";
-
-                    // 5-minute warning
-                    if (remaining <= 300 && remaining > 0)
-                    {
-                        WarningBanner.Visibility = Visibility.Visible;
-                        var mins = (int)Math.Ceiling(remaining / 60.0);
-                        WarningText.Text = $"⚠️  Залишилось {mins} хв! Поповніть баланс або подовжіть сесію";
-                    }
-                    else
-                    {
-                        WarningBanner.Visibility = Visibility.Collapsed;
-                    }
-                }
-                else
-                {
-                    SessionCountdown.Text = "∞";
-                    SessionTimeLabel.Text = "Безлімітна сесія";
-                    WarningBanner.Visibility = Visibility.Collapsed;
-                }
-            }
-
-            // Parse tariff info
-            try
-            {
-                var tariffIdx = json.IndexOf("\"tariffName\":", StringComparison.OrdinalIgnoreCase);
-                if (tariffIdx >= 0 && SessionPanel.Visibility == Visibility.Visible)
-                {
-                    var aq = json.IndexOf('"', tariffIdx + 13) + 1;
-                    var eq = json.IndexOf('"', aq);
-                    if (aq > 0 && eq > aq)
-                        SessionTariff.Text = $"Тариф: {json.Substring(aq, eq - aq)}";
-                }
-
-                var costIdx = json.IndexOf("\"currentCost\":", StringComparison.OrdinalIgnoreCase);
-                if (costIdx >= 0 && SessionPanel.Visibility == Visibility.Visible)
-                {
-                    var after = json.Substring(costIdx + 14);
-                    var numStr = new string(after.TakeWhile(c => char.IsDigit(c) || c == '.').ToArray());
-                    if (decimal.TryParse(numStr, System.Globalization.NumberStyles.Any,
-                        System.Globalization.CultureInfo.InvariantCulture, out var cost))
-                    {
-                        SessionCost.Text = $"Вартість: {cost:N0} ₴";
-                    }
-                }
-            }
-            catch { }
-
-            // Fail-open: if agent heartbeat is stale (>15s)
-            var hb = Path.Combine(programData, "ClubAgent", "agent_heartbeat.txt");
-            var stale = false;
-            try
-            {
-                if (File.Exists(hb))
-                {
-                    var text = File.ReadAllText(hb);
-                    if (DateTimeOffset.TryParse(text, out var dt) && DateTimeOffset.UtcNow - dt > TimeSpan.FromSeconds(15))
-                        stale = true;
-                }
-                else
-                {
-                    stale = true;
-                }
-            }
-            catch { }
-
-            // Effective lock state
-            var effectiveLocked = isLocked && !stale && !_staffUnlocked;
-            if (effectiveLocked)
+            if (decision.Locked)
                 SetLocked();
             else
                 SetUnlocked();
         }
         catch
         {
-            // Fail open on errors
+            if (!_lock.StaffOverride) SetLocked(); // fail closed on errors
+        }
+    }
+
+    /// <summary>state.json; a read error keeps the last good state for up to 15 s, then null.</summary>
+    private LauncherState? ReadAgentState(DateTimeOffset now)
+    {
+        try
+        {
+            var path = Path.Combine(AgentFiles.Directory, AgentFiles.StateFile);
+            if (File.Exists(path) && IsTrustedAgentFile(path))
+            {
+                var state = JsonSerializer.Deserialize<LauncherState>(ReadShared(path), LauncherJson.Options);
+                if (state != null)
+                {
+                    _lastState = state;
+                    _lastStateReadUtc = now;
+                    return state;
+                }
+            }
+            else
+            {
+                _lastState = null;
+                return null;
+            }
+        }
+        catch
+        {
+            // the agent replaces the file at this moment; use the last state for a short time
+        }
+        return now - _lastStateReadUtc <= AgentFiles.AgentSilentAfter ? _lastState : null;
+    }
+
+    private DateTimeOffset? ReadAgentHeartbeat()
+    {
+        try
+        {
+            var path = Path.Combine(AgentFiles.Directory, AgentFiles.HeartbeatFile);
+            if (!File.Exists(path) || !IsTrustedAgentFile(path)) return null;
+            return DateTimeOffset.TryParse(ReadShared(path).Trim(), System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind, out var hb) ? hb : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void UpdateLockReason(LockDecision decision)
+    {
+        if (_lockReasonText == null) return;
+        var text = decision.Reason switch
+        {
+            LockReason.AgentSilent => "> АГЕНТ НЕ ВІДПОВІДАЄ — ЗВЕРНІТЬСЯ ДО ПЕРСОНАЛУ / AGENT NOT RESPONDING",
+            LockReason.NoAgentState => "> НЕМАЄ СТАНУ АГЕНТА — ЗВЕРНІТЬСЯ ДО ПЕРСОНАЛУ / NO AGENT STATE",
+            _ => string.Empty
+        };
+        _lockReasonText.Text = text;
+        _lockReasonText.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdateCountdowns(long remaining)
+    {
+        // Lock overlay countdown
+        if (_lockCountdown != null)
+        {
+            if (remaining > 0)
+            {
+                var ts = TimeSpan.FromSeconds(remaining);
+                _lockCountdown.Text = $"Залишилось: {ts:hh\\:mm\\:ss}";
+                _lockCountdown.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                _lockCountdown.Text = string.Empty;
+                _lockCountdown.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        // Session panel countdown
+        if (SessionPanel.Visibility != Visibility.Visible) return;
+        if (remaining > 0)
+        {
+            var ts = TimeSpan.FromSeconds(remaining);
+            SessionCountdown.Text = $"{ts:hh\\:mm\\:ss}";
+            SessionTimeLabel.Text = "Залишилось часу";
+
+            // 5-minute warning
+            if (remaining <= 300)
+            {
+                WarningBanner.Visibility = Visibility.Visible;
+                var mins = (int)Math.Ceiling(remaining / 60.0);
+                WarningText.Text = $"⚠️  Залишилось {mins} хв! Поповніть баланс або подовжіть сесію";
+            }
+            else
+            {
+                WarningBanner.Visibility = Visibility.Collapsed;
+            }
+        }
+        else
+        {
+            SessionCountdown.Text = "∞";
+            SessionTimeLabel.Text = "Безлімітна сесія";
+            WarningBanner.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -492,6 +586,8 @@ internal record LauncherState(
     long RemainingSeconds,
     DateTimeOffset? SessionEndUtc,
     string? LockReason,
-    string? ServerUrl);
+    string? ServerUrl,
+    DateTimeOffset? LockChangedUtc = null,
+    string? Enrollment = null);
 
 internal record UserResponse(Guid id, string username, string displayName, decimal balance, decimal bonusPoints);

@@ -1,9 +1,16 @@
 # Client (Gaming PC) Installer Script for Windows
 # Run as Administrator
-# Usage: .\install-client.ps1 [-ServerUrl "http://server:5081"]
+# Usage: .\install-client.ps1 -ServerUrl "http://server:5081" [-EnrollmentToken "<token>"] [-KioskMode]
+#
+# -EnrollmentToken: the server's CMS_ENROLLMENT_TOKEN / Devices:EnrollmentToken. With it the PC is
+#   approved at once; without it the PC waits as "pending" until staff approve it in the admin UI.
+#   The token is used only with an explicit -ServerUrl (never sent to a server found by discovery),
+#   is stored in C:\ProgramData\ClubAgent\private (SYSTEM, Administrators, agent only) and is
+#   deleted by the agent after the first successful registration.
 
 param(
     [string]$ServerUrl = "",  # Empty = auto-discovery
+    [string]$EnrollmentToken = "",
     [string]$AgentPath = "C:\ClubAgent",
     [string]$LauncherPath = "C:\ClubLauncher",
     [switch]$KioskMode = $false
@@ -72,12 +79,42 @@ $config = @{
 $config | ConvertTo-Json -Depth 5 | Set-Content -Path $agentConfig
 
 $programDataConfigDir = Join-Path $env:ProgramData "ClubAgent"
-if (!(Test-Path $programDataConfigDir)) {
-    New-Item -ItemType Directory -Path $programDataConfigDir -Force | Out-Null
+$privateDir = Join-Path $programDataConfigDir "private"
+foreach ($dir in @($programDataConfigDir, $privateDir)) {
+    if (!(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 }
+
+# Permissions (SIDs, so this works on every Windows language):
+#   ClubAgent         SYSTEM, Administrators: full; agent (LocalService): modify; Users: read only.
+#                     Players can read the lock state and the PIN hash, but cannot create or change
+#                     files there (a planted state.json or staff-pin.json would unlock the PC).
+#   ClubAgent\private SYSTEM, Administrators: full; agent: modify; no access for players (device key, token).
+# /setowner: files left by older versions are owned by Administrators afterwards.
+icacls $programDataConfigDir /setowner "*S-1-5-32-544" /T /C | Out-Null
+icacls $programDataConfigDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
+icacls $privateDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the permissions of $programDataConfigDir" }
+
+# Earlier versions kept the device key in the readable folder; the agent moves it, remove a stale copy
+$legacyDeviceFile = Join-Path $programDataConfigDir "device.json"
+if ((Test-Path $legacyDeviceFile) -and !(Test-Path (Join-Path $privateDir "device.json"))) {
+    Move-Item $legacyDeviceFile (Join-Path $privateDir "device.json") -Force
+}
+
 @{
     serverUrl = $ServerUrl
 } | ConvertTo-Json -Depth 3 | Set-Content -Path (Join-Path $programDataConfigDir "config.json")
+
+if ($EnrollmentToken) {
+    Set-Content -Path (Join-Path $privateDir "enrollment-token.txt") -Value $EnrollmentToken.Trim() -NoNewline
+    if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
+        Write-Warning "The enrollment token is used only with -ServerUrl. With auto-discovery the PC waits for approval in the admin UI."
+    } else {
+        Write-Host "   Enrollment token stored (the agent deletes it after the first registration)" -ForegroundColor Gray
+    }
+} else {
+    Write-Host "   No enrollment token: approve this PC in the admin UI (Devices) after the first start" -ForegroundColor Gray
+}
 
 if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
     Write-Host "   Server URL: Auto-discovery (LAN broadcast)" -ForegroundColor Gray
@@ -253,7 +290,9 @@ if ($KioskMode) {
     # Note: Full keyboard filtering requires Embedded Shell Launcher or keyboard filter feature
     Write-Host "   Keyboard hooks will be managed by Launcher" -ForegroundColor Gray
     
-    # Write kiosk config marker for Launcher to detect
+    # Write kiosk config marker for Launcher to detect.
+    # No PIN here: the staff PIN is set by the owner in the admin UI (Settings); the agent receives
+    # only its hash from the server and the launcher verifies it locally (also offline).
     $kioskConfig = Join-Path $LauncherPath "kiosk.json"
     @{
         KioskMode = $true
@@ -261,7 +300,6 @@ if ($KioskMode) {
         BlockAltTab = $true
         BlockAltF4 = $true
         BlockWinKey = $true
-        StaffUnlockPin = "1234"
         InstalledUtc = (Get-Date).ToUniversalTime().ToString("o")
     } | ConvertTo-Json | Set-Content -Path $kioskConfig
     Write-Host "   Kiosk config written to $kioskConfig" -ForegroundColor Gray
@@ -284,7 +322,8 @@ if ($KioskMode) {
     Write-Host "KIOSK MODE ENABLED:" -ForegroundColor Magenta
     Write-Host "  - User: ClubUser (auto-login on boot)" -ForegroundColor White
     Write-Host "  - Shell: Cms.Launcher.exe (replaces explorer)" -ForegroundColor White
-    Write-Host "  - Staff unlock: Ctrl+Shift+U (PIN: 1234)" -ForegroundColor White
+    Write-Host "  - Staff unlock: Ctrl+Shift+U + the staff PIN (set it in the admin UI, Settings)" -ForegroundColor White
+    Write-Host "  - The lock screen stays locked when the agent stops (fail closed)" -ForegroundColor White
     Write-Host "  - Switch to admin: Ctrl+Alt+Del > Switch User" -ForegroundColor White
     Write-Host ""
     Write-Host "To undo kiosk mode, run: uninstall-kiosk.ps1" -ForegroundColor Yellow

@@ -2,21 +2,48 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
+using Cms.Shared;
 
 namespace Cms.Agent.Service;
 
+/// <summary>
+/// Agent on a club PC (Windows service ClubAgent).
+///  - Server loop: registers, sends a heartbeat every 5 s, polls commands every second.
+///  - Local loop: every second writes the lock state for Cms.Launcher (state.json) and its own
+///    heartbeat file, also while the server is down, so the launcher can tell a silent agent.
+/// Files in %ProgramData%\ClubAgent:
+///    state.json, agent_heartbeat.txt, config.json, staff-pin.json  - readable by the launcher
+///    private\device.json, private\enrollment-token.txt            - SYSTEM, Administrators, agent only
+/// </summary>
 public class Worker : BackgroundService
 {
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
+
     private readonly ILogger<Worker> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _config;
 
-    private Guid _deviceId;
-    private string? _deviceKey;
+    private static readonly string AgentDir = AgentFiles.Directory;
+    private static readonly string PrivateDir = Path.Combine(AgentDir, AgentFiles.PrivateDirectoryName);
+
+    // Lock state, shared by the server loop (commands) and the local loop (state.json)
+    private readonly object _gate = new();
     private DateTimeOffset? _sessionEndUtc;
     private bool _manualLockRequested;
+    private bool? _lastLocked;
+    private DateTimeOffset _lockChangedUtc = DateTimeOffset.UtcNow;
     private string? _serverUrl;
+
+    // Registration
+    private Guid _deviceId;
+    private string? _deviceKey;
+    private bool _credentialsConfirmed;
+    private string _enrollmentStatus = "unknown";
+    private bool _pendingLogged;
+    private DateTimeOffset _nextHeartbeatUtc;
 
     // Performance counters for real metrics
     private PerformanceCounter? _cpuCounter;
@@ -30,27 +57,147 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        Directory.CreateDirectory(AgentDir);
+        EnsurePrivateDirectory();
+        MigrateLegacyCredentials();
         InitializeCounters();
         LoadRuntimeState();
 
+        var localLoop = RunLocalStateLoopAsync(stoppingToken);
+        try
+        {
+            await RunServerLoopAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // service stops
+        }
+        await localLoop;
+    }
+
+    // ──── LOCAL STATE FOR THE LAUNCHER ────
+
+    private async Task RunLocalStateLoopAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        try
+        {
+            do
+            {
+                WriteLocalState();
+            } while (await timer.WaitForNextTickAsync(ct));
+        }
+        catch (OperationCanceledException)
+        {
+            // service stops
+        }
+    }
+
+    /// <summary>
+    /// Writes state.json and agent_heartbeat.txt (atomic replace). The session end time is enforced
+    /// here, so a timed session also locks while the server is unreachable.
+    /// </summary>
+    private void WriteLocalState()
+    {
+        try
+        {
+            AgentState state;
+            lock (_gate)
+            {
+                var now = DateTimeOffset.UtcNow;
+                long remaining = 0;
+                var sessionExpired = false;
+                if (_sessionEndUtc.HasValue)
+                {
+                    var left = _sessionEndUtc.Value - now;
+                    if (left <= TimeSpan.Zero) sessionExpired = true;
+                    else remaining = (long)Math.Ceiling(left.TotalSeconds);
+                }
+
+                var locked = _manualLockRequested || sessionExpired;
+                if (_lastLocked != locked)
+                {
+                    _lastLocked = locked;
+                    _lockChangedUtc = now;
+                }
+                var reason = _manualLockRequested ? "manual" : sessionExpired ? "session_expired" : "none";
+                state = new AgentState(locked, remaining, _sessionEndUtc, reason, _serverUrl, _lockChangedUtc, _enrollmentStatus);
+            }
+
+            WriteAtomic(Path.Combine(AgentDir, AgentFiles.StateFile), JsonSerializer.Serialize(state, JsonOptions));
+            WriteAtomic(Path.Combine(AgentDir, AgentFiles.HeartbeatFile), DateTimeOffset.UtcNow.ToString("O"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to write the local state");
+        }
+    }
+
+    /// <summary>Write to a temporary file, then replace: the launcher never reads a half-written file.</summary>
+    private static void WriteAtomic(string path, string content)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, content);
+        try
+        {
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch (IOException)
+        {
+            // The launcher holds the file open at this moment; write in place this time
+            File.WriteAllText(path, content);
+            try { File.Delete(tmp); } catch { /* next tick */ }
+        }
+    }
+
+    private void LoadRuntimeState()
+    {
+        try
+        {
+            var path = Path.Combine(AgentDir, AgentFiles.StateFile);
+            if (!File.Exists(path)) return;
+
+            var state = JsonSerializer.Deserialize<AgentState>(File.ReadAllText(path), JsonOptions);
+            if (state == null) return;
+
+            lock (_gate)
+            {
+                _sessionEndUtc = state.SessionEndUtc;
+                _manualLockRequested = state.IsLocked &&
+                                       string.Equals(state.LockReason, "manual", StringComparison.OrdinalIgnoreCase);
+                _serverUrl = state.ServerUrl;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load runtime state");
+        }
+    }
+
+    // ──── SERVER LOOP ────
+
+    private async Task RunServerLoopAsync(CancellationToken stoppingToken)
+    {
         var configuredUrl = _config["Server:BaseUrl"];
         var explicitServerUrl = IsExplicitServerUrl(configuredUrl);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             var baseUrl = await ResolveServerUrlAsync(configuredUrl, stoppingToken);
-            _serverUrl = NormalizeBaseUrl(baseUrl);
+            lock (_gate) _serverUrl = NormalizeBaseUrl(baseUrl);
             WriteLauncherConfig();
 
             _logger.LogInformation("Agent connecting to server URL: {BaseUrl}", _serverUrl);
 
             var http = _httpClientFactory.CreateClient();
             http.BaseAddress = new Uri(_serverUrl + "/");
+            http.Timeout = TimeSpan.FromSeconds(15);
 
-            var registered = await EnsureRegisteredWithRetryAsync(http, stoppingToken, retryForever: explicitServerUrl);
+            // The enrollment token goes only to an explicitly configured server, never to a server
+            // found by (spoofable) UDP discovery. A discovered server puts the PC in the approval queue.
+            var registered = await EnsureRegisteredWithRetryAsync(http, stoppingToken, retryForever: explicitServerUrl, allowToken: explicitServerUrl);
             if (!registered)
             {
-                await UpdateSessionStateAsync();
                 await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 continue;
             }
@@ -60,32 +207,38 @@ public class Worker : BackgroundService
             {
                 try
                 {
-                    var hbOk = await SendHeartbeatAsync(http, stoppingToken);
-                    if (!hbOk)
+                    if (DateTimeOffset.UtcNow >= _nextHeartbeatUtc)
                     {
-                        _logger.LogWarning("Heartbeat unauthorized; re-registering");
-                        _deviceId = Guid.Empty;
-                        _deviceKey = null;
-                        registered = await EnsureRegisteredWithRetryAsync(http, stoppingToken, retryForever: explicitServerUrl);
-                        if (!registered)
+                        _nextHeartbeatUtc = DateTimeOffset.UtcNow + HeartbeatInterval;
+                        var hb = await SendHeartbeatAsync(http, stoppingToken);
+                        if (hb == HeartbeatResult.Unauthorized)
                         {
-                            rediscover = true;
-                            break;
+                            _logger.LogWarning("The server does not know this device key any more; registering again");
+                            ClearCredentials();
+                            if (!await EnsureRegisteredWithRetryAsync(http, stoppingToken, retryForever: explicitServerUrl, allowToken: explicitServerUrl))
+                            {
+                                rediscover = true;
+                                break;
+                            }
                         }
                     }
-                    await PollAndExecuteAsync(http, stoppingToken);
+                    if (_enrollmentStatus == "approved")
+                        await PollAndExecuteAsync(http, stoppingToken);
                 }
                 catch (HttpRequestException ex)
                 {
-                    _logger.LogWarning(ex, "Server connection failed");
+                    _logger.LogWarning("Server connection failed: {Message}", ex.Message);
                     rediscover = !explicitServerUrl;
                 }
-                catch (Exception ex)
+                catch (TaskCanceledException) when (!stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning("Server request timed out");
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _logger.LogError(ex, "Agent loop error");
                 }
 
-                await UpdateSessionStateAsync();
                 await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
             }
         }
@@ -109,38 +262,12 @@ public class Worker : BackgroundService
 
         try
         {
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var dir = Path.Combine(programData, "ClubAgent");
-            Directory.CreateDirectory(dir);
-            var configPath = Path.Combine(dir, "config.json");
             var json = JsonSerializer.Serialize(new LauncherConfig(_serverUrl), JsonOptions);
-            File.WriteAllText(configPath, json);
+            WriteAtomic(Path.Combine(AgentDir, AgentFiles.ConfigFile), json);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to write launcher config");
-        }
-    }
-
-    private void LoadRuntimeState()
-    {
-        try
-        {
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var path = Path.Combine(programData, "ClubAgent", "state.json");
-            if (!File.Exists(path)) return;
-
-            var state = JsonSerializer.Deserialize<AgentState>(File.ReadAllText(path), JsonOptions);
-            if (state == null) return;
-
-            _sessionEndUtc = state.SessionEndUtc;
-            _manualLockRequested = state.IsLocked &&
-                                   string.Equals(state.LockReason, "manual", StringComparison.OrdinalIgnoreCase);
-            _serverUrl = state.ServerUrl;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to load runtime state");
         }
     }
 
@@ -166,15 +293,12 @@ public class Worker : BackgroundService
         catch { return 0; }
     }
 
-    private double GetMemPercent()
+    private static double GetMemPercent()
     {
         try
         {
-            var gcInfo = GC.GetGCMemoryInfo();
-            var totalMem = gcInfo.TotalAvailableMemoryBytes;
+            var totalMem = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
             if (totalMem <= 0) return 0;
-            var usedMem = totalMem - gcInfo.TotalAvailableMemoryBytes + 
-                          (long)(Environment.WorkingSet);
             // Simple approximation using process working set vs total RAM
             return Math.Round((double)Environment.WorkingSet / totalMem * 100, 1);
         }
@@ -208,16 +332,12 @@ public class Worker : BackgroundService
 
     private async Task<string> ResolveServerUrlAsync(string? configuredUrl, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(configuredUrl) && 
-            !configuredUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase) &&
-            !configuredUrl.Contains("127.0.0.1"))
-        {
-            return configuredUrl;
-        }
+        if (IsExplicitServerUrl(configuredUrl))
+            return configuredUrl!;
 
         _logger.LogInformation("No server URL configured, attempting LAN discovery...");
         var discoveredUrl = await ServerDiscovery.DiscoverServerWithRetryAsync(3, _logger);
-        
+
         if (!string.IsNullOrWhiteSpace(discoveredUrl))
         {
             _logger.LogInformation("Using discovered server: {ServerUrl}", discoveredUrl);
@@ -229,8 +349,9 @@ public class Worker : BackgroundService
         return fallback;
     }
 
+    // ──── REGISTRATION ────
 
-    private async Task<bool> EnsureRegisteredWithRetryAsync(HttpClient http, CancellationToken ct, bool retryForever)
+    private async Task<bool> EnsureRegisteredWithRetryAsync(HttpClient http, CancellationToken ct, bool retryForever, bool allowToken)
     {
         var delay = TimeSpan.FromSeconds(2);
         var maxDelay = TimeSpan.FromMinutes(1);
@@ -240,15 +361,21 @@ public class Worker : BackgroundService
         {
             try
             {
-                await EnsureRegisteredAsync(http, ct);
+                await EnsureRegisteredAsync(http, allowToken, ct);
                 return true;
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogWarning("Registration failed (server unreachable?), retrying in {Delay}s: {Message}", 
+                _logger.LogWarning("Registration failed (server unreachable?), retrying in {Delay}s: {Message}",
                     (int)delay.TotalSeconds, ex.Message);
             }
-            catch (Exception ex)
+            catch (RegistrationRefusedException ex)
+            {
+                _logger.LogError("Registration refused by the server: {Message}. Check the enrollment token " +
+                                 "(installer option -EnrollmentToken) or approve the PC in the admin UI. Retrying in {Delay}s",
+                    ex.Message, (int)delay.TotalSeconds);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "Registration failed unexpectedly, retrying in {Delay}s", (int)delay.TotalSeconds);
             }
@@ -275,49 +402,168 @@ public class Worker : BackgroundService
         return false;
     }
 
-
-    private async Task EnsureRegisteredAsync(HttpClient http, CancellationToken ct)
+    /// <summary>
+    /// With stored credentials: re-registers with the current key (updates OS and agent version).
+    /// Without: registers with the enrollment token (approved at once) or without it (pending
+    /// until staff approve the PC in the admin UI). The server never hands out the key of a known PC.
+    /// </summary>
+    private async Task EnsureRegisteredAsync(HttpClient http, bool allowToken, CancellationToken ct)
     {
         if (_deviceId == Guid.Empty || string.IsNullOrWhiteSpace(_deviceKey))
-        {
             LoadDeviceCredentials();
-        }
-        
-        if (_deviceId != Guid.Empty && !string.IsNullOrWhiteSpace(_deviceKey)) return;
+        var haveCredentials = _deviceId != Guid.Empty && !string.IsNullOrWhiteSpace(_deviceKey);
+        if (haveCredentials && _credentialsConfirmed) return;
 
         var hostname = Environment.MachineName;
         var os = Environment.OSVersion.VersionString;
         var agentVersion = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0";
+        var (token, tokenFromFile) = allowToken && !haveCredentials ? ReadEnrollmentToken() : (null, false);
 
-        var req = new { Hostname = hostname, OsVersion = os, AgentVersion = agentVersion, Token = (string?)null };
-        var resp = await http.PostAsJsonAsync("api/devices/register", req, ct);
+        object req = haveCredentials
+            ? new { Hostname = hostname, OsVersion = os, AgentVersion = agentVersion, DeviceId = _deviceId, DeviceKey = _deviceKey }
+            : new { Hostname = hostname, OsVersion = os, AgentVersion = agentVersion, Token = token };
+        using var resp = await http.PostAsJsonAsync("api/devices/register", req, ct);
+
+        if (resp.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            var error = await ReadErrorAsync(resp, ct);
+            if (haveCredentials)
+            {
+                // Key revoked or unknown on this server: start over as a new registration
+                ClearCredentials();
+                throw new RegistrationRefusedException("stored device key rejected (" + error + ")");
+            }
+            throw new RegistrationRefusedException(error);
+        }
+        if (resp.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests or HttpStatusCode.BadRequest)
+            throw new RegistrationRefusedException($"{(int)resp.StatusCode}: {await ReadErrorAsync(resp, ct)}");
         resp.EnsureSuccessStatusCode();
-        var body = await resp.Content.ReadFromJsonAsync<DeviceRegistrationResponse>(cancellationToken: ct);
-        if (body == null) throw new InvalidOperationException("Empty registration response");
+
+        var body = await resp.Content.ReadFromJsonAsync<DeviceRegistrationResponse>(JsonOptions, ct)
+                   ?? throw new InvalidOperationException("Empty registration response");
         _deviceId = body.DeviceId;
         _deviceKey = body.DeviceKey;
-        
+        _credentialsConfirmed = true;
+        SetEnrollmentStatus(body.Status);
         SaveDeviceCredentials();
-        _logger.LogInformation("Registered device {DeviceId}", _deviceId);
+
+        if (token != null && tokenFromFile)
+        {
+            // The token is needed only once; do not leave it on the PC
+            try { File.Delete(Path.Combine(PrivateDir, AgentFiles.EnrollmentTokenFile)); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Could not delete the enrollment token file"); }
+        }
+        _logger.LogInformation("Registered device {DeviceId} (status {Status})", _deviceId, body.Status);
+    }
+
+    private static async Task<string> ReadErrorAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        try
+        {
+            var text = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(text);
+            return doc.RootElement.TryGetProperty("error", out var e) ? e.GetString() ?? text : text;
+        }
+        catch
+        {
+            return resp.ReasonPhrase ?? resp.StatusCode.ToString();
+        }
+    }
+
+    /// <summary>private\enrollment-token.txt (written by the installer), or Server:EnrollmentToken.</summary>
+    private (string? Token, bool FromFile) ReadEnrollmentToken()
+    {
+        try
+        {
+            var path = Path.Combine(PrivateDir, AgentFiles.EnrollmentTokenFile);
+            if (File.Exists(path))
+            {
+                var token = File.ReadAllText(path).Trim();
+                if (token.Length > 0) return (token, true);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read the enrollment token file");
+        }
+        var configured = _config["Server:EnrollmentToken"];
+        return string.IsNullOrWhiteSpace(configured) ? (null, false) : (configured.Trim(), false);
+    }
+
+    private void SetEnrollmentStatus(string? status)
+    {
+        lock (_gate) _enrollmentStatus = string.IsNullOrWhiteSpace(status) ? "unknown" : status;
+        if (_enrollmentStatus == "pending")
+        {
+            if (!_pendingLogged)
+                _logger.LogWarning("This PC waits for approval. Approve it in the admin UI (Devices), " +
+                                   "or install the agent with the enrollment token.");
+            _pendingLogged = true;
+        }
+        else
+        {
+            _pendingLogged = false;
+        }
+    }
+
+    /// <summary>
+    /// The private folder holds the device key. Only SYSTEM, Administrators and the agent service
+    /// account get access (the installer also sets this ACL), so a player cannot read the key.
+    /// </summary>
+    private void EnsurePrivateDirectory()
+    {
+        if (Directory.Exists(PrivateDir)) return;
+        try
+        {
+            var security = new DirectorySecurity();
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            void Allow(SecurityIdentifier sid) => security.AddAccessRule(new FileSystemAccessRule(sid,
+                FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            Allow(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
+            Allow(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
+            var self = WindowsIdentity.GetCurrent().User;
+            if (self != null) Allow(self);
+            new DirectoryInfo(PrivateDir).Create(security);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not create {Dir} with a restricted ACL", PrivateDir);
+            Directory.CreateDirectory(PrivateDir);
+        }
+    }
+
+    /// <summary>Earlier versions kept device.json (with the key) in the launcher-readable folder.</summary>
+    private void MigrateLegacyCredentials()
+    {
+        try
+        {
+            var legacy = Path.Combine(AgentDir, AgentFiles.DeviceFile);
+            var current = Path.Combine(PrivateDir, AgentFiles.DeviceFile);
+            if (!File.Exists(legacy)) return;
+            if (!File.Exists(current)) File.Copy(legacy, current);
+            File.Delete(legacy);
+            _logger.LogInformation("Moved device credentials to {Path}", current);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to move the device credentials to the private folder");
+        }
     }
 
     private void LoadDeviceCredentials()
     {
         try
         {
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var path = Path.Combine(programData, "ClubAgent", "device.json");
-            if (File.Exists(path))
+            var path = Path.Combine(PrivateDir, AgentFiles.DeviceFile);
+            if (!File.Exists(path)) return;
+            var creds = JsonSerializer.Deserialize<DeviceCredentials>(File.ReadAllText(path), JsonOptions);
+            if (creds != null && creds.DeviceId != Guid.Empty && !string.IsNullOrWhiteSpace(creds.DeviceKey))
             {
-                var json = File.ReadAllText(path);
-                var idMatch = System.Text.RegularExpressions.Regex.Match(json, "\"deviceId\":\\s*\"([^\"]+)\"");
-                var keyMatch = System.Text.RegularExpressions.Regex.Match(json, "\"deviceKey\":\\s*\"([^\"]+)\"");
-                if (idMatch.Success && keyMatch.Success && Guid.TryParse(idMatch.Groups[1].Value, out var id))
-                {
-                    _deviceId = id;
-                    _deviceKey = keyMatch.Groups[1].Value;
-                    _logger.LogInformation("Loaded device credentials from disk: {DeviceId}", _deviceId);
-                }
+                _deviceId = creds.DeviceId;
+                _deviceKey = creds.DeviceKey;
+                _credentialsConfirmed = false;
+                _logger.LogInformation("Loaded device credentials from disk: {DeviceId}", _deviceId);
             }
         }
         catch (Exception ex)
@@ -330,13 +576,8 @@ public class Worker : BackgroundService
     {
         try
         {
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var dir = Path.Combine(programData, "ClubAgent");
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "device.json");
-            var json = $"{{\"deviceId\":\"{_deviceId}\",\"deviceKey\":\"{_deviceKey}\"}}";
-            File.WriteAllText(path, json);
-            _logger.LogDebug("Saved device credentials to disk");
+            var json = JsonSerializer.Serialize(new DeviceCredentials { DeviceId = _deviceId, DeviceKey = _deviceKey ?? "" }, JsonOptions);
+            WriteAtomic(Path.Combine(PrivateDir, AgentFiles.DeviceFile), json);
         }
         catch (Exception ex)
         {
@@ -344,9 +585,22 @@ public class Worker : BackgroundService
         }
     }
 
-    private async Task<bool> SendHeartbeatAsync(HttpClient http, CancellationToken ct)
+    private void ClearCredentials()
     {
-        if (string.IsNullOrWhiteSpace(_deviceKey)) return false;
+        _deviceId = Guid.Empty;
+        _deviceKey = null;
+        _credentialsConfirmed = false;
+        SetEnrollmentStatus("unknown");
+        try { File.Delete(Path.Combine(PrivateDir, AgentFiles.DeviceFile)); } catch { /* ignore */ }
+    }
+
+    // ──── HEARTBEAT ────
+
+    private enum HeartbeatResult { Ok, Unauthorized }
+
+    private async Task<HeartbeatResult> SendHeartbeatAsync(HttpClient http, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(_deviceKey)) return HeartbeatResult.Unauthorized;
 
         using var req = new HttpRequestMessage(HttpMethod.Post, "api/devices/heartbeat");
         req.Headers.Add("X-Device-Key", _deviceKey);
@@ -359,14 +613,65 @@ public class Worker : BackgroundService
             Uptime = TimeSpan.FromMilliseconds(Environment.TickCount64)
         };
         req.Content = JsonContent.Create(payload);
-        var resp = await http.SendAsync(req, ct);
-        if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-        {
-            return false;
-        }
+        using var resp = await http.SendAsync(req, ct);
+        if (resp.StatusCode == HttpStatusCode.Unauthorized)
+            return HeartbeatResult.Unauthorized;
         resp.EnsureSuccessStatusCode();
-        return true;
+
+        try
+        {
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("status", out var status))
+                    SetEnrollmentStatus(status.GetString());
+                if (_enrollmentStatus == "approved" && root.TryGetProperty("staffPinHash", out var pin))
+                    UpdateStaffPin(pin.ValueKind == JsonValueKind.String ? pin.GetString() : null);
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogDebug(ex, "Unexpected heartbeat response");
+        }
+        return HeartbeatResult.Ok;
     }
+
+    /// <summary>
+    /// Keeps staff-pin.json equal to the PIN hash on the server. The launcher verifies the staff PIN
+    /// against this file, so the emergency unlock works offline. No PIN on the server = no file.
+    /// </summary>
+    private void UpdateStaffPin(string? hash)
+    {
+        var path = Path.Combine(AgentDir, AgentFiles.StaffPinFile);
+        try
+        {
+            if (hash == null || !StaffPinHash.IsWellFormed(hash))
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                    _logger.LogInformation("Staff PIN removed on the server; deleted {Path}", path);
+                }
+                return;
+            }
+
+            if (File.Exists(path))
+            {
+                var current = JsonSerializer.Deserialize<StaffPinFile>(File.ReadAllText(path), JsonOptions);
+                if (current?.Hash == hash) return;
+            }
+            WriteAtomic(path, JsonSerializer.Serialize(new StaffPinFile { Hash = hash, UpdatedUtc = DateTimeOffset.UtcNow }, JsonOptions));
+            _logger.LogInformation("Staff PIN updated from the server");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update {Path}", path);
+        }
+    }
+
+    // ──── COMMANDS ────
 
     private async Task PollAndExecuteAsync(HttpClient http, CancellationToken ct)
     {
@@ -374,17 +679,21 @@ public class Worker : BackgroundService
 
         using var pollReq = new HttpRequestMessage(HttpMethod.Get, $"api/devices/{_deviceId}/commands?max=5");
         pollReq.Headers.Add("X-Device-Key", _deviceKey);
-        var pollResp = await http.SendAsync(pollReq, ct);
+        using var pollResp = await http.SendAsync(pollReq, ct);
+        if (pollResp.StatusCode == HttpStatusCode.Forbidden)
+        {
+            // Not approved (any more); the next heartbeat tells the status
+            SetEnrollmentStatus("pending");
+            return;
+        }
         if (pollResp.StatusCode == HttpStatusCode.Unauthorized)
         {
-            _logger.LogWarning("Command poll unauthorized; re-registering");
-            _deviceId = Guid.Empty;
-            _deviceKey = null;
+            _nextHeartbeatUtc = DateTimeOffset.UtcNow; // the heartbeat handles re-registration
             return;
         }
         pollResp.EnsureSuccessStatusCode();
 
-        var cmds = await pollResp.Content.ReadFromJsonAsync<List<CommandView>>(cancellationToken: ct) ?? new();
+        var cmds = await pollResp.Content.ReadFromJsonAsync<List<CommandView>>(JsonOptions, ct) ?? new();
         foreach (var cmd in cmds)
         {
             string status = "done";
@@ -393,23 +702,23 @@ public class Worker : BackgroundService
             {
                 switch (cmd.Type?.ToLowerInvariant())
                 {
-                    case "restart":
-                        await ExecuteRestartAsync();
+                    case CommandTypes.Restart:
+                        ExecuteRestart();
                         break;
-                    case "lock":
-                        await SetLockStateAsync(true);
+                    case CommandTypes.Lock:
+                        SetManualLock(true);
                         break;
-                    case "unlock":
-                        await SetLockStateAsync(false);
+                    case CommandTypes.Unlock:
+                        SetManualLock(false);
                         break;
-                    case "logoff":
-                        await ExecuteLogoffAsync();
+                    case CommandTypes.Logoff:
+                        ExecuteLogoff();
                         break;
-                    case "message":
-                        await ExecuteMessageAsync(cmd.Payload);
+                    case CommandTypes.Message:
+                        _logger.LogInformation("MESSAGE: {Text}", cmd.Payload?.ToString() ?? "");
                         break;
-                    case "session_set":
-                        await HandleSessionSetAsync(cmd.Payload);
+                    case CommandTypes.SessionSet:
+                        HandleSessionSet(cmd.Payload);
                         break;
                     default:
                         status = "ignored";
@@ -422,6 +731,7 @@ public class Worker : BackgroundService
                 status = "failed";
                 result = ex.Message;
             }
+            WriteLocalState();
 
             var ack = new AckCommandRequest { Status = status, Result = result };
             using var req = new HttpRequestMessage(HttpMethod.Post, $"api/devices/{_deviceId}/commands/{cmd.Id}/ack");
@@ -429,32 +739,34 @@ public class Worker : BackgroundService
             req.Content = JsonContent.Create(ack);
             try
             {
-                var resp = await http.SendAsync(req, ct);
+                using var resp = await http.SendAsync(req, ct);
                 resp.EnsureSuccessStatusCode();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(ex, "Failed to ACK command {CommandId}", cmd.Id);
             }
         }
     }
 
-    private Task HandleSessionSetAsync(object? payload)
+    private void HandleSessionSet(object? payload)
     {
         try
         {
             if (TryReadEndUtc(payload, out var endUtc))
             {
-                _sessionEndUtc = endUtc;
-                _manualLockRequested = false;
-                _logger.LogInformation("Session end set to {End}", _sessionEndUtc);
+                lock (_gate)
+                {
+                    _sessionEndUtc = endUtc;
+                    _manualLockRequested = false;
+                }
+                _logger.LogInformation("Session end set to {End}", endUtc);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to parse session_set payload");
         }
-        return Task.CompletedTask;
     }
 
     private static bool TryReadEndUtc(object? payload, out DateTimeOffset endUtc)
@@ -463,15 +775,10 @@ public class Worker : BackgroundService
 
         if (payload is JsonElement element)
         {
-            if (element.ValueKind == JsonValueKind.Object &&
-                element.TryGetProperty("endUtc", out var endProperty) &&
-                endProperty.ValueKind == JsonValueKind.String &&
-                DateTimeOffset.TryParse(endProperty.GetString(), out endUtc))
-            {
-                return true;
-            }
-
-            return false;
+            return element.ValueKind == JsonValueKind.Object &&
+                   element.TryGetProperty("endUtc", out var endProperty) &&
+                   endProperty.ValueKind == JsonValueKind.String &&
+                   DateTimeOffset.TryParse(endProperty.GetString(), out endUtc);
         }
 
         var json = payload?.ToString();
@@ -480,85 +787,18 @@ public class Worker : BackgroundService
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                doc.RootElement.TryGetProperty("endUtc", out var endProperty) &&
-                endProperty.ValueKind == JsonValueKind.String &&
-                DateTimeOffset.TryParse(endProperty.GetString(), out endUtc))
-            {
-                return true;
-            }
+            return doc.RootElement.ValueKind == JsonValueKind.Object &&
+                   doc.RootElement.TryGetProperty("endUtc", out var endProperty) &&
+                   endProperty.ValueKind == JsonValueKind.String &&
+                   DateTimeOffset.TryParse(endProperty.GetString(), out endUtc);
         }
-        catch
+        catch (JsonException)
         {
-            // Legacy fallback for unexpected payload formats.
-            var marker = "\"endUtc\":";
-            var idx = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (idx >= 0)
-            {
-                var start = json.IndexOf('"', idx + marker.Length);
-                var end = json.IndexOf('"', start + 1);
-                if (start > 0 && end > start)
-                {
-                    var iso = json.Substring(start + 1, end - start - 1);
-                    return DateTimeOffset.TryParse(iso, out endUtc);
-                }
-            }
+            return false;
         }
-
-        return false;
     }
 
-    private Task UpdateSessionStateAsync()
-    {
-        try
-        {
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var dir = Path.Combine(programData, "ClubAgent");
-            Directory.CreateDirectory(dir);
-
-            // Agent heartbeat marker
-            var hbPath = Path.Combine(dir, "agent_heartbeat.txt");
-            File.WriteAllText(hbPath, DateTimeOffset.UtcNow.ToString("O"));
-            var path = Path.Combine(dir, "state.json");
-
-            bool sessionExpired = false;
-            long remaining = 0;
-
-            if (_sessionEndUtc.HasValue)
-            {
-                var now = DateTimeOffset.UtcNow;
-                var left = _sessionEndUtc.Value - now;
-                if (left <= TimeSpan.Zero)
-                {
-                    sessionExpired = true;
-                    remaining = 0;
-                }
-                else
-                {
-                    remaining = (long)Math.Ceiling(left.TotalSeconds);
-                }
-            }
-
-            var finalLocked = _manualLockRequested || sessionExpired;
-            var lockReason = _manualLockRequested ? "manual" : sessionExpired ? "session_expired" : "none";
-
-            var json = JsonSerializer.Serialize(new AgentState(
-                finalLocked,
-                remaining,
-                _sessionEndUtc,
-                lockReason,
-                _serverUrl
-            ), JsonOptions);
-            File.WriteAllText(path, json);
-        }
-        catch
-        {
-            // ignore
-        }
-        return Task.CompletedTask;
-    }
-
-    private Task ExecuteRestartAsync()
+    private void ExecuteRestart()
     {
         var psi = new ProcessStartInfo("shutdown", "/r /t 5")
         {
@@ -567,10 +807,9 @@ public class Worker : BackgroundService
         };
         Process.Start(psi);
         _logger.LogInformation("Restart scheduled in 5 seconds");
-        return Task.CompletedTask;
     }
 
-    private Task ExecuteLogoffAsync()
+    private void ExecuteLogoff()
     {
         var psi = new ProcessStartInfo("shutdown", "/l")
         {
@@ -579,59 +818,12 @@ public class Worker : BackgroundService
         };
         Process.Start(psi);
         _logger.LogInformation("Logoff initiated");
-        return Task.CompletedTask;
     }
 
-    private Task ExecuteMessageAsync(object? payload)
+    private void SetManualLock(bool isLocked)
     {
-        var text = payload?.ToString() ?? "";
-        _logger.LogInformation("MESSAGE: {Text}", text);
-        return Task.CompletedTask;
-    }
-
-    private Task SetLockStateAsync(bool isLocked)
-    {
-        try
-        {
-            _manualLockRequested = isLocked;
-
-            var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            var dir = Path.Combine(programData, "ClubAgent");
-            Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "state.json");
-
-            long remaining = 0;
-            var sessionExpired = false;
-            if (_sessionEndUtc.HasValue)
-            {
-                var left = _sessionEndUtc.Value - DateTimeOffset.UtcNow;
-                if (left > TimeSpan.Zero)
-                {
-                    remaining = (long)Math.Ceiling(left.TotalSeconds);
-                }
-                else
-                {
-                    sessionExpired = true;
-                }
-            }
-
-            var finalLocked = _manualLockRequested || sessionExpired;
-            var lockReason = _manualLockRequested ? "manual" : sessionExpired ? "session_expired" : "none";
-            var json = JsonSerializer.Serialize(new AgentState(
-                finalLocked,
-                remaining,
-                _sessionEndUtc,
-                lockReason,
-                _serverUrl
-            ), JsonOptions);
-            File.WriteAllText(path, json);
-            _logger.LogInformation("Manual lock state set to {IsLocked}", isLocked);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to set lock state");
-        }
-        return Task.CompletedTask;
+        lock (_gate) _manualLockRequested = isLocked;
+        _logger.LogInformation("Manual lock state set to {IsLocked}", isLocked);
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -640,14 +832,25 @@ public class Worker : BackgroundService
         PropertyNameCaseInsensitive = true
     };
 
+    /// <summary>state.json, read by Cms.Launcher. LockChangedUtc changes whenever IsLocked changes.</summary>
     private sealed record AgentState(
         bool IsLocked,
         long RemainingSeconds,
         DateTimeOffset? SessionEndUtc,
         string LockReason,
-        string? ServerUrl);
+        string? ServerUrl,
+        DateTimeOffset? LockChangedUtc,
+        string? Enrollment);
 
     private sealed record LauncherConfig(string ServerUrl);
+
+    private sealed class RegistrationRefusedException(string message) : Exception(message);
+
+    private sealed class DeviceCredentials
+    {
+        public Guid DeviceId { get; set; }
+        public string DeviceKey { get; set; } = string.Empty;
+    }
 
     private sealed class CommandView
     {
@@ -666,6 +869,7 @@ public class Worker : BackgroundService
     {
         public Guid DeviceId { get; set; }
         public string DeviceKey { get; set; } = string.Empty;
+        public string Status { get; set; } = "approved";
     }
 
     private sealed class DeviceHeartbeatRequest

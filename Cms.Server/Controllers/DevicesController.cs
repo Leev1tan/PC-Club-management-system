@@ -44,12 +44,14 @@ public class DevicesController : ControllerBase
     /// </summary>
     [HttpPost("heartbeat")]
     [Authorize(Policy = Policies.Device)]
-    public ActionResult<DeviceHeartbeatResponse> Heartbeat([FromBody] DeviceHeartbeatRequest request)
+    public async Task<ActionResult<DeviceHeartbeatResponse>> Heartbeat([FromBody] DeviceHeartbeatRequest request)
     {
         var key = Request.Headers[DeviceKeyAuthenticationHandler.HeaderName].ToString();
         var status = _devices.Heartbeat(key, request);
         if (status == null) return Unauthorized();
-        return Ok(new DeviceHeartbeatResponse(status));
+        // Approved PCs get the hash of the staff PIN for the offline emergency unlock (null = no PIN set)
+        var pinHash = status == DeviceStatuses.Approved ? await KioskSettings.GetStaffPinHashAsync(_db) : null;
+        return Ok(new DeviceHeartbeatResponse(status, pinHash));
     }
 
     [HttpGet]
@@ -200,7 +202,8 @@ public class DevicesController : ControllerBase
 /// <summary>Token = enrollment token (new PC); DeviceId + DeviceKey = current credentials (re-registration).</summary>
 public record DeviceRegistrationRequest(string Hostname, string OsVersion, string AgentVersion, string? Token, Guid? DeviceId = null, string? DeviceKey = null);
 public record DeviceRegistrationResponse(Guid DeviceId, string DeviceKey, string Status);
-public record DeviceHeartbeatResponse(string Status);
+/// <summary>StaffPinHash: see Cms.Shared.StaffPinHash; only for approved PCs, null when no PIN is set.</summary>
+public record DeviceHeartbeatResponse(string Status, string? StaffPinHash);
 
 public enum DeviceRegistrationKind { ReRegistered, Enrolled, ReEnrolled, Pending, Unauthorized, Invalid }
 

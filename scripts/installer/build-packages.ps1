@@ -169,7 +169,8 @@ Project by Volodymyr Shabat
    Or run ClubClientSetup.exe as Administrator.
 
 ## Options
-- ``-ServerUrl "http://server:5081"`` (optional, auto-discovers if empty)
+- ``-ServerUrl "http://server:5081"`` (recommended; auto-discovers if empty)
+- ``-EnrollmentToken "<token>"`` (the server's CMS_ENROLLMENT_TOKEN; without it, approve the PC in the admin UI, Devices)
 - ``-AgentPath "C:\ClubAgent"`` (default)
 - ``-LauncherPath "C:\ClubLauncher"`` (default)
 - ``-KioskMode`` (for full kiosk shell replacement, advanced)
@@ -177,7 +178,7 @@ Project by Volodymyr Shabat
 ## Isolated switch / MikroTik deployment
 If client ports are isolated, do not rely on auto-discovery. Forward TCP 5081 on the router to the ClubServer PC and install clients with:
 
-``ClubClientSetup.exe -ServerUrl "http://10.3.3.1:5081"``
+``ClubClientSetup.exe -ServerUrl "http://10.3.3.1:5081" -EnrollmentToken "<token>"``
 
 ## Auto-Discovery
 By default, the agent will broadcast on the LAN to find the server.
@@ -186,7 +187,8 @@ Make sure UDP port 5082 is open on both server and client.
 ## After Installation
 - Agent runs as Windows Service: ClubAgent
 - Launcher starts on user login
-- Staff unlock: Ctrl+Shift+U (PIN: 1234)
+- Staff unlock: Ctrl+Shift+U and the staff PIN. The owner sets the PIN in the admin UI (Settings);
+  there is no default PIN. The lock screen stays locked when the agent stops.
 "@ | Set-Content "$clientDir\README.txt"
 
 # Create ZIP archives
