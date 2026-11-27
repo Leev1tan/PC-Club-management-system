@@ -15,6 +15,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{86CB3745
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cms.Server.Tests", "tests\Cms.Server.Tests\Cms.Server.Tests.csproj", "{811FB490-22AF-4F11-BF0E-C1C501B409C7}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cms.Client", "Cms.Client\Cms.Client.csproj", "{0A152E39-331A-4E48-A999-DB72A69FCD17}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cms.Client.Tests", "tests\Cms.Client.Tests\Cms.Client.Tests.csproj", "{DAD71DCF-968A-491D-8E0E-C4C7B1EC279D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -44,8 +48,17 @@ Global
 		{811FB490-22AF-4F11-BF0E-C1C501B409C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{811FB490-22AF-4F11-BF0E-C1C501B409C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{811FB490-22AF-4F11-BF0E-C1C501B409C7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0A152E39-331A-4E48-A999-DB72A69FCD17}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0A152E39-331A-4E48-A999-DB72A69FCD17}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0A152E39-331A-4E48-A999-DB72A69FCD17}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0A152E39-331A-4E48-A999-DB72A69FCD17}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DAD71DCF-968A-491D-8E0E-C4C7B1EC279D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DAD71DCF-968A-491D-8E0E-C4C7B1EC279D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DAD71DCF-968A-491D-8E0E-C4C7B1EC279D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DAD71DCF-968A-491D-8E0E-C4C7B1EC279D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{811FB490-22AF-4F11-BF0E-C1C501B409C7} = {86CB3745-6C28-4F92-A25A-381477D66515}
+		{DAD71DCF-968A-491D-8E0E-C4C7B1EC279D} = {86CB3745-6C28-4F92-A25A-381477D66515}
 	EndGlobalSection
 EndGlobal

@@ -17,5 +17,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Cms.Shared\Cms.Shared.csproj" />
+    <ProjectReference Include="..\Cms.Client\Cms.Client.csproj" />
   </ItemGroup>
 </Project>

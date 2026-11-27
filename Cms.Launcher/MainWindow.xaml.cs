@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Cms.Client;
 using Cms.Shared;
 
 namespace Cms.Launcher;
@@ -18,6 +19,18 @@ public partial class MainWindow : Window
     private Border? _lockOverlay;
     private TextBlock? _lockCountdown;
     private TextBlock? _lockReasonText;
+    private TextBlock? _lockTitle;
+    private TextBlock? _lockHint;
+    private TextBlock? _lockStaffHint;
+    private Button? _languageButton;
+
+    // Club settings from the agent (client-settings.json): language and currency; Ukrainian without the file.
+    // The player may switch the language on the lock screen until the PC locks again.
+    private ClientSettings _settings = ClientSettings.Default;
+    private string? _languageOverride;
+    private LauncherTexts _texts = LauncherTexts.Uk;
+    private bool _wasLocked = true;
+    private LockDecision? _lastDecision;
 
     // Fail-closed lock decision and staff PIN (Cms.Shared, unit-tested)
     private readonly LockScreenController _lock = new();
@@ -111,24 +124,22 @@ public partial class MainWindow : Window
         var wait = _pinLimiter.WaitTime(DateTimeOffset.UtcNow);
         if (wait is { } w)
         {
-            MessageBox.Show(this, $"Забагато невірних спроб. Зачекайте {Math.Ceiling(w.TotalSeconds)} с.",
-                "Розблокування", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, LauncherTexts.Format(_texts.PinWait, Math.Ceiling(w.TotalSeconds)),
+                _texts.UnlockTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         var hash = ReadStaffPinHash();
         if (hash == null)
         {
-            MessageBox.Show(this, "PIN персоналу не налаштовано. Власник задає його в адмін-панелі (Налаштування). " +
-                                  "Staff PIN is not set: the owner sets it in the admin UI (Settings).",
-                "Розблокування", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, _texts.PinNotSet, _texts.UnlockTitle, MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         _pinPromptOpen = true;
         try
         {
-            var dialog = new StaffPinDialog(this, "Введіть PIN персоналу. Розблокування діє до наступного блокування.");
+            var dialog = new StaffPinDialog(this, _texts);
             if (dialog.ShowDialog() != true || string.IsNullOrEmpty(dialog.Pin)) return;
 
             var pin = dialog.Pin;
@@ -138,13 +149,12 @@ public partial class MainWindow : Window
                 _pinLimiter.RecordSuccess();
                 ReportStaffUnlock();
                 _lock.BeginStaffOverride(_lastState == null ? null : new AgentLockSnapshot(_lastState.IsLocked, _lastState.LockChangedUtc));
-                MessageBox.Show(this, "Розблоковано персоналом.\n\nРозблокування діє до наступного блокування від сервера.",
-                    "Успіх", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(this, _texts.PinUnlocked, _texts.Done, MessageBoxButton.OK, MessageBoxImage.Information);
             }
             else
             {
                 _pinLimiter.RecordFailure(DateTimeOffset.UtcNow);
-                MessageBox.Show(this, "Невірний PIN.", "Помилка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, _texts.PinWrong, _texts.Error, MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
         finally
@@ -225,12 +235,12 @@ public partial class MainWindow : Window
 
         if (string.IsNullOrWhiteSpace(username))
         {
-            ShowLoginError("Введіть ім'я користувача");
+            ShowLoginError(_texts.EnterUsername);
             return;
         }
 
         LoginButton.IsEnabled = false;
-        LoginButton.Content = "Вхід...";
+        LoginButton.Content = _texts.LoginBusy;
         LoginError.Visibility = Visibility.Collapsed;
 
         try
@@ -253,23 +263,23 @@ public partial class MainWindow : Window
             }
 
             var status = (int)resp.StatusCode;
-            ShowLoginError(status == 401 ? "Невірний логін або пароль" : $"Помилка сервера ({status})");
+            ShowLoginError(status == 401 ? _texts.WrongLogin : LauncherTexts.Format(_texts.ServerError, status));
         }
         catch (Exception ex)
         {
-            ShowLoginError($"Немає зв'язку з сервером: {ex.Message}");
+            ShowLoginError(LauncherTexts.Format(_texts.NoConnection, ex.Message));
         }
         finally
         {
             LoginButton.IsEnabled = true;
-            LoginButton.Content = "Увійти";
+            LoginButton.Content = _texts.LoginButton;
         }
     }
 
     private void OnGuestClick(object sender, RoutedEventArgs e)
     {
         _userId = null;
-        _username = "Гість";
+        _username = null;
         _balance = 0;
         _isGuest = true;
         EnterSessionMode();
@@ -287,8 +297,7 @@ public partial class MainWindow : Window
         LoginPanel.Visibility = Visibility.Collapsed;
         SessionPanel.Visibility = Visibility.Visible;
 
-        SessionUser.Text = _isGuest ? "👤 Гість" : $"👤 {_username}";
-        SessionBalance.Text = _isGuest ? "" : $"💰 {_balance:N0} ₴";
+        UpdateSessionHeader();
 
         try
         {
@@ -300,15 +309,66 @@ public partial class MainWindow : Window
     // ──── EXTEND SESSION ────
     private void OnExtendClick(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show("Зверніться до адміністратора або поповніть баланс для подовження сесії.",
-            "Подовження сесії", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, _texts.ExtendHint, _texts.ExtendTitle, MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    // ──── CALL STAFF ────
-    private void OnCallStaffClick(object sender, RoutedEventArgs e)
+    private void UpdateSessionHeader()
     {
-        MessageBox.Show("Виклик надіслано. Адміністратор скоро підійде.",
-            "Виклик персоналу", MessageBoxButton.OK, MessageBoxImage.Information);
+        SessionUser.Text = _isGuest || _username == null ? "👤 " + _texts.Guest : $"👤 {_username}";
+        SessionBalance.Text = _isGuest ? "" : "💰 " + LauncherFormat.Money(_balance, _settings);
+    }
+
+    // ──── LANGUAGE ────
+
+    /// <summary>
+    /// Reads client-settings.json (written by the agent from the club settings). A missing or untrusted
+    /// file means Ukrainian and UAH. The texts change at once when the club changes the setting.
+    /// </summary>
+    private void RefreshClientSettings()
+    {
+        ClientSettings settings;
+        try
+        {
+            var path = Path.Combine(AgentFiles.Directory, AgentFiles.ClientSettingsFile);
+            settings = File.Exists(path) && IsTrustedAgentFile(path) ? ClientSettings.Parse(ReadShared(path)) ?? ClientSettings.Default : ClientSettings.Default;
+        }
+        catch
+        {
+            settings = ClientSettings.Default;
+        }
+        if (settings.SameAs(_settings) && _texts.Language == LauncherTexts.For(_languageOverride ?? settings.Language).Language) return;
+        _settings = settings;
+        ApplyTexts();
+    }
+
+    /// <summary>UA / EN on the lock screen: the player's choice lasts until the PC locks again.</summary>
+    private void OnLanguageClick(object? sender, RoutedEventArgs e)
+    {
+        _languageOverride = _texts.Other.Language;
+        ApplyTexts();
+    }
+
+    /// <summary>Puts the texts of the current language on every element of the window.</summary>
+    private void ApplyTexts()
+    {
+        _texts = LauncherTexts.For(_languageOverride ?? _settings.Language);
+        Title = _texts.WindowTitle;
+        LoginRequiredText.Text = _texts.LoginRequired;
+        UsernameLabel.Text = _texts.UsernameLabel;
+        SecretLabel.Text = _texts.SecretLabel;
+        if (LoginButton.IsEnabled) LoginButton.Content = _texts.LoginButton;
+        GuestLinkText.Text = _texts.GuestLink;
+        LoginStaffHint.Text = _texts.StaffHint;
+        SessionActiveText.Text = _texts.SessionActive;
+        SessionStaffHint.Text = _texts.StaffHint;
+        ExtendButton.Content = _texts.ExtendButton;
+        if (_lockTitle != null) _lockTitle.Text = _texts.LockedTitle;
+        if (_lockHint != null) _lockHint.Text = _texts.LockedHint;
+        if (_lockStaffHint != null) _lockStaffHint.Text = _texts.StaffHint;
+        if (_languageButton != null) _languageButton.Content = _texts.LanguageSwitch;
+        UpdateSessionHeader();
+        if (_lastDecision != null) UpdateLockReason(_lastDecision);
+        UpdateCountdowns(_lastState?.RemainingSeconds ?? 0);
     }
 
     // ──── INITIALIZATION ────
@@ -337,9 +397,9 @@ public partial class MainWindow : Window
         };
 
         // Main title with neon glow
-        var lockTitle = new TextBlock
+        var lockTitle = _lockTitle = new TextBlock
         {
-            Text = "[ LOCKED ]",
+            Text = _texts.LockedTitle,
             Foreground = neonCyan,
             FontSize = 42,
             FontWeight = FontWeights.Bold,
@@ -388,24 +448,29 @@ public partial class MainWindow : Window
                     lockTitle,
                     _lockCountdown,
                     _lockReasonText,
-                    new TextBlock
+                    (_lockHint = new TextBlock
                     {
-                        Text = "> АВТОРИЗУЙТЕСЬ АБО ЗВЕРНІТЬСЯ ДО ПЕРСОНАЛУ",
                         Foreground = mutedText,
                         FontSize = 13,
                         HorizontalAlignment = HorizontalAlignment.Center,
                         Margin = new Thickness(0, 24, 0, 0),
                         FontFamily = monoFont
-                    },
-                    new TextBlock
+                    }),
+                    (_lockStaffHint = new TextBlock
                     {
-                        Text = "CTRL+SHIFT+U :: STAFF_OVERRIDE",
                         Foreground = new SolidColorBrush(Color.FromRgb(26, 26, 48)),
                         FontSize = 10,
                         HorizontalAlignment = HorizontalAlignment.Center,
                         Margin = new Thickness(0, 20, 0, 0),
                         FontFamily = monoFont
-                    }
+                    }),
+                    (_languageButton = new Button
+                    {
+                        Style = (Style)FindResource("CyberButton"),
+                        Padding = new Thickness(14, 6, 14, 6),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 24, 0, 0)
+                    })
                 }
             },
             Visibility = Visibility.Visible, // locked until the first state read says otherwise
@@ -419,6 +484,9 @@ public partial class MainWindow : Window
             grid.Children.Add(_lockOverlay);
             Panel.SetZIndex(_lockOverlay, 9999);
         }
+        _languageButton.Click += OnLanguageClick;
+        RefreshClientSettings();
+        ApplyTexts();
 
         // Read server URL from agent config
         try
@@ -455,6 +523,12 @@ public partial class MainWindow : Window
             var decision = _lock.Evaluate(
                 state == null ? null : new AgentLockSnapshot(state.IsLocked, state.LockChangedUtc),
                 heartbeat, now);
+            _lastDecision = decision;
+
+            // A new lock ends the player's language choice: back to the club language
+            if (decision.Locked && !_wasLocked) _languageOverride = null;
+            _wasLocked = decision.Locked;
+            RefreshClientSettings();
 
             if (state != null && !string.IsNullOrWhiteSpace(state.ServerUrl))
                 _serverUrl = state.ServerUrl.TrimEnd('/');
@@ -522,8 +596,8 @@ public partial class MainWindow : Window
         if (_lockReasonText == null) return;
         var text = decision.Reason switch
         {
-            LockReason.AgentSilent => "> АГЕНТ НЕ ВІДПОВІДАЄ — ЗВЕРНІТЬСЯ ДО ПЕРСОНАЛУ / AGENT NOT RESPONDING",
-            LockReason.NoAgentState => "> НЕМАЄ СТАНУ АГЕНТА — ЗВЕРНІТЬСЯ ДО ПЕРСОНАЛУ / NO AGENT STATE",
+            LockReason.AgentSilent => _texts.AgentNotResponding,
+            LockReason.NoAgentState => _texts.NoAgentState,
             _ => string.Empty
         };
         _lockReasonText.Text = text;
@@ -537,8 +611,7 @@ public partial class MainWindow : Window
         {
             if (remaining > 0)
             {
-                var ts = TimeSpan.FromSeconds(remaining);
-                _lockCountdown.Text = $"Залишилось: {ts:hh\\:mm\\:ss}";
+                _lockCountdown.Text = LauncherTexts.Format(_texts.LockedTimeLeft, LauncherFormat.Clock(remaining));
                 _lockCountdown.Visibility = Visibility.Visible;
             }
             else
@@ -552,16 +625,15 @@ public partial class MainWindow : Window
         if (SessionPanel.Visibility != Visibility.Visible) return;
         if (remaining > 0)
         {
-            var ts = TimeSpan.FromSeconds(remaining);
-            SessionCountdown.Text = $"{ts:hh\\:mm\\:ss}";
-            SessionTimeLabel.Text = "Залишилось часу";
+            SessionCountdown.Text = LauncherFormat.Clock(remaining);
+            SessionTimeLabel.Text = _texts.TimeLeftLabel;
 
             // 5-minute warning
             if (remaining <= 300)
             {
                 WarningBanner.Visibility = Visibility.Visible;
                 var mins = (int)Math.Ceiling(remaining / 60.0);
-                WarningText.Text = $"⚠️  Залишилось {mins} хв! Поповніть баланс або подовжіть сесію";
+                WarningText.Text = LauncherTexts.Format(_texts.LowTimeBanner, mins);
             }
             else
             {
@@ -571,7 +643,7 @@ public partial class MainWindow : Window
         else
         {
             SessionCountdown.Text = "∞";
-            SessionTimeLabel.Text = "Безлімітна сесія";
+            SessionTimeLabel.Text = _texts.OpenEndedLabel;
             WarningBanner.Visibility = Visibility.Collapsed;
         }
     }

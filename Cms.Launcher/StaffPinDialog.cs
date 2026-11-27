@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Cms.Client;
 
 namespace Cms.Launcher;
 
@@ -16,10 +17,10 @@ internal sealed class StaffPinDialog : Window
 
     public string Pin => _pin.Password;
 
-    public StaffPinDialog(Window owner, string message)
+    public StaffPinDialog(Window owner, LauncherTexts texts)
     {
         Owner = owner;
-        Title = "Розблокування персоналом";
+        Title = texts.PinDialogTitle;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
         SizeToContent = SizeToContent.WidthAndHeight;
@@ -42,17 +43,17 @@ internal sealed class StaffPinDialog : Window
             MaxLength = Cms.Shared.StaffPinHash.MaxLength
         };
 
-        var ok = new Button { Content = "[ OK ]", IsDefault = true, Width = 120, Margin = new Thickness(0, 0, 8, 0), FontFamily = font };
+        var ok = new Button { Content = texts.Ok, IsDefault = true, Width = 120, Margin = new Thickness(0, 0, 8, 0), FontFamily = font };
         ok.Click += (_, _) => DialogResult = true;
-        var cancel = new Button { Content = "[ СКАСУВАТИ ]", IsCancel = true, Width = 140, FontFamily = font };
+        var cancel = new Button { Content = texts.Cancel, IsCancel = true, Width = 140, FontFamily = font };
 
         Content = new StackPanel
         {
             Margin = new Thickness(24),
             Children =
             {
-                new TextBlock { Text = "PIN ПЕРСОНАЛУ / STAFF PIN", Foreground = new SolidColorBrush(Color.FromRgb(0, 240, 255)), FontFamily = font, FontSize = 16 },
-                new TextBlock { Text = message, Foreground = text, FontFamily = font, FontSize = 12, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap, MaxWidth = 280 },
+                new TextBlock { Text = texts.PinDialogHeader, Foreground = new SolidColorBrush(Color.FromRgb(0, 240, 255)), FontFamily = font, FontSize = 16 },
+                new TextBlock { Text = texts.PinPrompt, Foreground = text, FontFamily = font, FontSize = 12, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap, MaxWidth = 280 },
                 _pin,
                 new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { ok, cancel } }
             }

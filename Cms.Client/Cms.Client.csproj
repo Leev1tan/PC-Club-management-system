@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Logic of the club PC programs (agent and lock screen) that runs and is tested on any OS:
+       launcher texts, game grid, the agent pipe protocol, session teardown, low-time warnings.
+       Windows-only code (WPF, Win32, ACLs) stays thin in Cms.Agent.Service and Cms.Launcher. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cms.Shared\Cms.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -21,6 +21,7 @@ tools
 tests
 Cms.Agent.Service
 Cms.Launcher
+Cms.Client
 VM2
 VMs
 deploy

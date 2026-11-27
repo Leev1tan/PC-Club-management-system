@@ -71,6 +71,9 @@ jobs:
       - name: Test the server (SQLite)
         run: dotnet test tests/Cms.Server.Tests/Cms.Server.Tests.csproj -c Release
 
+      - name: Test the client library
+        run: dotnet test tests/Cms.Client.Tests/Cms.Client.Tests.csproj -c Release
+
       - name: Build the admin UI (static files for the Windows server)
         working-directory: admin-ui
         run: |

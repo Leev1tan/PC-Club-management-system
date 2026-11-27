@@ -24,7 +24,7 @@ env:
 
 jobs:
   server:
-    name: Server and Shared (Linux, build + test)
+    name: Server, Shared and Client library (Linux, build + test)
     runs-on: ubuntu-latest
     # PostgreSQL for the concurrency, migration and audit trigger tests (CMS_TEST_POSTGRES)
     services:
@@ -57,6 +57,10 @@ jobs:
           CMS_TEST_POSTGRES: Host=localhost;Port=5432;Username=cms;Password=ci-only-throwaway;Database=cms
         run: dotnet test tests/Cms.Server.Tests/Cms.Server.Tests.csproj -c Release --logger "trx;LogFileName=server-tests.trx" --results-directory TestResults
 
+      # Logic of the agent and the lock screen (Cms.Client, net8.0): texts, game grid, pipe, teardown
+      - name: Test the client library
+        run: dotnet test tests/Cms.Client.Tests/Cms.Client.Tests.csproj -c Release --logger "trx;LogFileName=client-tests.trx" --results-directory TestResults
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -86,6 +90,9 @@ jobs:
 
       - name: Test server on Windows
         run: dotnet test tests/Cms.Server.Tests/Cms.Server.Tests.csproj -c Release
+
+      - name: Test the client library on Windows
+        run: dotnet test tests/Cms.Client.Tests/Cms.Client.Tests.csproj -c Release
 
   admin-ui:
     name: Admin UI (build)

@@ -730,6 +730,8 @@ public class Worker : BackgroundService
                     SetEnrollmentStatus(status.GetString());
                 if (_enrollmentStatus == "approved" && root.TryGetProperty("staffPinHash", out var pin))
                     UpdateStaffPin(pin.ValueKind == JsonValueKind.String ? pin.GetString() : null);
+                if (_enrollmentStatus == "approved" && root.TryGetProperty("client", out var client) && client.ValueKind == JsonValueKind.Object)
+                    UpdateClientSettings(client.GetRawText());
             }
         }
         catch (JsonException ex)
@@ -765,6 +767,30 @@ public class Worker : BackgroundService
             }
             WriteAtomic(path, JsonSerializer.Serialize(new StaffPinFile { Hash = hash, UpdatedUtc = DateTimeOffset.UtcNow }, JsonOptions));
             _logger.LogInformation("Staff PIN updated from the server");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update {Path}", path);
+        }
+    }
+
+    /// <summary>
+    /// Keeps client-settings.json equal to the club settings of the lock screen (language, currency).
+    /// The file stays when the server is down, so the lock screen keeps the last known club language;
+    /// without the file (the server was never reached) it shows Ukrainian.
+    /// </summary>
+    private void UpdateClientSettings(string json)
+    {
+        var path = Path.Combine(AgentDir, AgentFiles.ClientSettingsFile);
+        try
+        {
+            var received = ClientSettings.Parse(json);
+            if (received == null) return;
+            var current = File.Exists(path) ? ClientSettings.Parse(File.ReadAllText(path)) : null;
+            if (received.SameAs(current)) return;
+            var settings = new ClientSettings { Language = received.Language, Currency = received.Currency, ReceivedUtc = DateTimeOffset.UtcNow };
+            WriteAtomic(path, settings.ToJson());
+            _logger.LogInformation("Lock screen settings from the server: language {Language}, currency {Currency}", settings.Language, settings.Currency);
         }
         catch (Exception ex)
         {
