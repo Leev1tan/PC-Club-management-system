@@ -396,6 +396,7 @@ public partial class MainWindow : Window
         _timer.Tick += (_, __) => RefreshLockState();
         _timer.Start();
         RefreshLockState();
+        StartLockGuard(); // while locked: on top and in the foreground every second, foreign top-most windows pushed down
     }
 
     // ──── LOCK STATE POLLING ────
