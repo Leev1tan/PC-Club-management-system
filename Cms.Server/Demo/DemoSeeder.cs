@@ -100,7 +100,7 @@ public static partial class DemoSeeder
     /// <summary>Tables with many rows: PostgreSQL empties them with one TRUNCATE.</summary>
     private static readonly string[] BigTables =
         { "Commands", "Heartbeats", "Transactions", "GamePlays", "SessionSegments", "Sessions", "SaleItems", "Sales", "StockMovements", "Shifts", "LedgerEntries", "AuditLog", "Reservations",
-          "BarOrderItems", "BarOrders" };
+          "BarOrderItems", "BarOrders", "EventMatches", "EventPlayers", "EventTeams", "EventDevices", "Events" };
 
     /// <summary>Tables of the bulk insert whose foreign keys PostgreSQL checks once at the end.</summary>
     private static readonly string[] BulkTables = { "Sessions", "SessionSegments", "GamePlays", "Sales", "SaleItems", "StockMovements", "LedgerEntries" };
@@ -108,7 +108,8 @@ public static partial class DemoSeeder
     private sealed record ForeignKeyDefinition(string Table, string Name, string Definition);
 
     /// <summary>Tables with ids from a sequence that the seed fills with explicit ids in date order.</summary>
-    private static readonly string[] SequenceTables = { "Shifts", "Sales", "SaleItems", "StockMovements", "LedgerEntries", "AuditLog", "Reservations", "BarOrderItems", "BarOrders" };
+    private static readonly string[] SequenceTables = { "Shifts", "Sales", "SaleItems", "StockMovements", "LedgerEntries", "AuditLog", "Reservations", "BarOrderItems", "BarOrders",
+        "Events", "EventTeams", "EventPlayers", "EventMatches" };
 
     /// <summary>
     /// True when the database is empty or was seeded by demo mode. Demo mode refuses to
@@ -129,6 +130,7 @@ public static partial class DemoSeeder
                && !await db.Ledger.AnyAsync(ct)
                && !await db.Reservations.AnyAsync(ct)
                && !await db.BarOrders.AnyAsync(ct)
+               && !await db.Events.AnyAsync(ct)
                && !await db.StaffUsers.AnyAsync(ct);
     }
 
@@ -173,6 +175,11 @@ public static partial class DemoSeeder
         else
         {
             // Children first (foreign key order); the append-only tables are cleared the demo way
+            await db.EventMatches.ExecuteDeleteAsync(ct);
+            await db.EventPlayers.ExecuteDeleteAsync(ct);
+            await db.EventTeams.ExecuteDeleteAsync(ct);
+            await db.EventDevices.ExecuteDeleteAsync(ct);
+            await db.Events.ExecuteDeleteAsync(ct);
             await db.Reservations.ExecuteDeleteAsync(ct);
             await db.BarOrderItems.ExecuteDeleteAsync(ct);
             await db.BarOrders.ExecuteDeleteAsync(ct);
@@ -204,7 +211,7 @@ public static partial class DemoSeeder
 
         // Bulk insert in foreign key order. The rows are complete (balances after each ledger row, the
         // shift of each row, hashes of the audit rows), so they skip the change tracker (Data/BulkInsert)
-        foreach (var rows in new IEnumerable<object>[] { seed.Club, seed.Sessions, seed.Segments, seed.Plays, seed.Shifts, seed.Sales,
+        foreach (var rows in new IEnumerable<object>[] { seed.Club, seed.EventRows, seed.Sessions, seed.Segments, seed.Plays, seed.Shifts, seed.Sales,
                      seed.SaleItems.SelectMany(x => x.Items), seed.Movements, seed.LedgerRows, audit })
             await BulkInsert.InsertAsync(db, rows, ct);
 
@@ -226,7 +233,10 @@ public static partial class DemoSeeder
         await tx.CommitAsync(ct);
         db.ChangeTracker.Clear();
 
-        // Reservations of today and tomorrow, through the real service (deposits in the ledger, audit rows)
+        // An event in two days, through the real service (entry fees in the ledger, audit rows), then the reservations
+        // of today and tomorrow (deposits in the ledger, audit rows)
+        await SeedUpcomingEventAsync(db, now, zone, ct);
+        db.ChangeTracker.Clear();
         await DemoReservations.SeedAsync(db, now, zone, rng, ct);
         db.ChangeTracker.Clear();
         return result;
@@ -295,6 +305,7 @@ public static partial class DemoSeeder
             var paused = SeedLiveSessions(pcs);
             SeedDebtor();
             SeedFreeTime();
+            SeedFinishedEvent();
             SeedHistory();
             SeedPlays();
             SeedBar();
@@ -742,7 +753,7 @@ public static partial class DemoSeeder
 
         private LedgerEntryEntity Post(UserEntity user, DateTimeOffset at, string type, string method, decimal amount, decimal balanceDelta,
             decimal bonusDelta, decimal desk, string description, SessionEntity? session = null, string? reason = null, string? actor = "demo-cashier",
-            decimal debtDelta = 0m)
+            decimal debtDelta = 0m, long? eventId = null, Guid? deviceId = null)
         {
             var (balance, bonus) = _wallets[user.Id];
             balance += balanceDelta;
@@ -755,7 +766,7 @@ public static partial class DemoSeeder
                 CreatedUtc = at, UserId = user.Id, Type = type, Method = method, Amount = amount,
                 BalanceDelta = balanceDelta, BonusDelta = bonusDelta, DeskAmount = desk, BalanceAfter = balance, BonusAfter = bonus,
                 DebtDelta = debtDelta, DebtAfter = debt,
-                SessionId = session?.Id, PackageId = session?.PackageId, DeviceId = session?.DeviceId,
+                SessionId = session?.Id, PackageId = session?.PackageId, DeviceId = session?.DeviceId ?? deviceId, EventId = eventId,
                 Description = description, Reason = reason, ActorUsername = actor
             };
             LedgerRows.Add(row);
