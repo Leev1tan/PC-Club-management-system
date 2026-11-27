@@ -132,4 +132,23 @@ public sealed class ClubThemesTests
         var back = ClientSettings.Parse(json)!;
         Assert.Equal(("arcade", "#E0457B", hash), (back.Theme, back.Accent, back.LogoSha256));
     }
+
+    /// <summary>Windows test 2026-11-27, defect 9: after an upgrade client-settings.json had no "theme" until the first change.</summary>
+    [Fact]
+    public void A_settings_file_of_an_older_agent_is_written_again_when_it_lacks_a_field()
+    {
+        var received = new ClientSettings { Language = "uk", Currency = "UAH", Theme = "cyber", ReceivedUtc = DateTimeOffset.UnixEpoch };
+        const string old = "{\"language\":\"uk\",\"currency\":\"UAH\",\"receivedUtc\":\"2026-11-27T10:00:00+00:00\"}";
+        Assert.True(received.SameAs(ClientSettings.Parse(old)));         // the same values ...
+        Assert.True(ClientSettings.LacksFields(old, received));            // ... but no "theme": written again
+        Assert.False(ClientSettings.LacksFields(received.ToJson(), received));
+        Assert.False(ClientSettings.LacksFields("{\"Language\":\"uk\",\"CURRENCY\":\"UAH\",\"theme\":\"cyber\",\"receivedUtc\":null}", received));
+        // Null values (no accent, no logo) are not required
+        var withLogo = new ClientSettings { Theme = "light", Accent = "#E0457B", LogoSha256 = new string('a', 64) };
+        Assert.True(ClientSettings.LacksFields("{\"language\":\"uk\",\"currency\":\"UAH\",\"theme\":\"light\"}", withLogo)); // no accent, no logo key
+        Assert.False(ClientSettings.LacksFields(withLogo.ToJson(), withLogo));
+        Assert.True(ClientSettings.LacksFields(null, received));
+        Assert.True(ClientSettings.LacksFields("[]", received));
+        Assert.True(ClientSettings.LacksFields("not json", received));
+    }
 }

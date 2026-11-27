@@ -915,13 +915,15 @@ public partial class Worker : BackgroundService
         {
             var received = ClientSettings.Parse(json);
             if (received == null) return;
-            var current = File.Exists(path) ? ClientSettings.Parse(File.ReadAllText(path)) : null;
-            if (received.SameAs(current)) return;
+            var currentText = File.Exists(path) ? File.ReadAllText(path) : null;
+            var current = ClientSettings.Parse(currentText);
             var settings = new ClientSettings
             {
                 Language = received.Language, Currency = received.Currency, Theme = received.Theme, Accent = received.Accent,
                 LogoSha256 = received.LogoSha256, ReceivedUtc = DateTimeOffset.UtcNow
             };
+            // The same values: write only when the file lacks a field (a file of an older agent, for example without "theme")
+            if (received.SameAs(current) && !ClientSettings.LacksFields(currentText, settings)) return;
             WriteAtomic(path, settings.ToJson());
             _logger.LogInformation("Lock screen settings from the server: language {Language}, currency {Currency}, theme {Theme}, accent {Accent}, logo {Logo}",
                 settings.Language, settings.Currency, settings.Theme, settings.Accent ?? "-", settings.LogoSha256?[..12] ?? "-");

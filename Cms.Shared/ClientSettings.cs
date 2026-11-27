@@ -83,6 +83,28 @@ public sealed class ClientSettings
         other != null && Language == other.Language && Currency == other.Currency &&
         Theme == other.Theme && Accent == other.Accent && LogoSha256 == other.LogoSha256;
 
+    /// <summary>
+    /// True when the file text lacks a field that these settings write (for example "theme" in a file of an older agent),
+    /// or is not a JSON object. The agent then writes the file again, also when the values are the same (Windows test
+    /// 2026-11-27, defect 9: after an upgrade client-settings.json had no "theme" until the first change).
+    /// </summary>
+    public static bool LacksFields(string? fileJson, ClientSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(fileJson)) return true;
+        try
+        {
+            using var file = JsonDocument.Parse(fileJson);
+            if (file.RootElement.ValueKind != JsonValueKind.Object) return true;
+            var present = new HashSet<string>(file.RootElement.EnumerateObject().Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            using var expected = JsonDocument.Parse(settings.ToJson());
+            return expected.RootElement.EnumerateObject().Any(p => p.Value.ValueKind != JsonValueKind.Null && !present.Contains(p.Name));
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>True for exactly 64 hex characters (a SHA-256 in hex).</summary>
     public static bool IsSha256Hex(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
