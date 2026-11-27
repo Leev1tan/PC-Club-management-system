@@ -306,6 +306,38 @@ function Register-LockScreenTask([string]$UserName, [string]$LauncherExe) {
     }
 }
 
+# Keeps the automatic sign-in of the kiosk user at the start of the PC (Windows re-test 2026-11-27 late, defect 3).
+# Windows writes the last user who signed in at the screen into DefaultUserName ("Configure Windows to automate logon",
+# Microsoft Learn, KB 324737). After ClubAdmin signed in, the next start would try ClubAdmin with the password of ClubUser
+# and stop at the Windows sign-in screen. This task of SYSTEM writes the values of ClubUser again at every start, at every
+# sign-in and every 5 minutes. It runs only reg.exe of Windows with fixed arguments (no script file that somebody could
+# change). A failure is a warning: the values are right until somebody else signs in at the screen.
+function Register-AutoLogonTask([string]$UserName) {
+    try {
+        $reg = Join-Path $env:SystemRoot 'System32\reg.exe'
+        $key = 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        $actions = @(
+            (New-ScheduledTaskAction -Execute $reg -Argument "add `"$key`" /v AutoAdminLogon /t REG_SZ /d 1 /f"),
+            (New-ScheduledTaskAction -Execute $reg -Argument "add `"$key`" /v DefaultUserName /t REG_SZ /d `"$UserName`" /f"),
+            (New-ScheduledTaskAction -Execute $reg -Argument "add `"$key`" /v DefaultDomainName /t REG_SZ /d `"$env:COMPUTERNAME`" /f")
+        )
+        $triggers = @(
+            (New-ScheduledTaskTrigger -AtStartup),
+            (New-ScheduledTaskTrigger -AtLogOn),
+            (New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes 5))
+        )
+        $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+            -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 1)
+        Register-ScheduledTask -TaskName 'ClubKioskAutoLogon' -Action $actions -Trigger $triggers -Principal $principal `
+            -Settings $settings -Force | Out-Null
+        Write-Host "   Scheduled task ClubKioskAutoLogon (SYSTEM): keeps the automatic sign-in of '$UserName' after an administrator signed in" -ForegroundColor Gray
+    } catch {
+        Write-Warning ("Could not register the scheduled task ClubKioskAutoLogon: $($_.Exception.Message). After an administrator " +
+            "signed in at the screen, run the installer again, else '$UserName' may not sign in automatically at the next start.")
+    }
+}
+
 # Restart actions of a service: when it ends with an error, Windows starts it again after 5 s, 5 s, then 30 s (the
 # count goes back to zero after one day). failureflag 1: also when the service stops itself with an error code.
 function Set-ServiceRecovery([string]$Name) {
@@ -611,7 +643,8 @@ function Stop-LockScreens([string]$Folder, [string]$KioskUser) {
     return @($sessions.Keys)
 }
 
-# Signs out the given Windows sessions (the kiosk user). With ForceAutoLogon, ClubUser signs in again at once.
+# Signs out the given Windows sessions (the kiosk user). Windows then signs ClubUser in again: the automatic sign-in works
+# at the start of the PC and after a sign-out (Wait-KioskLockScreen checks it).
 function Invoke-SessionLogoff([object[]]$Sessions) {
     foreach ($id in $Sessions) {
         $ErrorActionPreference = 'Continue'
@@ -622,6 +655,24 @@ function Invoke-SessionLogoff([object[]]$Sessions) {
             Write-Warning "Could not sign out the session $id (logoff.exe exit code $LASTEXITCODE). Restart the PC."
         }
     }
+}
+
+# True when a lock screen of the kiosk user runs again within the given seconds (its shell starts it after the automatic
+# sign-in). Windows signs ClubUser in only while nobody else uses the screen: when an administrator runs this installer
+# at the screen, ClubUser signs in after that administrator signs out.
+function Wait-KioskLockScreen([string]$Folder, [string]$KioskUser, [int]$Seconds) {
+    $prefix = ($Folder -replace '/', '\').TrimEnd('\') + '\'
+    for ($i = 0; $i -lt $Seconds; $i++) {
+        $found = @(Get-CimInstance Win32_Process -Filter "Name='Cms.Launcher.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })
+        foreach ($p in $found) {
+            try {
+                if ((Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction Stop).User -eq $KioskUser) { return $true }
+            } catch { }
+        }
+        Start-Sleep -Seconds 1
+    }
+    return $false
 }
 
 # Waits until the service runs. False after the given seconds.
@@ -645,6 +696,11 @@ function Resume-LockScreens {
         $sessions = $script:stoppedSessions
         $script:stoppedSessions = @()
         Invoke-SessionLogoff $sessions
+        if (-not (Wait-KioskLockScreen $LauncherPath $kioskUserName 45)) {
+            Write-Warning ("$kioskUserName did not sign in again within 45 s. If an administrator uses the screen, " +
+                "$kioskUserName signs in after that person signs out. If the PC shows the Windows sign-in screen, restart the PC: " +
+                "$kioskUserName signs in automatically at the start.")
+        }
     }
 }
 
@@ -929,21 +985,26 @@ if (-not (Wait-ServiceRunning $serviceName 30)) {
 $agentVersion = (Get-Item $exePath).VersionInfo.FileVersion
 Write-Host "   Agent service running (version $agentVersion)" -ForegroundColor Gray
 
-# Step 6: Configure Launcher autostart
+# Step 6: Configure Launcher autostart. In kiosk mode the shell of ClubUser starts the lock screen (and the scheduled
+# task ClubLauncherWatchdog of ClubUser). A shortcut in the common Startup folder starts it for EVERY account: it locked
+# the desktop of ClubAdmin with the lock screen in kiosk mode (Windows re-test 2026-11-27 late, defect 3), so a kiosk PC
+# has no such shortcut. Without kiosk mode the shortcut is the way the lock screen starts.
 Write-Host "[6/8] Configuring Launcher autostart..." -ForegroundColor Yellow
-
-if (Test-Path $launcherExe) {
-    # Add to common startup folder (all users)
-    $startupFolder = [Environment]::GetFolderPath('CommonStartup')
-    $shortcutPath = Join-Path $startupFolder "ClubLauncher.lnk"
-    
+$startupShortcut = Join-Path ([Environment]::GetFolderPath('CommonStartup')) "ClubLauncher.lnk"
+if ($KioskMode -or (Test-Path (Join-Path $LauncherPath 'kiosk.json'))) {
+    if (Test-Path -LiteralPath $startupShortcut) {
+        Remove-Item -LiteralPath $startupShortcut -Force
+        Write-Host "   Removed the common Startup shortcut: in kiosk mode only the shell of ClubUser starts the lock screen" -ForegroundColor Gray
+    } else {
+        Write-Host "   Kiosk mode: the shell of ClubUser starts the lock screen (no Startup shortcut for all accounts)" -ForegroundColor Gray
+    }
+} elseif (Test-Path $launcherExe) {
     $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut = $shell.CreateShortcut($startupShortcut)
     $shortcut.TargetPath = $launcherExe
     $shortcut.WorkingDirectory = $LauncherPath
     $shortcut.Description = "Club Launcher"
     $shortcut.Save()
-    
     Write-Host "   Launcher added to common startup" -ForegroundColor Gray
 }
 
@@ -1051,6 +1112,10 @@ if ($KioskMode) {
 
     # Step 8: Automatic sign-in of ClubUser. The password goes to the LSA secret "DefaultPassword" (only SYSTEM
     # can read it), never to the registry value DefaultPassword (local users can read the Winlogon key).
+    # AutoAdminLogon signs ClubUser in at the start of the PC and after a sign-out of ClubUser (the staff "Log off", an
+    # update). ForceAutoLogon is NOT set (Windows re-test 2026-11-27 late, defect 3): it also signed ClubUser in again on
+    # "Ctrl+Alt+Del > Switch user", so ClubAdmin could never sign in at the screen. An older install set it: it is removed.
+    # Register-AutoLogonTask keeps DefaultUserName = ClubUser after ClubAdmin signed in.
     Write-Host "[8/8] Configuring auto-login..." -ForegroundColor Yellow
     try {
         [ClubInstall.KioskNative]::SetAutoLogonPassword($kioskPassword)
@@ -1064,8 +1129,9 @@ if ($KioskMode) {
     Set-ItemProperty -Path $winlogonPath -Name "DefaultUserName" -Value $kioskUser
     Set-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -Value $env:COMPUTERNAME
     Set-ItemProperty -Path $winlogonPath -Name "AutoAdminLogon" -Value "1"
-    Set-ItemProperty -Path $winlogonPath -Name "ForceAutoLogon" -Value "1"
-    Write-Host "   Auto-login enabled for '$kioskUser' (password in LSA, not in the registry)" -ForegroundColor Gray
+    Remove-ItemProperty -Path $winlogonPath -Name "ForceAutoLogon" -ErrorAction SilentlyContinue
+    Register-AutoLogonTask -UserName $kioskUser
+    Write-Host "   Auto-login enabled for '$kioskUser' (password in LSA, not in the registry; no ForceAutoLogon)" -ForegroundColor Gray
 
     # Keyboard hooks (Alt+Tab, Alt+F4, Windows key) are managed by the Launcher.
     # Write kiosk config marker for Launcher to detect.
@@ -1128,7 +1194,8 @@ if ($KioskMode) {
     Write-Host "  - Staff unlock: Ctrl+Shift+U + the staff PIN (set it in the admin UI, Settings)" -ForegroundColor White
     Write-Host "  - The lock screen stays locked when the agent stops (fail closed)" -ForegroundColor White
     if ($adminReady) {
-        Write-Host "  - Switch to admin: Ctrl+Alt+Del > Switch User > $adminUser" -ForegroundColor White
+        Write-Host "  - Admin access: Ctrl+Alt+Del > Switch user > $adminUser (the lock screen does not start for $adminUser)." -ForegroundColor White
+        Write-Host "    When you are done, sign out of ${adminUser}: $kioskUser signs in again. If the Windows sign-in screen stays, restart the PC." -ForegroundColor White
     } else {
         Write-Host "  - No $adminUser account: create a local administrator before you need to leave the kiosk" -ForegroundColor Yellow
     }

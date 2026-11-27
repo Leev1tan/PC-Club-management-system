@@ -472,8 +472,13 @@ if ($hiveRoot) {
     Write-Host "   Could not open the registry hive of $kioskUser (may already be clean)" -ForegroundColor Gray
 }
 
-# Step 2: Disable auto-login
+# Step 2: Disable auto-login. First the task of install-client.ps1 that puts the automatic sign-in of ClubUser back at
+# every start and sign-in (else it switches the automatic sign-in on again at the next sign-in).
 Write-Host "[2/5] Disabling auto-login..." -ForegroundColor Yellow
+if (Get-ScheduledTask -TaskName 'ClubKioskAutoLogon' -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName 'ClubKioskAutoLogon' -Confirm:$false
+    Write-Host "   Removed the scheduled task ClubKioskAutoLogon" -ForegroundColor Gray
+}
 Remove-ItemProperty -Path $winlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
 Set-ItemProperty -Path $winlogonPath -Name "AutoAdminLogon" -Value "0"
 Remove-ItemProperty -Path $winlogonPath -Name "ForceAutoLogon" -ErrorAction SilentlyContinue
