@@ -173,4 +173,5 @@ public static class ShiftErrors
     public static readonly BillingError BadFloat = new("bad_float", "The opening float must be between 0 and 1000000.");
     public static readonly BillingError BadCounted = new("bad_counted", "The counted cash must be between 0 and 1000000.");
     public static readonly BillingError CashTooLow = new("cash_too_low", "The drawer should hold only {0} ₴.", StatusCodes.Status409Conflict);
+    public static readonly BillingError ReportAfterClose = new("shift_report_after_close", "A cashier sees the Z-report of an own shift after the close (blind close).", StatusCodes.Status403Forbidden);
 }

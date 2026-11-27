@@ -17,8 +17,28 @@ namespace Cms.Server.Controllers;
 public class LedgerController : ControllerBase
 {
     private readonly CmsDbContext _db;
+    private readonly ClubClock _clock;
 
-    public LedgerController(CmsDbContext db) => _db = db;
+    public LedgerController(CmsDbContext db, ClubClock? clock = null)
+    {
+        _db = db;
+        _clock = clock ?? ClubClock.System();
+    }
+
+    /// <summary>
+    /// Ledger rows of a date range in club time (from and to inclusive, at most 366 days) as CSV for
+    /// accounting (UTF-8 with BOM). lang: uk (default) or en; sep: semicolon (default, decimal comma) or comma.
+    /// </summary>
+    [HttpGet("export.csv")]
+    public async Task<IActionResult> Export([FromQuery] DateOnly? from, [FromQuery] DateOnly? to, [FromQuery] string? lang = null, [FromQuery] string? sep = null)
+    {
+        if (from == null || to == null || to < from || to.Value.DayNumber - from.Value.DayNumber > 365)
+            return BadRequest(new { error = "Give from and to (yyyy-MM-dd, at most 366 days).", code = "bad_range" });
+        var fromUtc = ClubTimeZone.LocalToUtc(from.Value.ToDateTime(TimeOnly.MinValue), _clock.Zone);
+        var toUtc = ClubTimeZone.LocalToUtc(to.Value.AddDays(1).ToDateTime(TimeOnly.MinValue), _clock.Zone);
+        var (bytes, _) = await Cms.Server.Shifts.CsvExport.LedgerAsync(_db, _clock, fromUtc, toUtc, lang, sep, HttpContext.RequestAborted);
+        return File(bytes, Cms.Server.Shifts.CsvExport.ContentType, $"ledger-{from:yyyy-MM-dd}_{to:yyyy-MM-dd}.csv");
+    }
 
     /// <summary>Newest first; filters: type, userId, guests (rows without a player); paging with beforeId.</summary>
     [HttpGet]

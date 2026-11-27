@@ -89,7 +89,39 @@ public class ShiftsController : ControllerBase
         var shift = await _db.Shifts.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id);
         if (shift == null) return NotFound();
         if (!IsManager && shift.OpenedById != MyId) return Forbid();
-        return Ok(ShiftView.From(shift));
+        return Ok(ShiftView.From(shift, hideExpected: !IsManager && shift.Status == ShiftStatuses.Open));
+    }
+
+    /// <summary>
+    /// Z-report of a shift from its ledger rows (an open shift: the report so far). Owner, Manager:
+    /// any shift; Cashier: own shifts after the close.
+    /// </summary>
+    [HttpGet("{id:long}/report")]
+    public async Task<ActionResult<ZReport>> Report(long id)
+    {
+        var (shift, error) = await ReportShiftAsync(id);
+        if (shift == null) return error!;
+        return Ok(await ZReport.BuildAsync(_db, shift, _clock));
+    }
+
+    /// <summary>The Z-report as CSV (UTF-8 with BOM). lang: uk (default) or en; sep: semicolon (default, decimal comma) or comma.</summary>
+    [HttpGet("{id:long}/report.csv")]
+    public async Task<IActionResult> ReportCsv(long id, [FromQuery] string? lang = null, [FromQuery] string? sep = null)
+    {
+        var (shift, error) = await ReportShiftAsync(id);
+        if (shift == null) return error!;
+        var report = await ZReport.BuildAsync(_db, shift, _clock);
+        return File(CsvExport.ZReport(report, _clock, lang, sep), CsvExport.ContentType, $"z-report-shift-{id}.csv");
+    }
+
+    private async Task<(ShiftEntity? Shift, ActionResult? Error)> ReportShiftAsync(long id)
+    {
+        var shift = await _db.Shifts.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id);
+        if (shift == null) return (null, ShiftErrors.NotFound.ToActionResult());
+        if (IsManager) return (shift, null);
+        if (shift.OpenedById != MyId) return (null, Forbid());
+        if (shift.Status == ShiftStatuses.Open) return (null, ShiftErrors.ReportAfterClose.ToActionResult());
+        return (shift, null);
     }
 }
 
