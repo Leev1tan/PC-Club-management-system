@@ -18,7 +18,13 @@
 #   POSTGRES_PASSWORD   database password (internal network only; set your own)
 #   CMS_BIND_ADDRESS    host address for the published port (default 0.0.0.0 = all interfaces)
 #   CMS_PORT            published port for UI + API (default 5081, same as the Windows installer)
-#   DEMO_MODE           true = seed a demo club and simulate the PCs (default false)
+#   CMS_INITIAL_OWNER_USERNAME / CMS_INITIAL_OWNER_PASSWORD
+#                       first Owner account, used only while no staff account exists. Without them,
+#                       open the UI and use the setup screen with the one-time code from:
+#                         docker compose exec server cat /app/data/setup-code.txt
+#   CMS_ENROLLMENT_TOKEN secret for the club PC installer (ClubClientSetup.exe -EnrollmentToken ...);
+#                       without it, new PCs wait for approval in the admin UI (Devices)
+#   DEMO_MODE           true = seed a demo club, demo staff accounts and simulate the PCs (default false)
 #   DEMO_RESET_HOURS    demo wipe + re-seed interval in hours (default 6; 0 = only on restart)
 #   CMS_SERVER_IMAGE / CMS_UI_IMAGE   use pre-built images instead of building locally
 
@@ -53,8 +59,14 @@ services:
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=cms;Username=cms;Password=${POSTGRES_PASSWORD:-change-me}"
       Database__Provider: postgres
+      CMS_INITIAL_OWNER_USERNAME: ${CMS_INITIAL_OWNER_USERNAME:-}
+      CMS_INITIAL_OWNER_PASSWORD: ${CMS_INITIAL_OWNER_PASSWORD:-}
+      CMS_ENROLLMENT_TOKEN: ${CMS_ENROLLMENT_TOKEN:-}
       DEMO_MODE: ${DEMO_MODE:-false}
       DEMO_RESET_HOURS: ${DEMO_RESET_HOURS:-6}
+    volumes:
+      # login cookie keys and the one-time setup code (logins survive a container restart)
+      - serverdata:/app/data
     # Not published: browsers and agents reach the API through the admin-ui port (/api).
     # To expose the API port directly as well, uncomment:
     # ports:
@@ -75,6 +87,8 @@ services:
 volumes:
   pgdata:
     name: ccms-pgdata
+  serverdata:
+    name: ccms-serverdata
 
 networks:
   default:

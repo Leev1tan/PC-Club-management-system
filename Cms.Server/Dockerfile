@@ -6,8 +6,14 @@
 # Runtime settings (environment variables):
 #   ConnectionStrings__DefaultConnection  PostgreSQL connection string; empty = SQLite in /app/data
 #   Database__Provider                    postgres | sqlite (optional, overrides auto-detection)
-#   DEMO_MODE / DEMO_RESET_HOURS          demo club + simulated PCs, reset interval (default 6 h)
+#   CMS_INITIAL_OWNER_USERNAME / _PASSWORD  first Owner account (only while no staff account exists);
+#                                         without them: setup screen + code in /app/data/setup-code.txt
+#   CMS_ENROLLMENT_TOKEN                  secret for the agent installer (-EnrollmentToken)
+#   DEMO_MODE / DEMO_RESET_HOURS          demo club + simulated PCs + demo staff accounts, reset interval (default 6 h)
 #   Cors__AllowedOrigins                  only if the admin UI is served from another origin
+#   Auth__CookieSecure=always             login cookie only over HTTPS (set it behind an HTTPS ingress)
+#   ReverseProxy__ForwardLimit            proxies in front of the server (default 1; 2 = ingress + admin-ui)
+# Keep /app/data on a volume: login cookie keys, setup code, SQLite database.
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
@@ -27,9 +33,10 @@ WORKDIR /app
 ENV ASPNETCORE_URLS=http://+:8080 \
     ASPNETCORE_HTTP_PORTS= \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    Storage__DataDirectory=/app/data \
     Database__SqlitePath=/app/data/cms.db \
     Discovery__Enabled=false \
-    Cors__AllowAnyOrigin=false
+    ReverseProxy__TrustForwardedHeaders=true
 
 COPY --from=build /app/publish .
 # Writable directory for the optional SQLite database; everything else stays read-only for the app user

@@ -26,6 +26,19 @@ jobs:
   server:
     name: Server and Shared (Linux, build + test)
     runs-on: ubuntu-latest
+    # PostgreSQL for the concurrency, migration and audit trigger tests (CMS_TEST_POSTGRES)
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cms
+          POSTGRES_PASSWORD: ci-only-throwaway
+          POSTGRES_DB: cms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cms -d cms"
+          --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -39,7 +52,9 @@ jobs:
       - name: Build Cms.Server
         run: dotnet build Cms.Server/Cms.Server.csproj -c Release
 
-      - name: Test
+      - name: Test (SQLite and PostgreSQL)
+        env:
+          CMS_TEST_POSTGRES: Host=localhost;Port=5432;Username=cms;Password=ci-only-throwaway;Database=cms
         run: dotnet test tests/Cms.Server.Tests/Cms.Server.Tests.csproj -c Release --logger "trx;LogFileName=server-tests.trx" --results-directory TestResults
 
       - name: Upload test results
@@ -134,7 +149,11 @@ jobs:
             curl -fsS http://127.0.0.1:5081/api/health && break
             sleep 2
           done
-          curl -fsS http://127.0.0.1:5081/api/devices \
+          # Admin endpoints need a login; the demo staff accounts exist only in demo mode
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5081/api/devices)" = 401
+          curl -fsS -c cookies.txt -H 'Content-Type: application/json' -H 'X-CCMS-CSRF: 1' \
+            -d '{"username":"demo-owner","password":"demo"}' http://127.0.0.1:5081/api/auth/login > /dev/null
+          curl -fsS -b cookies.txt http://127.0.0.1:5081/api/devices \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d) == 20, len(d); print(len(d), "demo PCs")'
           curl -fsS http://127.0.0.1:5081/ | grep -q "<title>"
 
