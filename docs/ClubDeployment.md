@@ -51,11 +51,36 @@ Notes:
 - The hairpin masquerade rule is important when clients and server are in the same subnet but switch isolation blocks direct traffic.
 - Server-side remote IP may look like the router IP. Device identity still comes from each agent's device ID, hostname, and heartbeat payload.
 
+## Install from a release
+
+A GitHub release (tag `v1.2.3`) has ready Windows packages: `ccms-server-<tag>-win-x64.zip`,
+`ccms-agent-<tag>-win-x64.zip`, `ccms-launcher-<tag>-win-x64.zip` and `SHA256SUMS`. They are
+self-contained (no .NET needed on the PCs) and not code-signed.
+
+1. Check every zip before you use it: `Get-FileHash <zip>` (PowerShell) must give the SHA-256 that
+   `SHA256SUMS` lists for that file.
+2. Server PC (option A): extract the server zip and run `Install.cmd` as Administrator. It takes
+   the same options as `ClubServerSetup.exe` below (`-HttpPort`, `-DataPath`, `-EnrollmentToken`,
+   `-TimeZone`, `-PostgresConnectionString`).
+3. Gaming PCs: extract the agent zip and the launcher zip into the same folder (it then has
+   `agent\`, `launcher\` and `Install.cmd`) and run as Administrator:
+
+   ```powershell
+   Install.cmd -ServerUrl "http://10.3.3.1:5081" -EnrollmentToken "<token>" -KioskMode
+   ```
+
+   This is the same installer as `ClubClientSetup.exe`, see [Client Install](#client-install).
+4. Update: extract the zips of the new version into a new folder and run `Install.cmd` again with
+   the same options. The server keeps its data, enrollment token and time zone.
+
+Option B (Docker) does not use these files; CI publishes the images to `ghcr.io` for the same tags.
+
 ## Server Install
 
 ### Option A: Windows PC (installer)
 
-Run on the ClubServer PC as Administrator:
+Run on the ClubServer PC as Administrator (`ClubServerSetup.exe` from `scripts\installer\build-packages.ps1`,
+or `Install.cmd` of the release server zip):
 
 ```powershell
 ClubServerSetup.exe
@@ -159,7 +184,8 @@ Do not continue client rollout until this passes.
 
 ## Client Install
 
-Run on each gaming PC as Administrator:
+Run on each gaming PC as Administrator (`ClubClientSetup.exe`, or `Install.cmd` of the release agent and
+launcher zips extracted into one folder):
 
 ```powershell
 ClubClientSetup.exe -ServerUrl "http://10.3.3.1:5081" -EnrollmentToken "<token>" -KioskMode

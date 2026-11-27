@@ -197,6 +197,23 @@ Use the demo (`DEMO_MODE=true docker compose up -d`, 30 days of history) or a cl
       language; club data (product, tariff, player names) stays as entered
 - [ ] Demo: Owner → Журнал дій → 🔗 Перевірити ланцюжок: "перевірено якорів змін: 60" (every seeded closed shift)
 
+### Test 13: Install From the Release Zips (phase 6)
+On GitHub: Actions → Release → Run workflow (branch main). On a clean Windows 11 VM and a second VM as the server:
+- [ ] The run is green; the artifact `release-dryrun-<commit>` has `ccms-server-…`, `ccms-agent-…`,
+      `ccms-launcher-…-win-x64.zip` and `SHA256SUMS`; no release and no tag were created
+- [ ] `Get-FileHash <zip>` of each zip gives the SHA-256 of its line in `SHA256SUMS`
+- [ ] Each zip has `LICENSE`, `NOTICE.md` and `INSTALL.txt`; the server zip has `server\wwwroot\index.html`
+- [ ] Server VM: extract the server zip, `Install.cmd` as Administrator → service `ClubServer` runs, the setup code
+      and the enrollment token are printed, `http://localhost:5081` shows the setup screen of the admin UI
+- [ ] Client VM: extract the agent zip and the launcher zip into one folder (`agent\`, `launcher\`, `Install.cmd`),
+      run `Install.cmd -ServerUrl "http://<server>:5081" -EnrollmentToken "<token>"` as Administrator →
+      `Get-Service ClubAgent` is Running, the PC is online and approved in the admin UI
+- [ ] After a logon the lock screen (launcher) starts and is locked
+- [ ] If Windows marks the extracted files as downloaded and refuses them: `Get-ChildItem -Recurse | Unblock-File`
+      in the folder, then run `Install.cmd` again (note it in the release notes if this happens)
+- [ ] A pushed tag `v0.0.1-test` (in a fork) creates a pre-release with the three zips and `SHA256SUMS`;
+      the agent of that build reports the version `0.0.1.0` (Devices: agent version)
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

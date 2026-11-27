@@ -16,6 +16,7 @@ Project authorship: created and maintained by Volodymyr Shabat.
 - [Screenshots](#screenshots)
 - [How it works](#how-it-works)
 - [Features: done and planned](#features-done-and-planned)
+- [Install from a release](#install-from-a-release)
 - [Run the server: two options](#run-the-server-two-options)
 - [Install the club PCs (Windows)](#install-the-club-pcs-windows)
 - [Demo mode](#demo-mode)
@@ -103,10 +104,36 @@ Status of each product area. "Partial" means a basic version works and more is p
 | 8 | Game launcher and account pool | Planned | – | Game grid in the launcher, club account pool |
 | 9 | Tournaments | Planned | – | Batch unlock of a zone for a match |
 | 10 | Analytics and reports | Done (MVP) | Owner analytics (today / 7 / 30 days): revenue split PC time vs bar and by payment method, refunds, bonus issued and spent, average ticket, occupancy per zone, heatmap weekday × hour, cash variance of the shifts, checked against the ledger and the Z-reports; CSV of the period; Z-report per shift; ledger export of a date range as CSV (UTF-8 with BOM) | Excel (.xlsx) files, multi-club totals |
-| 11 | Deployment | Partial | Windows installers, Docker compose, demo mode, CI | Pre-built release binaries, multi-club (public live demo: done) |
+| 11 | Deployment | Partial | Windows installers, Docker compose, demo mode, CI; GitHub releases with ready Windows packages (server, agent, launcher) and SHA-256 sums | Signed installers, multi-club (public live demo: done) |
 | 12 | Languages and currency | Done (admin UI) | Every admin UI screen in Ukrainian and English (switch in the top bar and on the login page; dictionaries in `admin-ui/app/i18n.ts`); club currency UAH / EUR / USD / PLN (Owner setting, display only); club time zone setting | Lock screen (launcher) in English |
 
 Every admin page and API call needs a staff login with a role; club PCs authenticate with their own device key. Read [Security](#security) before you install the system in a club.
+
+## Install from a release
+
+Every version tag (`v1.2.3`) creates a [GitHub release](https://github.com/Leev1tan/PC-Club-management-system/releases) with ready Windows packages. They are self-contained (win-x64), so the PCs need no .NET and no Visual Studio.
+
+| File | Install on | Contents |
+| --- | --- | --- |
+| `ccms-server-<tag>-win-x64.zip` | the club server PC (option A below) | `server\` (Cms.Server.exe with the admin UI), `install-server.ps1`, `Install.cmd` |
+| `ccms-agent-<tag>-win-x64.zip` | every gaming PC | `agent\` (ClubAgent service), `install-client.ps1`, `uninstall-kiosk.ps1`, `Install.cmd` |
+| `ccms-launcher-<tag>-win-x64.zip` | every gaming PC | `launcher\` (lock screen) |
+| `SHA256SUMS` | | SHA-256 of the three zips |
+
+Each zip also holds `LICENSE`, `NOTICE.md` and `INSTALL.txt`.
+
+1. Download the zips and `SHA256SUMS`. Compare the SHA-256 of each zip with its line in `SHA256SUMS`:
+   PowerShell `Get-FileHash .\ccms-server-v1.2.3-win-x64.zip`, Linux `sha256sum -c SHA256SUMS`.
+   The packages are not code-signed, so Windows SmartScreen can say "unknown publisher".
+2. Server PC: extract the server zip and run `Install.cmd` as Administrator (options as in [A](#a-windows-pc-in-the-club-installer)).
+   The installer prints the one-time setup code and the enrollment token.
+3. Every gaming PC: extract the agent zip **and** the launcher zip into the same folder, then run as Administrator:
+   ```powershell
+   Install.cmd -ServerUrl "http://<server-ip-or-router>:5081" -EnrollmentToken "<token>" -KioskMode
+   ```
+4. For the Docker option the release has no files: CI publishes the images to `ghcr.io` for the same tags.
+
+Maintainers: `git tag v1.2.3 && git push origin v1.2.3` starts the workflow [Release](.github/workflows/release.yml) (windows-latest: server tests, admin UI build, the three publishes, zips, `SHA256SUMS`, then `gh release create`). *Actions → Release → Run workflow* is a dry run: the same files as a workflow artifact, no release. The same files on a Windows build PC: build the admin UI (`cd admin-ui; npm ci; npm run build`), then `pwsh scripts/release/build-release.ps1 -Version v1.2.3`.
 
 ## Run the server: two options
 
@@ -125,7 +152,7 @@ Both options serve the same API on the same URL, so the client install and the M
 
 ### A. Windows PC in the club (installer)
 
-1. On a Windows build PC with the .NET 8 SDK and Node.js 22, build the packages:
+1. Take the server zip of a [release](#install-from-a-release), or, on a Windows build PC with the .NET 8 SDK and Node.js 22, build the packages:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\installer\build-packages.ps1
    ```
@@ -292,7 +319,7 @@ Docker compose (`.env`): `POSTGRES_PASSWORD`, `CMS_ENROLLMENT_TOKEN`, `CMS_INITI
 | New database migration (PostgreSQL) | `dotnet ef migrations add <Name> --project Cms.Server` |
 | Agent and launcher | Windows with the .NET 8 SDK or Visual Studio 2022 |
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) builds and tests the server on Ubuntu, builds the agent and the launcher on Windows, builds the admin UI and both Docker images.
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) builds and tests the server on Ubuntu, builds the agent and the launcher on Windows, builds the admin UI and both Docker images. The release workflow ([.github/workflows/release.yml](.github/workflows/release.yml)) builds the Windows packages for a version tag (see [Install from a release](#install-from-a-release)).
 
 ## Documentation
 
