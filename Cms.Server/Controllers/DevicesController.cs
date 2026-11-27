@@ -164,7 +164,7 @@ public class DevicesController : ControllerBase
         // An unlock of a PC without an active session gives time without payment
         var withoutSession = type == CommandTypes.Unlock &&
                              !await _db.Sessions.AnyAsync(s => s.DeviceId == deviceId && s.Status == "active");
-        var text = type == CommandTypes.Message ? request.Payload?.ToString() : null;
+        var text = type == CommandTypes.Message ? MessageText(request.Payload) : null;
         await AuditAsync(withoutSession ? AuditActions.UnlockWithoutSession : AuditActions.DeviceCommand, deviceId,
             withoutSession ? $"Unlocked {device.Hostname} without an active session (no payment)" : $"Command {type} sent to {device.Hostname}",
             new { type, message = text is { Length: > 200 } ? text[..200] : text });
@@ -188,6 +188,13 @@ public class DevicesController : ControllerBase
         if (!ok) return NotFound();
         return Ok();
     }
+
+    private static string? MessageText(object? payload) => payload switch
+    {
+        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Object } o when o.TryGetProperty("text", out var t) => t.ToString(),
+        System.Text.Json.JsonElement e => e.ToString(),
+        _ => payload?.ToString()
+    };
 
     /// <summary>Approve a PC that registered without the enrollment token.</summary>
     [HttpPost("{deviceId:guid}/approve")]

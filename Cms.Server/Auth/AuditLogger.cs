@@ -53,7 +53,11 @@ public static class AuditActions
 /// </summary>
 public sealed class AuditLogger
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    // Readable details (Cyrillic, quotes); the admin UI shows them as plain text, never as HTML
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
     private readonly CmsDbContext _db;
     private readonly IHttpContextAccessor _http;
 

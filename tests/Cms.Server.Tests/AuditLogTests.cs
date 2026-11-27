@@ -65,6 +65,9 @@ public sealed class AuditLogTests : IClassFixture<CmsFactory>
         Assert.Equal(pc.ToString(), unlock.GetProperty("targetId").GetString());
 
         Assert.Contains("150", One(AuditActions.PlayerTopUp).GetProperty("summary").GetString());
+        Assert.Equal(HttpStatusCode.OK, (await cashier.PostAsJsonAsync($"/api/devices/{pc}/commands", new { type = "message", payload = new { text = "Ваш час спливає" } })).StatusCode);
+        var message = Assert.Single(await AuditAsync(owner, AuditActions.DeviceCommand));
+        Assert.Contains("\"message\":\"Ваш час спливає\"", message.GetProperty("detailsJson").GetString()); // readable, not \u escapes
         var adjust = One(AuditActions.PlayerBalanceAdjusted);
         Assert.Equal("Owner", adjust.GetProperty("actorRole").GetString());
         Assert.Contains("refund of a broken PC", adjust.GetProperty("summary").GetString());
