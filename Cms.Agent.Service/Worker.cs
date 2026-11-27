@@ -70,30 +70,41 @@ public partial class Worker : BackgroundService
         _config = config;
     }
 
+    /// <summary>
+    /// The agent never stops on a server, network or timeout error (Windows test 2026-11-27, defect 1): each loop runs
+    /// in AgentLoops.RunForeverAsync and starts again after an error; only the stop of the service ends them. Program.cs
+    /// also sets BackgroundServiceExceptionBehavior.Ignore, and the installer sets restart actions for the service.
+    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Directory.CreateDirectory(AgentDir);
-        EnsurePrivateDirectory();
-        EnsureInboxDirectory();
-        MigrateLegacyCredentials();
-        WriteTeardownSettings();
-        WriteAccountPoolSettings();
-        InitializeCounters();
-        LoadRuntimeState();
+        // Each start step logs its own error; a failed step never stops the agent (the PC stays locked)
+        Step("create the agent folder", () => Directory.CreateDirectory(AgentDir));
+        Step("create the private folder", EnsurePrivateDirectory);
+        Step("create the inbox", EnsureInboxDirectory);
+        Step("move old credentials", MigrateLegacyCredentials);
+        Step("write teardown.json", WriteTeardownSettings);
+        Step("write account-pool.json", WriteAccountPoolSettings);
+        Step("start the CPU counter", InitializeCounters);
+        Step("load state.json", LoadRuntimeState);
 
-        var localLoop = RunLocalStateLoopAsync(stoppingToken);
-        var pipe = RunLauncherPipeAsync(stoppingToken);
-        try
-        {
-            await RunServerLoopAsync(stoppingToken);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // service stops
-        }
-        await localLoop;
-        await pipe;
+        await Task.WhenAll(
+            Forever("local state loop", RunLocalStateLoopAsync, stoppingToken),
+            Forever("launcher pipe", RunLauncherPipeAsync, stoppingToken),
+            Forever("server loop", RunServerLoopAsync, stoppingToken));
     }
+
+    private void Step(string what, Action action)
+    {
+        try { action(); }
+        catch (Exception ex) { _logger.LogError(ex, "Agent start: could not {What}; the agent goes on", what); }
+    }
+
+    private Task Forever(string name, Func<CancellationToken, Task> loop, CancellationToken stoppingToken) =>
+        AgentLoops.RunForeverAsync(loop, ex =>
+        {
+            if (ex == null) _logger.LogWarning("The {Loop} ended; it starts again in 5 s", name);
+            else _logger.LogError(ex, "The {Loop} failed; it starts again in 5 s", name);
+        }, TimeSpan.FromSeconds(5), stoppingToken);
 
     // ──── LOCAL STATE FOR THE LAUNCHER ────
 
@@ -210,6 +221,23 @@ public partial class Worker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            try
+            {
+                await ConnectAndServeAsync(configuredUrl, explicitServerUrl, stoppingToken);
+            }
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+            {
+                // For example a server URL that is not a valid URI: logged, tried again (the PC stays locked)
+                _logger.LogError(ex, "Server connection failed; trying again in 10 s");
+                await AgentLoops.DelayAsync(TimeSpan.FromSeconds(10), stoppingToken);
+            }
+        }
+    }
+
+    /// <summary>Finds the server, registers, then sends heartbeats and polls commands until the server must be found again.</summary>
+    private async Task ConnectAndServeAsync(string? configuredUrl, bool explicitServerUrl, CancellationToken stoppingToken)
+    {
+        {
             var baseUrl = await ResolveServerUrlAsync(configuredUrl, stoppingToken);
             lock (_gate) _serverUrl = NormalizeBaseUrl(baseUrl);
             WriteLauncherConfig();
@@ -225,8 +253,8 @@ public partial class Worker : BackgroundService
             var registered = await EnsureRegisteredWithRetryAsync(http, stoppingToken, retryForever: explicitServerUrl, allowToken: explicitServerUrl);
             if (!registered)
             {
-                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
-                continue;
+                await AgentLoops.DelayAsync(TimeSpan.FromSeconds(2), stoppingToken);
+                return;
             }
 
             var rediscover = false;
@@ -261,18 +289,22 @@ public partial class Worker : BackgroundService
                     if (_enrollmentStatus == "approved")
                         await PollAndExecuteAsync(http, stoppingToken);
                 }
-                catch (HttpRequestException ex)
+                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
                 {
-                    _logger.LogWarning("Server connection failed: {Message}", ex.Message);
-                    rediscover = !explicitServerUrl;
-                }
-                catch (TaskCanceledException) when (!stoppingToken.IsCancellationRequested)
-                {
-                    _logger.LogWarning("Server request timed out");
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogError(ex, "Agent loop error");
+                    // Every error is logged and tried again; only the stop of the service ends this loop
+                    switch (AgentLoops.Classify(ex))
+                    {
+                        case AgentLoops.ErrorKind.Network:
+                            _logger.LogWarning("Server connection failed: {Message}", ex.Message);
+                            rediscover = !explicitServerUrl;
+                            break;
+                        case AgentLoops.ErrorKind.Timeout:
+                            _logger.LogWarning("Server request timed out");
+                            break;
+                        default:
+                            _logger.LogError(ex, "Agent loop error");
+                            break;
+                    }
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
@@ -387,56 +419,24 @@ public partial class Worker : BackgroundService
 
     // ──── REGISTRATION ────
 
-    private async Task<bool> EnsureRegisteredWithRetryAsync(HttpClient http, CancellationToken ct, bool retryForever, bool allowToken)
-    {
-        var delay = TimeSpan.FromSeconds(2);
-        var maxDelay = TimeSpan.FromMinutes(1);
-        var attempts = 0;
-
-        while (!ct.IsCancellationRequested)
+    /// <summary>
+    /// Registers until it works. A server that is off, a network that is down or a request that times out is logged and
+    /// tried again (AgentLoops.RetryAsync, tested with a server that never answers); it never ends the agent.
+    /// </summary>
+    private Task<bool> EnsureRegisteredWithRetryAsync(HttpClient http, CancellationToken ct, bool retryForever, bool allowToken) =>
+        AgentLoops.RetryAsync(token => EnsureRegisteredAsync(http, allowToken, token), (ex, delay) =>
         {
-            try
-            {
-                await EnsureRegisteredAsync(http, allowToken, ct);
-                return true;
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogWarning("Registration failed (server unreachable?), retrying in {Delay}s: {Message}",
-                    (int)delay.TotalSeconds, ex.Message);
-            }
-            catch (RegistrationRefusedException ex)
-            {
+            var next = delay > TimeSpan.Zero ? $"retrying in {(int)delay.TotalSeconds}s" : "the server is looked for again";
+            if (ex is RegistrationRefusedException)
                 _logger.LogError("Registration refused by the server: {Message}. Check the enrollment token " +
-                                 "(installer option -EnrollmentToken) or approve the PC in the admin UI. Retrying in {Delay}s",
-                    ex.Message, (int)delay.TotalSeconds);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Registration failed unexpectedly, retrying in {Delay}s", (int)delay.TotalSeconds);
-            }
-
-            attempts++;
-            if (!retryForever && attempts >= 3)
-            {
-                _logger.LogWarning("Registration failed after {Attempts} attempts; rediscovery will run again", attempts);
-                return false;
-            }
-
-            try
-            {
-                await Task.Delay(delay, ct);
-            }
-            catch (TaskCanceledException)
-            {
-                return false;
-            }
-
-            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, maxDelay.TotalSeconds));
-        }
-
-        return false;
-    }
+                                 "(installer option -EnrollmentToken) or approve the PC in the admin UI; {Next}", ex.Message, next);
+            else if (AgentLoops.Classify(ex) == AgentLoops.ErrorKind.Timeout)
+                _logger.LogWarning("Registration: the server did not answer in time; {Next}", next);
+            else if (AgentLoops.Classify(ex) == AgentLoops.ErrorKind.Network)
+                _logger.LogWarning("Registration failed (server unreachable?): {Message}; {Next}", ex.Message, next);
+            else
+                _logger.LogError(ex, "Registration failed unexpectedly; {Next}", next);
+        }, retryForever, maxAttempts: 3, TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(1), ct);
 
     /// <summary>
     /// With stored credentials: re-registers with the current key (updates OS and agent version).
@@ -914,10 +914,11 @@ public partial class Worker : BackgroundService
             if (result != ClubLogoSync.Result.Unchanged)
                 _logger.LogInformation("Club logo {Result}: {Hash}", result, sha256?[..12] ?? "-");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
+            // Also a timeout of the download: the heartbeat goes on with the old logo
             _logoRetryUtc = DateTimeOffset.UtcNow.AddSeconds(60);
-            _logger.LogWarning(ex, "Club logo {Hash}: failed; next try in 60 s", sha256?[..12]);
+            _logger.LogWarning("Club logo {Hash}: failed ({Error}); next try in 60 s", sha256?[..12], ex.GetType().Name + ": " + ex.Message);
         }
     }
 
@@ -1052,9 +1053,10 @@ public partial class Worker : BackgroundService
                 using var resp = await http.SendAsync(req, ct);
                 resp.EnsureSuccessStatusCode();
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                _logger.LogWarning(ex, "Failed to ACK command {CommandId}", cmd.Id);
+                // Also a timeout: the next commands are still run and acknowledged
+                _logger.LogWarning("Failed to ACK command {CommandId}: {Error}", cmd.Id, ex.GetType().Name + ": " + ex.Message);
             }
         }
     }

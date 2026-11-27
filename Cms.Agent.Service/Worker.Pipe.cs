@@ -28,18 +28,9 @@ public partial class Worker
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetNamedPipeClientProcessId(SafePipeHandle pipe, out uint clientProcessId);
 
-    private async Task RunLauncherPipeAsync(CancellationToken ct)
-    {
-        try
-        {
-            var server = new AgentPipeServer(CreatePipe, HandlePipeAsync, ex => _logger.LogDebug(ex, "Launcher pipe"), AuthorizePipeClient);
-            await server.RunAsync(ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "The launcher pipe stopped; player login on the lock screen is not possible");
-        }
-    }
+    /// <summary>An error of the pipe server goes to ExecuteAsync, which logs it and starts the pipe again after 5 s.</summary>
+    private Task RunLauncherPipeAsync(CancellationToken ct) =>
+        new AgentPipeServer(CreatePipe, HandlePipeAsync, ex => _logger.LogDebug(ex, "Launcher pipe"), AuthorizePipeClient).RunAsync(ct);
 
     /// <summary>
     /// Players (Users) may read and write the pipe but not create an instance of it, so nobody can take
