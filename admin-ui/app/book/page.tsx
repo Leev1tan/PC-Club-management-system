@@ -138,7 +138,7 @@ export default function BookPage() {
               <label className="form-label" htmlFor="book-name">{t.book.name}</label>
               <input id="book-name" className="form-input" autoComplete="given-name" maxLength={60} required value={name} onChange={e => setName(e.target.value)} />
               <label className="form-label" htmlFor="book-phone" style={{ marginTop: 10 }}>{t.book.phone}</label>
-              <input id="book-phone" className="form-input" type="tel" inputMode="tel" autoComplete="tel" maxLength={24} required placeholder="+380 67 123 45 67"
+              <input id="book-phone" className="form-input" type="tel" inputMode="tel" autoComplete="tel" maxLength={24} required placeholder="+380 __ ___ __ __"
                 value={phone} onChange={e => setPhone(e.target.value)} />
               <div className="book-hp" aria-hidden="true">
                 <label htmlFor="book-website">Website</label>
