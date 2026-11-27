@@ -89,10 +89,7 @@ public sealed class ShiftService
         {
             return ShiftErrors.AlreadyOpen; // opened by someone else at the same moment
         }
-        await AuditAsync(AuditActions.ShiftOpened, shift.Id,
-            $"Shift #{shift.Id} opened with a float of {openingFloat} {cur}" +
-            (previous?.CountedCash is { } left && left != openingFloat ? $" (shift #{previous.Id} closed with {left} {cur} counted)" : ""),
-            new { shift.OpeningFloat, note = shift.OpenNote, previousShift = previous?.Id, previousCountedCash = previous?.CountedCash });
+        await AuditAsync(AuditActions.ShiftOpened, shift.Id, OpenedSummary(shift, previous, cur), OpenedDetails(shift, previous));
         await tx.CommitAsync();
         return BillingResult<ShiftEntity>.Success(shift);
     }
@@ -113,27 +110,50 @@ public sealed class ShiftService
         if (shift.Status != ShiftStatuses.Open) return ShiftErrors.Closed;
         if (!isManager && (_actor?.Id == null || shift.OpenedById != _actor.Id)) return ShiftErrors.NotYours;
 
-        var now = _clock.UtcNow;
         var expected = await ExpectedCashAsync(_db, shift);
-        shift.Status = ShiftStatuses.Closed;
-        shift.ClosedUtc = now;
-        shift.ClosedById = _actor?.Id;
-        shift.ClosedByUsername = _actor?.Username;
-        shift.CountedCash = countedCash;
-        shift.ExpectedCash = expected;
-        shift.Variance = countedCash - expected;
-        shift.CloseNote = Clean(note);
         // Anchor: the last audit row and its hash, printed on the Z-report; a later rewrite of the chain shows
         await AuditChain.LockAsync(_db);
-        (shift.AuditHeadId, shift.AuditHeadHash) = await AuditChain.HeadAsync(_db);
+        ApplyClose(shift, countedCash, expected, note, _actor, _clock.UtcNow, await AuditChain.HeadAsync(_db));
         await _db.SaveChangesAsync();
 
-        await AuditAsync(AuditActions.ShiftClosed, shift.Id,
-            $"Shift #{shift.Id} closed: counted {countedCash} {cur}, expected {expected} {cur}, variance {shift.Variance:+0.00;-0.00;0.00} {cur}",
-            new { shift.OpeningFloat, countedCash, expectedCash = expected, variance = shift.Variance, note = shift.CloseNote, openedBy = shift.OpenedByUsername });
+        await AuditAsync(AuditActions.ShiftClosed, shift.Id, ClosedSummary(shift, cur), ClosedDetails(shift));
         await tx.CommitAsync();
         return BillingResult<ShiftEntity>.Success(shift);
     }
+
+    // The close and its audit texts, shared with the demo seed (Demo/DemoSeeder.Bar.cs), so a seeded
+    // shift is closed and anchored exactly like a real one.
+
+    /// <summary>
+    /// Closes the shift in memory: counted and expected cash, variance (counted - expected), who and when,
+    /// and the audit anchor = the last audit row and its hash BEFORE the shift.closed row.
+    /// </summary>
+    public static void ApplyClose(ShiftEntity shift, decimal countedCash, decimal expectedCash, string? note, StaffActor? actor,
+        DateTimeOffset now, (long? Id, string? Hash) auditHead)
+    {
+        shift.Status = ShiftStatuses.Closed;
+        shift.ClosedUtc = now;
+        shift.ClosedById = actor?.Id;
+        shift.ClosedByUsername = actor?.Username;
+        shift.CountedCash = countedCash;
+        shift.ExpectedCash = expectedCash;
+        shift.Variance = countedCash - expectedCash;
+        shift.CloseNote = Clean(note);
+        (shift.AuditHeadId, shift.AuditHeadHash) = auditHead;
+    }
+
+    public static string OpenedSummary(ShiftEntity shift, ShiftEntity? previous, string cur) =>
+        $"Shift #{shift.Id} opened with a float of {shift.OpeningFloat} {cur}" +
+        (previous?.CountedCash is { } left && left != shift.OpeningFloat ? $" (shift #{previous.Id} closed with {left} {cur} counted)" : "");
+
+    public static object OpenedDetails(ShiftEntity shift, ShiftEntity? previous) =>
+        new { shift.OpeningFloat, note = shift.OpenNote, previousShift = previous?.Id, previousCountedCash = previous?.CountedCash };
+
+    public static string ClosedSummary(ShiftEntity shift, string cur) =>
+        $"Shift #{shift.Id} closed: counted {shift.CountedCash} {cur}, expected {shift.ExpectedCash} {cur}, variance {shift.Variance:+0.00;-0.00;0.00} {cur}";
+
+    public static object ClosedDetails(ShiftEntity shift) =>
+        new { shift.OpeningFloat, countedCash = shift.CountedCash, expectedCash = shift.ExpectedCash, variance = shift.Variance, note = shift.CloseNote, openedBy = shift.OpenedByUsername };
 
     /// <summary>Cash out of the drawer during the open shift (Owner, Manager), with a reason.</summary>
     public async Task<BillingResult<LedgerEntryEntity>> PayoutAsync(long id, decimal amount, string? reason)
