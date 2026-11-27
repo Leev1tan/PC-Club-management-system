@@ -24,8 +24,13 @@ public static class PipeOps
     /// lock screen may ask (the agent checks the program of the pipe client).
     /// </summary>
     public const string Account = "account";
+    /// <summary>
+    /// The lock screen reports its state every 5 s (Locked, StaffUnlock). The agent answers at once (no server call) and
+    /// logs a lock screen that stops to report while the PC must be locked (Cms.Client.LockScreenWatch).
+    /// </summary>
+    public const string Status = "status";
 
-    public static readonly IReadOnlyList<string> All = new[] { Offers, Login, Logout, Menu, Order, OrderCancel, Account };
+    public static readonly IReadOnlyList<string> All = new[] { Offers, Login, Logout, Menu, Order, OrderCancel, Account, Status };
 }
 
 /// <summary>
@@ -37,9 +42,12 @@ public sealed record AccountLease(long LeaseId, string Platform, string LoginMas
 /// <summary>A line of a bar order (product and quantity).</summary>
 public sealed record PipeOrderItem(Guid ProductId, int Quantity);
 
-/// <summary>Items and Payment (balance or desk): a bar order. GameId: the game that needs a club account.</summary>
+/// <summary>
+/// Items and Payment (balance or desk): a bar order. GameId: the game that needs a club account. Locked and StaffUnlock:
+/// the state of the lock screen in a "status" report.
+/// </summary>
 public sealed record PipeRequest(string Op, string? Username = null, string? Secret = null, string? Offer = null, int? Minutes = null, Guid? PackageId = null,
-    IReadOnlyList<PipeOrderItem>? Items = null, string? Payment = null, Guid? GameId = null);
+    IReadOnlyList<PipeOrderItem>? Items = null, string? Payment = null, Guid? GameId = null, bool? Locked = null, bool? StaffUnlock = null);
 
 /// <summary>Status: the HTTP status of the server, or 503 when the agent or the server cannot answer. Body: the JSON of the server.</summary>
 public sealed record PipeResponse(int Status, string? Body)

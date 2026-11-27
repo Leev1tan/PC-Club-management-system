@@ -76,7 +76,8 @@ public partial class Worker
     /// </summary>
     private bool AuthorizePipeClient(NamedPipeServerStream stream, PipeRequest req)
     {
-        if (req.Op != PipeOps.Account) return true;
+        // A club account, and the status of the lock screen (a fake status of a player's program must not hide a dead lock screen)
+        if (req.Op is not (PipeOps.Account or PipeOps.Status)) return true;
         var launcher = _config["AccountPool:LauncherPath"];
         if (string.IsNullOrWhiteSpace(launcher)) launcher = DefaultLauncherPath;
         var consoleOnly = _config.GetValue("AccountPool:ConsoleSessionOnly", true);
@@ -86,7 +87,9 @@ public partial class Worker
         var path = pid is { } id ? ReadClientImagePath(stream, id) : null;
         var console = WTSGetActiveConsoleSessionId();
         var verdict = PipeClientCheck.Decide(path, launcher, session, console, consoleOnly);
-        if (verdict != PipeClientVerdict.Trusted)
+        if (verdict != PipeClientVerdict.Trusted && req.Op == PipeOps.Status)
+            _logger.LogDebug("Lock screen pipe: a status report from {Path} (session {Session}) ignored: {Verdict}", path ?? "?", session?.ToString() ?? "?", verdict);
+        else if (verdict != PipeClientVerdict.Trusted)
             _logger.LogWarning("Lock screen pipe: a club account request from {Path} (process {Pid}, session {Session}, console {Console}) refused: {Verdict} " +
                                "(only {Launcher} in the console session may ask)", path ?? "?", pid?.ToString() ?? "?", session?.ToString() ?? "?", console, verdict, launcher);
         return verdict == PipeClientVerdict.Trusted;
@@ -161,6 +164,12 @@ public partial class Worker
 
     private async Task<PipeResponse> HandlePipeAsync(PipeRequest req, CancellationToken ct)
     {
+        if (req.Op == PipeOps.Status)
+        {
+            // Answered here, also while the server is down
+            lock (_gate) _screen.Report(DateTimeOffset.UtcNow, req.Locked ?? true, req.StaffUnlock ?? false);
+            return new PipeResponse(200, null);
+        }
         string? serverUrl;
         lock (_gate) serverUrl = _serverUrl;
         if (_deviceId == Guid.Empty || string.IsNullOrWhiteSpace(_deviceKey) || _enrollmentStatus != "approved" || string.IsNullOrWhiteSpace(serverUrl))

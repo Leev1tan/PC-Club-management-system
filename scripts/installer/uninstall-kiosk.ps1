@@ -244,6 +244,12 @@ foreach ($cfg in $kioskConfigs) {
     }
 }
 
+# Remove the scheduled task that starts the watchdog of the lock screen (install-client.ps1 -KioskMode)
+if (Get-ScheduledTask -TaskName 'ClubLauncherWatchdog' -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName 'ClubLauncherWatchdog' -Confirm:$false
+    Write-Host "   Removed the scheduled task ClubLauncherWatchdog" -ForegroundColor Gray
+}
+
 # Remove launcher startup shortcut
 $startupFolder = [Environment]::GetFolderPath('CommonStartup')
 $shortcutPath = Join-Path $startupFolder "ClubLauncher.lnk"

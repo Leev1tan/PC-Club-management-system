@@ -264,6 +264,8 @@ function Dismount-KioskHive($Hive) {
 }
 
 # The shell and the lockdown policies of the kiosk user, in its own hive only (never machine-wide).
+# The shell is the watchdog of the lock screen ("Cms.Launcher.exe --watchdog", no window): it starts the lock screen and
+# starts it again within about a second when it ends (a player killed it, or it failed).
 function Set-KioskUserPolicies([string]$Root, [string]$LauncherExe) {
     $winlogon = "$Root\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
     $system = "$Root\Software\Microsoft\Windows\CurrentVersion\Policies\System"
@@ -271,9 +273,30 @@ function Set-KioskUserPolicies([string]$Root, [string]$LauncherExe) {
     foreach ($key in @($winlogon, $system, $explorer)) {
         if (!(Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
     }
-    New-ItemProperty -Path $winlogon -Name 'Shell' -Value "`"$LauncherExe`"" -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $winlogon -Name 'Shell' -Value "`"$LauncherExe`" --watchdog" -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $system -Name 'DisableTaskMgr' -Value 1 -PropertyType DWord -Force | Out-Null
     New-ItemProperty -Path $explorer -Name 'DisableContextMenusInStart' -Value 1 -PropertyType DWord -Force | Out-Null
+}
+
+# The third guard of the lock screen: a scheduled task of the kiosk user starts "Cms.Launcher.exe --watchdog" at its
+# sign-in and every minute. The watchdog ends at once while one runs in the session; when a player kills the watchdog
+# and the lock screen together, the task starts them again within a minute. Logon type Interactive: no password is
+# stored, and the task runs only while the user is signed in. A failure is a warning (the shell watchdog still works).
+function Register-LockScreenTask([string]$UserName, [string]$LauncherExe) {
+    try {
+        $user = "$env:COMPUTERNAME\$UserName"
+        $action = New-ScheduledTaskAction -Execute $LauncherExe -Argument '--watchdog' -WorkingDirectory (Split-Path -Parent $LauncherExe)
+        $atLogon = New-ScheduledTaskTrigger -AtLogOn -User $user
+        $everyMinute = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Minutes 1)
+        $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+            -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
+        Register-ScheduledTask -TaskName 'ClubLauncherWatchdog' -Action $action -Trigger @($atLogon, $everyMinute) `
+            -Principal $principal -Settings $settings -Force | Out-Null
+        Write-Host "   Scheduled task ClubLauncherWatchdog: starts the lock screen watchdog of '$UserName' every minute" -ForegroundColor Gray
+    } catch {
+        Write-Warning "Could not register the scheduled task ClubLauncherWatchdog: $($_.Exception.Message). The shell watchdog still restarts the lock screen."
+    }
 }
 
 # Restart actions of a service: when it ends with an error, Windows starts it again after 5 s, 5 s, then 30 s (the
@@ -546,7 +569,8 @@ if ($KioskMode) {
         Dismount-KioskHive $hive
     }
     if ($policyError) { Stop-Install "Could not write the shell and the policies of '$kioskUser': $policyError" }
-    Write-Host "   Shell set to Launcher ('$kioskUser' only)" -ForegroundColor Gray
+    Write-Host "   Shell set to the lock screen watchdog ('$kioskUser' only)" -ForegroundColor Gray
+    Register-LockScreenTask -UserName $kioskUser -LauncherExe $launcherExe
     Write-Host "   Task Manager and the Start context menus disabled ('$kioskUser' only)" -ForegroundColor Gray
 
     # 7e: Undo the machine-wide settings of older installers (they also locked out ClubAdmin)
@@ -609,7 +633,7 @@ if ($KioskMode) {
     Write-Host ""
     Write-Host "KIOSK MODE ENABLED:" -ForegroundColor Magenta
     Write-Host "  - User: ClubUser (auto-login on boot; random password, new on every install run)" -ForegroundColor White
-    Write-Host "  - Shell: Cms.Launcher.exe (replaces explorer for ClubUser only)" -ForegroundColor White
+    Write-Host "  - Shell: Cms.Launcher.exe --watchdog (replaces explorer for ClubUser only; restarts the lock screen)" -ForegroundColor White
     Write-Host "  - Staff unlock: Ctrl+Shift+U + the staff PIN (set it in the admin UI, Settings)" -ForegroundColor White
     Write-Host "  - The lock screen stays locked when the agent stops (fail closed)" -ForegroundColor White
     if ($adminReady) {

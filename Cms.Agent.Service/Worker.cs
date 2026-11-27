@@ -45,6 +45,8 @@ public partial class Worker : BackgroundService
     private ClientReservationInfo? _reservation;
     private bool? _lastLocked;
     private DateTimeOffset _lockChangedUtc = DateTimeOffset.UtcNow;
+    /// <summary>The status reports of the lock screen (pipe "status" every 5 s): a silent lock screen is logged.</summary>
+    private readonly LockScreenWatch _screen = new(DateTimeOffset.UtcNow);
     private string? _serverUrl;
 
     // Registration
@@ -133,10 +135,12 @@ public partial class Worker : BackgroundService
         try
         {
             AgentState state;
+            LockScreenEvent? screenEvent;
             lock (_gate)
             {
                 var now = DateTimeOffset.UtcNow;
                 var decision = _lock.Evaluate(now);
+                screenEvent = _screen.Check(now, decision.Locked);
                 if (_lastLocked != decision.Locked)
                 {
                     _lastLocked = decision.Locked;
@@ -157,10 +161,27 @@ public partial class Worker : BackgroundService
 
             WriteAtomic(Path.Combine(AgentDir, AgentFiles.StateFile), JsonSerializer.Serialize(state, JsonOptions));
             WriteAtomic(Path.Combine(AgentDir, AgentFiles.HeartbeatFile), DateTimeOffset.UtcNow.ToString("O"));
+            LogLockScreenEvent(screenEvent);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to write the local state");
+        }
+    }
+
+    private void LogLockScreenEvent(LockScreenEvent? screenEvent)
+    {
+        if (screenEvent == LockScreenEvent.SilentWhileLocked)
+        {
+            DateTimeOffset? last;
+            lock (_gate) last = _screen.LastReportUtc;
+            _logger.LogWarning("The lock screen does not answer ({Since}) while this PC must be locked: the screen may be empty " +
+                               "or open. The watchdog of the kiosk session starts it again; if it does not come back, restart the PC",
+                last is { } l ? $"last status {(int)(DateTimeOffset.UtcNow - l).TotalSeconds} s ago" : "no status since the agent start");
+        }
+        else if (screenEvent == LockScreenEvent.Back)
+        {
+            _logger.LogInformation("The lock screen answers again");
         }
     }
 
