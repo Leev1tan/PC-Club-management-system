@@ -29,12 +29,21 @@ a console (as SYSTEM: RMM tools, Intune) asks nothing and creates no ClubAdmin; 
 PowerShell instead:
   .\install-client.ps1 -ServerUrl "http://<server>:5081" -EnrollmentToken "<token>" -KioskMode -AdminPassword (Read-Host -AsSecureString)
 
-Update: extract the new zips into a new folder and run Install.cmd again with the same options.
+Update: extract the new zips into a new folder and run Install.cmd again with the same options. Do it
+when no session runs on the PC. The installer first copies the new files to C:\ClubAgent.new and
+C:\ClubLauncher.new and backs up the old ones (C:\ClubAgent.old, C:\ClubLauncher.old); a failure there
+changes nothing. Then it stops the agent and the lock screen, copies the files and starts the agent.
+If the copy or the start fails, it restores the old version, starts it again and ends with exit code 1
+("UPDATE FAILED ... The old version is restored and runs again"). On success it signs out ClubUser; the
+automatic sign-in starts the new lock screen ("RESULT: OK"). No restart of the PC is needed.
+The agent log is C:\ProgramData\ClubAgent\logs\agent.log (Administrators only).
 Remove the kiosk shell: uninstall-kiosk.ps1. Guide: docs/ClubDeployment.md in the source repository.
 
 Українською: розпакуйте цей архів і архів launcher в одну папку та запустіть від імені адміністратора
 Install.cmd -ServerUrl "http://<сервер>:5081" -EnrollmentToken "<токен>" -KioskMode.
 Пароль облікового запису ClubUser випадковий і новий після кожного запуску інсталятора; щоб скинути
 його, запустіть Install.cmd ще раз з тими самими параметрами.
+Оновлення: запустіть Install.cmd нової версії з тими самими параметрами, коли на ПК немає сесії. Якщо
+копіювання або запуск не вдалися, інсталятор повертає стару версію і завершується з кодом 1.
 
 License: AGPL-3.0-or-later (LICENSE). Author and contact: NOTICE.md.

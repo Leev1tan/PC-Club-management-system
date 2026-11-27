@@ -71,7 +71,14 @@ self-contained (no .NET needed on the PCs) and not code-signed.
 
    This is the same installer as `ClubClientSetup.exe`, see [Client Install](#client-install).
 4. Update: extract the zips of the new version into a new folder and run `Install.cmd` again with
-   the same options. The server keeps its data, enrollment token and time zone.
+   the same options. The server keeps its data, enrollment token and time zone. On a gaming PC, update
+   when no session runs. The client installer prepares first (new files in `C:\ClubAgent.new` and
+   `C:\ClubLauncher.new`, a backup in `C:\ClubAgent.old` and `C:\ClubLauncher.old`), then stops the agent
+   and the lock screen (also its watchdog), copies and starts the agent. If the copy or the start fails, it
+   restores the old version, starts it again and ends with exit code 1. On success it signs out ClubUser,
+   and the automatic sign-in starts the new lock screen. The last line says `RESULT: OK` or
+   `RESULT: FAILED`. The installer keeps the `Teardown` and `AccountPool` settings of
+   `C:\ClubAgent\appsettings.json`, and on a registered PC it does not store the enrollment token.
 
 Option B (Docker) does not use these files; CI publishes the images to `ghcr.io` for the same tags.
 

@@ -38,9 +38,13 @@ function Test-IsAdmin {
 }
 
 # Stops the install with a clear message and exit code 1 (RMM tools and Intune report the exit code).
+# A lock screen that this run stopped must not stay away: the watchdog task is switched on again and the sessions of the
+# kiosk user are signed out, so the automatic sign-in starts the lock screen (Resume-LockScreens).
 function Stop-Install([string]$Message) {
+    if (Get-Command Resume-LockScreens -ErrorAction SilentlyContinue) { Resume-LockScreens }
     Write-Host ""
     Write-Host "ERROR: $Message" -ForegroundColor Red
+    Write-Host "RESULT: FAILED (exit code 1)" -ForegroundColor Red
     exit 1
 }
 
@@ -317,6 +321,148 @@ function Remove-MachineValue([string]$Path, [string]$Name, [string]$What) {
     }
 }
 
+# --- Update helpers (Windows test 2026-11-27, defect 4: an update stopped the agent, then could not replace the
+# --- lock screen of the signed-in ClubUser and left the PC out of service). The order is: prepare everything,
+# --- stop the agent and the lock screen, copy, start; on a failure the old version is restored and started again.
+
+# Copies a folder with robocopy: every file (also unchanged ones), 3 tries 2 s apart for a file that is held for a
+# moment (antivirus). -Mirror also removes files that the source does not have (used to restore the old version).
+# True when every file was copied (robocopy exit code below 8).
+function Copy-Folder([string]$From, [string]$To, [switch]$Mirror) {
+    $ErrorActionPreference = 'Continue'
+    $mode = '/E'
+    if ($Mirror) { $mode = '/MIR' }
+    & robocopy.exe $From $To $mode /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+    return ($LASTEXITCODE -lt 8)
+}
+
+# A new empty folder that only SYSTEM and Administrators may change (the agent and the players may read it): the staged
+# new version and the backup of the old one, so a player cannot plant a program there.
+function New-ProtectedFolder([string]$Path) {
+    if (Test-Path $Path) { Remove-Item -Path $Path -Recurse -Force }
+    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    icacls $Path /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)RX" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not set the permissions of $Path" }
+    if (Get-ChildItem -Path $Path -Force) { throw "$Path is not empty after it was created" }
+}
+
+# The agent settings: the shipped appsettings.json with the server URL of this run, and the parts that an administrator
+# may have changed on this PC (Teardown, AccountPool) kept from the earlier install.
+function Set-AgentConfig([string]$Path, $PreviousConfig) {
+    try {
+        $config = [IO.File]::ReadAllText($Path) | ConvertFrom-Json
+    } catch {
+        $config = [pscustomobject]@{ Logging = @{ LogLevel = @{ Default = "Information"; "Microsoft.Hosting.Lifetime" = "Information" } } }
+    }
+    $config | Add-Member -NotePropertyName Server -NotePropertyValue @{ BaseUrl = $ServerUrl } -Force  # Empty = auto-discovery
+    foreach ($section in @('Teardown', 'AccountPool')) {
+        if ($PreviousConfig -and $PreviousConfig.$section) {
+            $config | Add-Member -NotePropertyName $section -NotePropertyValue $PreviousConfig.$section -Force
+            Write-Host "   Kept the $section settings of the earlier install" -ForegroundColor Gray
+        }
+    }
+    $config | ConvertTo-Json -Depth 8 | Set-Content -Path $Path -Encoding UTF8
+}
+
+# Stops the agent service. Its start type is "disabled" during the update, so its restart actions cannot start the old
+# program again while its files are replaced. A service that does not stop within 30 s is ended.
+function Stop-Agent([string]$Name) {
+    $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if (-not $service) { return }
+    sc.exe config $Name start= disabled | Out-Null
+    if ($service.Status -ne 'Stopped') {
+        try { Stop-Service -Name $Name -Force -ErrorAction Stop } catch { Write-Warning "Stop-Service ${Name}: $($_.Exception.Message)" }
+    }
+    for ($i = 0; $i -lt 30; $i++) {
+        if ((Get-Service -Name $Name).Status -eq 'Stopped') { return }
+        Start-Sleep -Seconds 1
+    }
+    $processId = (Get-CimInstance Win32_Service -Filter "Name='$Name'").ProcessId
+    if ($processId) {
+        Write-Warning "The service $Name did not stop within 30 s; ending its process $processId"
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+}
+
+# Ends every process of the lock screen program in the launcher folder (the lock screen and its watchdog, in all
+# sessions), so its files can be replaced. Several rounds: a watchdog may start a lock screen again for a moment.
+# Returns the sessions of the kiosk user that had a lock screen: they are signed out at the end, and the automatic
+# sign-in of ClubUser starts the new lock screen.
+function Stop-LockScreens([string]$Folder, [string]$KioskUser) {
+    $sessions = @{}
+    $prefix = ($Folder -replace '/', '\').TrimEnd('\') + '\'
+    for ($round = 0; $round -lt 10; $round++) {
+        $found = @(Get-CimInstance Win32_Process -Filter "Name='Cms.Launcher.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })
+        if ($found.Count -eq 0) { return @($sessions.Keys) }
+        foreach ($p in $found) {
+            try {
+                $owner = Invoke-CimMethod -InputObject $p -MethodName GetOwner -ErrorAction Stop
+                if ($owner.User -eq $KioskUser) { $sessions[[int]$p.SessionId] = $true }
+            } catch { }
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 700
+    }
+    Write-Warning "A lock screen process of $Folder still runs; the copy may fail (then the old version is restored)"
+    return @($sessions.Keys)
+}
+
+# Signs out the given Windows sessions (the kiosk user). With ForceAutoLogon, ClubUser signs in again at once.
+function Invoke-SessionLogoff([object[]]$Sessions) {
+    foreach ($id in $Sessions) {
+        $ErrorActionPreference = 'Continue'
+        & logoff.exe $id 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "   Signed out the session $id of ClubUser: the automatic sign-in starts the lock screen" -ForegroundColor Gray
+        } else {
+            Write-Warning "Could not sign out the session $id (logoff.exe exit code $LASTEXITCODE). Restart the PC."
+        }
+    }
+}
+
+# Waits until the service runs. False after the given seconds.
+function Wait-ServiceRunning([string]$Name, [int]$Seconds) {
+    for ($i = 0; $i -lt $Seconds; $i++) {
+        $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
+        if ($service -and $service.Status -eq 'Running') { return $true }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
+# The lock screens that this run stopped come back: the watchdog task is on again, and the sessions of the kiosk user
+# are signed out (the automatic sign-in starts the lock screen). Runs once, at the end or on a failure.
+function Resume-LockScreens {
+    if ($script:watchTask) {
+        $script:watchTask | Enable-ScheduledTask -ErrorAction SilentlyContinue | Out-Null
+        $script:watchTask = $null
+    }
+    if ($script:stoppedSessions.Count -gt 0) {
+        $sessions = $script:stoppedSessions
+        $script:stoppedSessions = @()
+        Invoke-SessionLogoff $sessions
+    }
+}
+
+# After a failed copy or start: the files of the old version back, the old agent started, and the lock screens back
+# (Resume-LockScreens). The PC is never left without the agent. True when the old version runs again.
+function Restore-OldVersion {
+    Write-Host "   Restoring the old version..." -ForegroundColor Yellow
+    $restored = $true
+    if ($script:agentBackupReady) { if (-not (Copy-Folder $agentBackup $AgentPath -Mirror)) { $restored = $false } }
+    if ($script:launcherBackupReady) { if (-not (Copy-Folder $launcherBackup $LauncherPath -Mirror)) { $restored = $false } }
+    if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+        sc.exe config $serviceName start= auto | Out-Null
+        sc.exe start $serviceName | Out-Null
+        if (-not (Wait-ServiceRunning $serviceName 30)) { $restored = $false }
+    }
+    Resume-LockScreens
+    if ($restored) { Write-Host "   The old version runs again" -ForegroundColor Yellow }
+    return $restored
+}
+
 if (-not (Test-IsAdmin)) {
     Write-Error "Please run this script as Administrator."
     exit 1
@@ -327,57 +473,73 @@ Write-Host "  Club Management System - Client Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Project by Volodymyr Shabat" -ForegroundColor DarkGray
 Write-Host ""
+# Last safety net: an unexpected error ends the install with exit code 1, and a lock screen that this run stopped comes
+# back (Stop-Install). Steps 3 and 4 have their own handler that restores the old version first.
+trap {
+    Stop-Install "Unexpected error at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
+}
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-
-# Step 1: Create directories
-Write-Host "[1/8] Creating installation directories..." -ForegroundColor Yellow
-foreach ($path in @($AgentPath, $LauncherPath)) {
-    if (!(Test-Path $path)) {
-        New-Item -ItemType Directory -Path $path -Force | Out-Null
-    }
-}
-
-# Step 2: Copy agent files
-Write-Host "[2/8] Installing Agent Service..." -ForegroundColor Yellow
 $agentFiles = Join-Path $scriptDir "agent"
+$launcherFiles = Join-Path $scriptDir "launcher"
+$serviceName = "ClubAgent"
+$kioskUserName = "ClubUser"
+$exePath = Join-Path $AgentPath "Cms.Agent.Service.exe"
+$launcherExe = Join-Path $LauncherPath "Cms.Launcher.exe"
+$agentStage = "$AgentPath.new"
+$launcherStage = "$LauncherPath.new"
+$agentBackup = "$AgentPath.old"
+$launcherBackup = "$LauncherPath.old"
+$script:agentBackupReady = $false
+$script:launcherBackupReady = $false
+$script:watchTask = $null
+$script:stoppedSessions = @()
+$signedOut = 0
 
-if (Test-Path $agentFiles) {
-    # Stop existing service first
-    try { Stop-Service -Name "ClubAgent" -Force -ErrorAction SilentlyContinue } catch {}
-    Start-Sleep -Seconds 1
-
-    # Keep the session teardown settings of an earlier install (an administrator may have changed them)
-    $previousTeardown = $null
-    $installedConfig = Join-Path $AgentPath "appsettings.json"
-    if (Test-Path $installedConfig) {
-        try { $previousTeardown = (Get-Content $installedConfig -Raw | ConvertFrom-Json).Teardown } catch {}
-    }
-
-    Copy-Item -Path "$agentFiles\*" -Destination $AgentPath -Recurse -Force
-} else {
-    Write-Error "Agent files not found at: $agentFiles"
-    exit 1
+# Step 1: Check the package and prepare everything while the old version still runs: the new files are staged in
+# C:\ClubAgent.new and C:\ClubLauncher.new (with the merged agent settings), the old files are copied to
+# C:\ClubAgent.old and C:\ClubLauncher.old. A failure here changes nothing on the PC.
+Write-Host "[1/8] Checking the package and preparing the files..." -ForegroundColor Yellow
+if (!(Test-Path (Join-Path $agentFiles "Cms.Agent.Service.exe"))) {
+    Stop-Install "Agent files not found at: $agentFiles. Extract the agent zip and the launcher zip into the same folder. Nothing was changed."
 }
-
-# Step 3: Configure agent
-Write-Host "[3/8] Configuring Agent..." -ForegroundColor Yellow
-$agentConfig = Join-Path $AgentPath "appsettings.json"
-
-# The shipped appsettings.json has the session teardown defaults ("Teardown": processes to close at the
-# end of a session, cleanup OFF); only the server URL is set here, and an earlier "Teardown" is kept.
+$haveLauncher = Test-Path (Join-Path $launcherFiles "Cms.Launcher.exe")
+if (-not $haveLauncher) {
+    Write-Warning "Launcher files not found at: $launcherFiles. The lock screen is not installed or updated."
+}
+$isUpdate = Test-Path $exePath
+$previousConfig = $null
+if (Test-Path (Join-Path $AgentPath "appsettings.json")) {
+    try { $previousConfig = [IO.File]::ReadAllText((Join-Path $AgentPath "appsettings.json")) | ConvertFrom-Json } catch { }
+}
 try {
-    $config = Get-Content $agentConfig -Raw | ConvertFrom-Json
+    foreach ($path in @($AgentPath, $LauncherPath)) {
+        if (!(Test-Path $path)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+    }
+    New-ProtectedFolder $agentStage
+    if (-not (Copy-Folder $agentFiles $agentStage)) { throw "Could not copy $agentFiles to $agentStage" }
+    Set-AgentConfig -Path (Join-Path $agentStage "appsettings.json") -PreviousConfig $previousConfig
+    if ($haveLauncher) {
+        New-ProtectedFolder $launcherStage
+        if (-not (Copy-Folder $launcherFiles $launcherStage)) { throw "Could not copy $launcherFiles to $launcherStage" }
+    }
+    if ($isUpdate) {
+        New-ProtectedFolder $agentBackup
+        if (-not (Copy-Folder $AgentPath $agentBackup)) { throw "Could not back up $AgentPath to $agentBackup" }
+        $script:agentBackupReady = $true
+    }
+    if (Test-Path $launcherExe) {
+        New-ProtectedFolder $launcherBackup
+        if (-not (Copy-Folder $LauncherPath $launcherBackup)) { throw "Could not back up $LauncherPath to $launcherBackup" }
+        $script:launcherBackupReady = $true
+    }
 } catch {
-    $config = [pscustomobject]@{ Logging = @{ LogLevel = @{ Default = "Information"; "Microsoft.Hosting.Lifetime" = "Information" } } }
+    Stop-Install "The install did not start: $($_.Exception.Message). Nothing was changed; the PC works as before."
 }
-$config | Add-Member -NotePropertyName Server -NotePropertyValue @{ BaseUrl = $ServerUrl } -Force  # Empty = auto-discovery
-if ($previousTeardown) {
-    $config | Add-Member -NotePropertyName Teardown -NotePropertyValue $previousTeardown -Force
-    Write-Host "   Kept the session teardown settings of the earlier install" -ForegroundColor Gray
-}
-$config | ConvertTo-Json -Depth 8 | Set-Content -Path $agentConfig -Encoding UTF8
+if ($isUpdate) { Write-Host "   Update: the old version is backed up in $agentBackup and $launcherBackup" -ForegroundColor Gray }
 
+# Step 2: The data folder of the agent (permissions, event source, server URL for the lock screen, enrollment token)
+Write-Host "[2/8] Configuring the agent data folder..." -ForegroundColor Yellow
 $programDataConfigDir = Join-Path $env:ProgramData "ClubAgent"
 $privateDir = Join-Path $programDataConfigDir "private"
 foreach ($dir in @($programDataConfigDir, $privateDir)) {
@@ -460,14 +622,34 @@ if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
     Write-Host "   Server URL: $ServerUrl" -ForegroundColor Gray
 }
 
-# Step 4: Copy launcher files
-Write-Host "[4/8] Installing Launcher..." -ForegroundColor Yellow
-$launcherFiles = Join-Path $scriptDir "launcher"
+# Steps 3 and 4 run with the agent stopped: any error there restores the old version and starts it again.
+$copyError = $null
+try {
+    # Step 3: Stop the agent and the lock screen (its watchdog too: the scheduled task is off during the copy)
+    Write-Host "[3/8] Stopping the agent and the lock screen..." -ForegroundColor Yellow
+    $script:watchTask = Get-ScheduledTask -TaskName 'ClubLauncherWatchdog' -ErrorAction SilentlyContinue
+    if ($script:watchTask) { $script:watchTask | Disable-ScheduledTask -ErrorAction SilentlyContinue | Out-Null }
+    Stop-Agent $serviceName
+    $script:stoppedSessions = @(Stop-LockScreens -Folder $LauncherPath -KioskUser $kioskUserName)
+    $signedOut = $script:stoppedSessions.Count
+    if ($signedOut -gt 0) {
+        Write-Host "   Lock screen stopped in the session(s) $($script:stoppedSessions -join ', ') of $kioskUserName (signed out at the end)" -ForegroundColor Gray
+    }
 
-if (Test-Path $launcherFiles) {
-    Copy-Item -Path "$launcherFiles\*" -Destination $LauncherPath -Recurse -Force
-} else {
-    Write-Warning "Launcher files not found at: $launcherFiles. Skipping launcher installation."
+    # Step 4: Copy the new version
+    Write-Host "[4/8] Copying the new version..." -ForegroundColor Yellow
+    if (-not (Copy-Folder $agentStage $AgentPath)) {
+        $copyError = "Could not copy the agent files to $AgentPath"
+    } elseif ($haveLauncher -and -not (Copy-Folder $launcherStage $LauncherPath)) {
+        $copyError = "Could not copy the lock screen files to $LauncherPath (a file is in use?)"
+    }
+} catch {
+    $copyError = "Unexpected error: $($_.Exception.Message)"
+}
+if ($copyError) {
+    $restored = Restore-OldVersion
+    if ($restored -and $isUpdate) { Stop-Install "UPDATE FAILED: $copyError. The old version is restored and runs again; nothing else was changed." }
+    Stop-Install "INSTALL FAILED: $copyError. Restore the old files from $agentBackup and $launcherBackup by hand, or run the installer again."
 }
 
 # Program folders: C:\ClubAgent and C:\ClubLauncher inherit "Authenticated Users: Modify" from C:\, so a
@@ -478,23 +660,37 @@ foreach ($path in @($AgentPath, $LauncherPath)) {
     if ($LASTEXITCODE -ne 0) { Write-Warning "Could not restrict the permissions of $path" }
 }
 
-# Step 5: Install Agent Windows Service
-Write-Host "[5/8] Installing Agent Windows Service..." -ForegroundColor Yellow
-$serviceName = "ClubAgent"
-$exePath = Join-Path $AgentPath "Cms.Agent.Service.exe"
-
-try { sc.exe delete $serviceName 2>$null | Out-Null } catch {}
-Start-Sleep -Seconds 1
-
+# Step 5: The agent service (LocalService), its restart actions, and its start. An existing service with the right
+# account is changed in place (a deleted service can stay "marked for deletion" and block a new one).
+Write-Host "[5/8] Installing and starting the agent service..." -ForegroundColor Yellow
 $binPath = "`"$exePath`""
-sc.exe create $serviceName binPath= $binPath start= auto obj= "NT AUTHORITY\LocalService" type= own | Out-Null
+$existing = Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+if ($existing -and $existing.StartName -eq 'NT AUTHORITY\LocalService') {
+    sc.exe config $serviceName binPath= $binPath start= auto type= own | Out-Null
+} else {
+    if ($existing) {
+        sc.exe delete $serviceName | Out-Null   # another account (for example a test as LocalSystem): back to LocalService
+        Start-Sleep -Seconds 2
+    }
+    sc.exe create $serviceName binPath= $binPath start= auto obj= "NT AUTHORITY\LocalService" type= own | Out-Null
+}
+if ($LASTEXITCODE -ne 0) { Write-Warning "sc.exe could not install the service $serviceName (exit code $LASTEXITCODE)" }
 sc.exe description $serviceName "Club Agent Service - Gaming PC management agent" | Out-Null
 Set-ServiceRecovery $serviceName
 sc.exe start $serviceName | Out-Null
+if (-not (Wait-ServiceRunning $serviceName 30)) {
+    if ($isUpdate) {
+        $restored = Restore-OldVersion
+        if ($restored) { Stop-Install "UPDATE FAILED: the new agent did not start within 30 s. The old version is restored and runs again." }
+        Stop-Install "UPDATE FAILED: the new agent did not start, and the old version could not be restored. Check $programDataConfigDir\logs\agent.log."
+    }
+    Stop-Install "The agent service did not start within 30 s. Check the Application event log and $programDataConfigDir\logs\agent.log."
+}
+$agentVersion = (Get-Item $exePath).VersionInfo.FileVersion
+Write-Host "   Agent service running (version $agentVersion)" -ForegroundColor Gray
 
 # Step 6: Configure Launcher autostart
 Write-Host "[6/8] Configuring Launcher autostart..." -ForegroundColor Yellow
-$launcherExe = Join-Path $LauncherPath "Cms.Launcher.exe"
 
 if (Test-Path $launcherExe) {
     # Add to common startup folder (all users)
@@ -651,13 +847,33 @@ if ($KioskMode) {
     Write-Host "[8/8] Auto-login: Skipped" -ForegroundColor Gray
 }
 
+# The lock screens that this run stopped come back with the new version (the sessions of ClubUser are signed out; the
+# automatic sign-in starts the new lock screen), and the staged files and the backup are removed.
+Resume-LockScreens
+foreach ($dir in @($agentStage, $launcherStage, $agentBackup, $launcherBackup)) {
+    if (Test-Path $dir) { Remove-Item -Path $dir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+$launcherVersion = $null
+if (Test-Path $launcherExe) { $launcherVersion = (Get-Item $launcherExe).VersionInfo.FileVersion }
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "  Client Installation Complete!" -ForegroundColor Green
+if ($isUpdate) {
+    Write-Host "  RESULT: OK - the club PC software is updated" -ForegroundColor Green
+} else {
+    Write-Host "  RESULT: OK - Client Installation Complete" -ForegroundColor Green
+}
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Agent Service: Running (ClubAgent)" -ForegroundColor Cyan
-Write-Host "Launcher: Installed at $LauncherPath" -ForegroundColor Cyan
+Write-Host "Agent service: running (ClubAgent, version $agentVersion; log $programDataConfigDir\logs\agent.log)" -ForegroundColor Cyan
+if ($launcherVersion) {
+    Write-Host "Lock screen: $launcherExe (version $launcherVersion)" -ForegroundColor Cyan
+} else {
+    Write-Host "Lock screen: not installed (no launcher files in the package)" -ForegroundColor Yellow
+}
+if ($signedOut -gt 0) {
+    Write-Host "$kioskUserName was signed out; the automatic sign-in starts the new lock screen." -ForegroundColor Cyan
+}
 Write-Host "The PC stays locked until a session starts or staff unlock it in the admin UI." -ForegroundColor Cyan
 
 if ($KioskMode) {
@@ -683,5 +899,9 @@ if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
     Write-Host "Agent connects to: $ServerUrl" -ForegroundColor White
 }
 Write-Host ""
-Write-Host "Restart the PC for all changes to take effect." -ForegroundColor Yellow
+if ($isUpdate) {
+    Write-Host "No restart is needed for this update." -ForegroundColor Yellow
+} else {
+    Write-Host "Restart the PC for all changes to take effect." -ForegroundColor Yellow
+}
 Write-Host ""
