@@ -35,7 +35,9 @@ public sealed class SaleService
         _actor = actor;
     }
 
-    public async Task<BillingResult<SaleEntity>> SellAsync(IReadOnlyList<SaleLine>? lines, string? paymentMethod, Guid? userId)
+    /// <param name="fixedPrices">Unit prices to sell at (a bar order sells at the prices of the moment it was ordered).</param>
+    public async Task<BillingResult<SaleEntity>> SellAsync(IReadOnlyList<SaleLine>? lines, string? paymentMethod, Guid? userId,
+        IReadOnlyDictionary<Guid, decimal>? fixedPrices = null)
     {
         var cur = await _db.CurrencySymbolAsync();
         if (lines == null || lines.Count == 0) return PosErrors.EmptySale;
@@ -58,14 +60,16 @@ public sealed class SaleService
         var items = merged.Select(l =>
         {
             var p = products[l.ProductId];
-            return new SaleItemEntity { ProductId = p.Id, Name = p.Name, Category = p.Category, UnitPrice = p.Price, Quantity = l.Quantity, LineTotal = p.Price * l.Quantity };
+            var price = fixedPrices != null && fixedPrices.TryGetValue(p.Id, out var fixedPrice) ? fixedPrice : p.Price;
+            return new SaleItemEntity { ProductId = p.Id, Name = p.Name, Category = p.Category, UnitPrice = price, Quantity = l.Quantity, LineTotal = price * l.Quantity };
         }).ToList();
         var total = items.Sum(i => i.LineTotal);
         if (total <= 0 || total > MaxTotal) return BillingErrors.BadAmount;
         if (PaymentMethods.IsDesk(method) && _db.RequireOpenShift && await ShiftService.OpenShiftAsync(_db) == null) return ShiftErrors.Required;
 
         var now = _clock.UtcNow;
-        await using var tx = await _db.Database.BeginTransactionAsync();
+        // The delivery of a bar order runs this inside its own transaction (it commits both)
+        await using var tx = await JoinedTransaction.BeginAsync(_db);
         if (userId.HasValue)
         {
             if (method == PaymentMethods.Balance)

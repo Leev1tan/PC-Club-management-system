@@ -5,16 +5,44 @@ namespace Cms.Server.Billing;
 
 /// <summary>Held money: the total that is held now, the number of open holds, and the ids whose ledger rows do not match.</summary>
 public sealed record HoldCheck(decimal Held, int Open, bool Ok, IReadOnlyList<long> Broken);
-public sealed record HoldsView(HoldCheck Deposits);
+public sealed record HoldsView(HoldCheck Deposits, HoldCheck Orders);
 
 /// <summary>
 /// Reconciliation of the money that the ledger holds for the club on player balances. Reservation deposits: per
 /// reservation the rows deposit_hold - deposit_release - deposit_kept equal the deposit while it is held and 0
-/// after it was applied, returned or kept; every deposit row points to a reservation with that deposit.
+/// after it was applied, returned or kept; every deposit row points to a reservation with that deposit. Prepaid bar
+/// orders: order_hold - order_release equals the total while the order is open and 0 after the delivery or a cancel.
 /// </summary>
 public static class Holds
 {
-    public static async Task<HoldsView> CheckAsync(CmsDbContext db, CancellationToken ct = default) => new(await DepositsAsync(db, ct));
+    public static async Task<HoldsView> CheckAsync(CmsDbContext db, CancellationToken ct = default) =>
+        new(await DepositsAsync(db, ct), await OrdersAsync(db, ct));
+
+    public static async Task<HoldCheck> OrdersAsync(CmsDbContext db, CancellationToken ct = default)
+    {
+        var rows = await db.Ledger.AsNoTracking().Where(l => l.Type == LedgerTypes.OrderHold || l.Type == LedgerTypes.OrderRelease)
+            .Select(l => new { l.BarOrderId, l.Type, l.Amount, l.BalanceDelta }).ToListAsync(ct);
+        var orders = await db.BarOrders.AsNoTracking().Where(o => o.Payment == BarOrderPayments.Balance)
+            .Select(o => new { o.Id, o.Total, o.Status }).ToListAsync(ct);
+        var ids = orders.Select(o => o.Id).ToHashSet();
+        var broken = new SortedSet<long>(rows.Where(r => r.BarOrderId is not { } id || !ids.Contains(id)).Select(r => r.BarOrderId ?? 0));
+        decimal held = 0;
+        var open = 0;
+        foreach (var o in orders)
+        {
+            var mine = rows.Where(r => r.BarOrderId == o.Id).ToList();
+            var hold = mine.Where(r => r.Type == LedgerTypes.OrderHold).Sum(r => r.Amount);
+            var release = mine.Where(r => r.Type == LedgerTypes.OrderRelease).Sum(r => r.Amount);
+            var isOpen = o.Status is BarOrderStatuses.New or BarOrderStatuses.Preparing;
+            if (hold != o.Total || hold - release != (isOpen ? o.Total : 0m) || mine.Sum(r => r.BalanceDelta) != (isOpen ? -o.Total : 0m)) broken.Add(o.Id);
+            if (isOpen)
+            {
+                held += o.Total;
+                open++;
+            }
+        }
+        return new HoldCheck(held, open, broken.Count == 0, broken.ToList());
+    }
 
     public static async Task<HoldCheck> DepositsAsync(CmsDbContext db, CancellationToken ct = default)
     {

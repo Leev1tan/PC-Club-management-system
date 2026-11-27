@@ -52,6 +52,10 @@ public sealed class LedgerTotals
     public decimal DepositsReleased { get; private set; }
     /// <summary>Deposits kept for no-shows: PC time revenue paid from the balance (in Time and TimeTotal).</summary>
     public decimal DepositsKept { get; private set; }
+    /// <summary>Prepaid bar orders held on the balances until the delivery (not revenue; the sale at the delivery is).</summary>
+    public decimal OrdersHeld { get; private set; }
+    /// <summary>Held orders back on the balances: at the delivery (the bar sale takes it) or a cancel.</summary>
+    public decimal OrdersReleased { get; private set; }
     public int Rows { get; private set; }
     public long? FirstId { get; private set; }
     public long? LastId { get; private set; }
@@ -161,6 +165,12 @@ public sealed class LedgerTotals
                 DepositsKept += r.Amount;
                 TimeTotal += r.Amount;
                 Time = Time.Add(PaymentMethods.Balance, r.Amount);
+                break;
+            case LedgerTypes.OrderHold:
+                OrdersHeld += r.Amount;
+                break;
+            case LedgerTypes.OrderRelease:
+                OrdersReleased += r.Amount;
                 break;
             case LedgerTypes.CashPayout:
                 _payouts.Add(new ZPayout(r.Id, r.CreatedUtc, -r.DeskAmount, r.Reason, r.ActorUsername));

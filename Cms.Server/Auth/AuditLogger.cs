@@ -109,6 +109,14 @@ public static class AuditActions
     public const string StockRestocked = "stock.restocked";
     public const string StockCorrected = "stock.corrected";
     public const string SaleRefunded = "sale.refunded";
+
+    /// <summary>A bar order from the lock screen (prepaid: the money is held on the balance).</summary>
+    public const string OrderPlaced = "order.placed";
+    /// <summary>A bar order delivered: the bar sale is recorded with its payment method.</summary>
+    public const string OrderDelivered = "order.delivered";
+    /// <summary>A bar order cancelled (prepaid: the money back on the balance).</summary>
+    public const string OrderCancelled = "order.cancelled";
+    public const string OrderSettingsChanged = "order.settings_changed";
 }
 
 /// <summary>

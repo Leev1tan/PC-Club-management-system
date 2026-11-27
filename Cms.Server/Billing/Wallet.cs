@@ -42,6 +42,10 @@ public static class LedgerTypes
     public const string DepositRelease = "deposit_release";
     /// <summary>A held deposit kept by the club for a no-show (no balance change; PC time revenue paid from the balance).</summary>
     public const string DepositKept = "deposit_kept";
+    /// <summary>A bar order paid from the real balance when ordered, held until the delivery (-balance; not revenue).</summary>
+    public const string OrderHold = "order_hold";
+    /// <summary>The held money of an order back on the balance: at the delivery (then the bar sale takes it) or a cancel (+balance).</summary>
+    public const string OrderRelease = "order_release";
 }
 
 public static class PaymentMethods

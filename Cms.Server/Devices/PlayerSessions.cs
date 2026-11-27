@@ -14,11 +14,17 @@ public static class PlayerSessions
         var tariff = s.TariffId.HasValue ? await db.Tariffs.AsNoTracking().Where(t => t.Id == s.TariffId).Select(t => t.Name).FirstOrDefaultAsync(ct) : null;
         var package = s.PackageId.HasValue ? await db.Packages.AsNoTracking().Where(p => p.Id == s.PackageId).Select(p => p.Name).FirstOrDefaultAsync(ct) : null;
         var user = s.UserId.HasValue ? await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == s.UserId, ct) : null;
+        // The bar order of the session: open, or the last one closed in the last 15 minutes
+        var orders = await db.BarOrders.AsNoTracking().Where(o => o.DeviceId == deviceId && o.SessionId == s.Id).OrderByDescending(o => o.Id).Take(1).ToListAsync(ct);
+        var order = orders.FirstOrDefault(o => o.Status is BarOrderStatuses.New or BarOrderStatuses.Preparing ||
+                                               DateTimeOffset.UtcNow - o.UpdatedUtc < TimeSpan.FromMinutes(15));
+        var lines = order == null ? 0 : await db.BarOrderItems.AsNoTracking().Where(i => i.OrderId == order.Id).SumAsync(i => i.Quantity, ct);
         return new ClientSessionInfo
         {
             Id = s.Id, StartUtc = s.StartUtc, EndUtc = s.EndUtc ?? s.BalanceEndUtc, Paused = s.PausedUtc.HasValue, Prepaid = s.IsPrepaid,
             FromBalance = s.LimitToBalance, Tariff = tariff, Package = package,
-            Username = user?.Username, DisplayName = user?.DisplayName, Balance = user?.Balance, Bonus = user?.BonusPoints
+            Username = user?.Username, DisplayName = user?.DisplayName, Balance = user?.Balance, Bonus = user?.BonusPoints,
+            Order = order == null ? null : new ClientOrderInfo { Id = order.Id, Status = order.Status, Payment = order.Payment, Total = order.Total, Items = lines }
         };
     }
 }

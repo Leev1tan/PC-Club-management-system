@@ -22,6 +22,18 @@ public sealed class ClientSessionInfo
     public string? DisplayName { get; init; }
     public decimal? Balance { get; init; }
     public decimal? Bonus { get; init; }
+    /// <summary>The bar order of this session: open, or closed in the last 15 minutes (the lock screen shows its state).</summary>
+    public ClientOrderInfo? Order { get; init; }
+}
+
+/// <summary>A bar order on the lock screen: new, preparing, delivered or cancelled; paid from the balance or at the desk.</summary>
+public sealed class ClientOrderInfo
+{
+    public long Id { get; init; }
+    public string Status { get; init; } = "new";
+    public string Payment { get; init; } = "desk";
+    public decimal Total { get; init; }
+    public int Items { get; init; }
 }
 
 /// <summary>

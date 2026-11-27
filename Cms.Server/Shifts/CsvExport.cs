@@ -169,6 +169,9 @@ public static class CsvExport
         csv.Row(deposits, t.T("Утримано з балансу", "Held from balances"), z.Holds.DepositsHeld);
         csv.Row(deposits, t.T("Повернуто на баланс", "Back on balances"), z.Holds.DepositsReleased);
         csv.Row(deposits, t.T("Залишено клубу (неявка, у виручці за час)", "Kept for no-shows (in PC time revenue)"), z.Holds.DepositsKept);
+        var orders = t.T("Замовлення бару з ПК (передоплата)", "Bar orders from the PCs (prepaid)");
+        csv.Row(orders, t.T("Утримано з балансу", "Held from balances"), z.Holds.OrdersHeld);
+        csv.Row(orders, t.T("Знято з утримання (видано або скасовано)", "Released (delivered or cancelled)"), z.Holds.OrdersReleased);
         var staff = t.T("Персонал", "Staff");
         foreach (var p in z.ByStaff)
         {

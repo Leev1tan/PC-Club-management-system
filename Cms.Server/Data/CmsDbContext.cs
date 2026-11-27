@@ -30,6 +30,8 @@ public class CmsDbContext : DbContext
     public DbSet<GameZoneEntity> GameZones => Set<GameZoneEntity>();
     public DbSet<GamePlayEntity> GamePlays => Set<GamePlayEntity>();
     public DbSet<ReservationEntity> Reservations => Set<ReservationEntity>();
+    public DbSet<BarOrderEntity> BarOrders => Set<BarOrderEntity>();
+    public DbSet<BarOrderItemEntity> BarOrderItems => Set<BarOrderItemEntity>();
 
     /// <summary>
     /// Cash and card rows of the ledger need an open shift (Shifts:RequireOpenShift, default true).
@@ -59,6 +61,7 @@ public class CmsDbContext : DbContext
     public const string ActiveSessionIndex = "IX_Sessions_DeviceId_Active";
     public const string OpenShiftIndex = "IX_Shifts_Open";
     public const string RefundOfSaleIndex = "IX_Sales_RefundOfSaleId";
+    public const string OpenOrderIndex = "IX_BarOrders_DeviceId_Open";
 
     /// <summary>
     /// Ends all but the newest active session of each PC. Runs before the unique index
@@ -130,6 +133,11 @@ public class CmsDbContext : DbContext
                 entry.Entity.ConcurrencyStamp = Guid.NewGuid();
         }
         foreach (var entry in ChangeTracker.Entries<ReservationEntity>())
+        {
+            if (entry.State == EntityState.Modified)
+                entry.Entity.ConcurrencyStamp = Guid.NewGuid();
+        }
+        foreach (var entry in ChangeTracker.Entries<BarOrderEntity>())
         {
             if (entry.State == EntityState.Modified)
                 entry.Entity.ConcurrencyStamp = Guid.NewGuid();
@@ -224,6 +232,39 @@ public class CmsDbContext : DbContext
             entity.HasIndex(e => e.ShiftId);
             entity.HasIndex(e => e.SaleId);
             entity.HasIndex(e => e.ReservationId);
+            entity.HasIndex(e => e.BarOrderId);
+        });
+
+        modelBuilder.Entity<BarOrderEntity>(entity =>
+        {
+            entity.ToTable("BarOrders");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Status).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Payment).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Total).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.CancelReason).HasMaxLength(200);
+            entity.Property(e => e.HandledByUsername).HasMaxLength(64);
+            entity.Property(e => e.DeskMethod).HasMaxLength(16);
+            entity.HasOne<DeviceEntity>().WithMany().HasForeignKey(e => e.DeviceId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<UserEntity>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.SetNull);
+            // At most ONE open order per PC, enforced by the database (partial unique index)
+            entity.HasIndex(e => e.DeviceId).IsUnique().HasFilter("\"Status\" IN ('new', 'preparing')").HasDatabaseName(OpenOrderIndex);
+            entity.HasIndex(e => new { e.Status, e.Id });
+            entity.Property(e => e.ConcurrencyStamp).IsConcurrencyToken();
+        });
+
+        modelBuilder.Entity<BarOrderItemEntity>(entity =>
+        {
+            entity.ToTable("BarOrderItems");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.LineTotal).HasColumnType("decimal(10,2)");
+            entity.HasOne<BarOrderEntity>().WithMany().HasForeignKey(e => e.OrderId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<ProductEntity>().WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.OrderId);
         });
 
         modelBuilder.Entity<ReservationEntity>(entity =>
@@ -651,6 +692,63 @@ public class LedgerEntryEntity
     public decimal? DebtAfter { get; set; }
     /// <summary>Reservation of a deposit row (deposit_hold, deposit_release, deposit_kept).</summary>
     public long? ReservationId { get; set; }
+    /// <summary>Bar order of a prepaid order row (order_hold, order_release).</summary>
+    public long? BarOrderId { get; set; }
+}
+
+public static class BarOrderStatuses
+{
+    public const string New = "new";
+    public const string Preparing = "preparing";
+    public const string Delivered = "delivered";
+    public const string Cancelled = "cancelled";
+    public static readonly string[] Open = { New, Preparing };
+}
+
+public static class BarOrderPayments
+{
+    /// <summary>Paid from the real balance of the player when ordering (held in the ledger until the delivery).</summary>
+    public const string Balance = "balance";
+    /// <summary>Paid at the desk (cash or card) when the order is delivered.</summary>
+    public const string Desk = "desk";
+}
+
+/// <summary>
+/// An order of the bar from the lock screen of a PC (spec areas 1 and 5): new, preparing, delivered or cancelled.
+/// The bar sale (receipt, stock, ledger) is recorded at the delivery with its payment method; a prepaid order holds
+/// the money on the player's real balance until then (order_hold / order_release). One open order per PC.
+/// </summary>
+public class BarOrderEntity
+{
+    public long Id { get; set; }
+    public Guid DeviceId { get; set; }
+    public Guid? SessionId { get; set; }
+    public Guid? UserId { get; set; }
+    public string Status { get; set; } = BarOrderStatuses.New;
+    public string Payment { get; set; } = BarOrderPayments.Desk;
+    public decimal Total { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; }
+    public DateTimeOffset UpdatedUtc { get; set; }
+    public DateTimeOffset? DeliveredUtc { get; set; }
+    /// <summary>The bar receipt of the delivery.</summary>
+    public long? SaleId { get; set; }
+    /// <summary>Desk orders: cash or card, chosen at the delivery.</summary>
+    public string? DeskMethod { get; set; }
+    public string? CancelReason { get; set; }
+    public string? HandledByUsername { get; set; }
+    public Guid ConcurrencyStamp { get; set; } = Guid.NewGuid();
+}
+
+/// <summary>A line of an order: name and price copied when ordered (the delivery sells at these prices).</summary>
+public class BarOrderItemEntity
+{
+    public long Id { get; set; }
+    public long OrderId { get; set; }
+    public Guid ProductId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public decimal UnitPrice { get; set; }
+    public int Quantity { get; set; }
+    public decimal LineTotal { get; set; }
 }
 
 public static class ReservationStatuses
@@ -1007,8 +1105,10 @@ public static class ClubSettingKeys
     public const string Currency = "club.currency";
     /// <summary>Language of the lock screens on the club PCs: uk (default) or en (Devices/ClubLanguage).</summary>
     public const string Language = "club.language";
-    /// <summary>Reservations, the public booking page and bar orders: JSON (Reservations/ReservationSettings).</summary>
+    /// <summary>Reservations and the public booking page: JSON (Reservations/ReservationSettings).</summary>
     public const string Reservations = "reservations.settings";
+    /// <summary>Bar orders from the lock screens: JSON (Pos/BarOrderSettings).</summary>
+    public const string BarOrders = "bar.orders";
 }
 
 /// <summary>Shifts:RequireOpenShift (default true): cash and card payments need an open shift.</summary>
