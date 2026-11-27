@@ -245,6 +245,32 @@ and an Epic or Battle.net link; one more entry only for another zone and one ina
 - [ ] Stop the server: the grid still works with the last catalog (games.json stays)
 - [ ] With the PC locked, clicking is not possible (the lock screen covers the grid)
 
+### Test 16: Player Login on the Lock Screen (phase 6)
+Prepare: a player with a PIN (Players → 🔑) and 100 ₴ on the balance; the PC's zone has a tariff (for example
+60 ₴/h) and a package on sale now. The PC is locked without a session.
+- [ ] The lock screen shows the login form: user name, PIN or password, "How to pay" with "From my balance",
+      1 / 2 / 3 h with prices in the club currency and the package with its end time; the tariff price now
+- [ ] Wrong PIN: "Wrong username or password"; an unknown user name gives the same text
+- [ ] Log in with "From my balance": within 3 s the PC unlocks; the session screen shows the player name, the
+      balance (and bonus), the tariff, "TIME FROM THE BALANCE" and about 1:40:00 left (100 ₴ at 60 ₴/h)
+- [ ] Admin UI: the PC map shows the PC busy with the time left; Sessions shows the badge "from the balance";
+      the audit log has `player.login` and `session.started` ("from the balance, until about …")
+- [ ] Top up the player by 60 ₴ at the desk: within 10 s the remaining time grows by about 1 h
+- [ ] Wait until 10 minutes are left (or give a player only 11 ₴): a sound and a small warning window on top of
+      a game in borderless mode; again at 5 minutes and at 1 minute ("Save your game")
+- [ ] When the time is used up the PC locks; the balance is 0, the debt 0; "Баланс збігається з журналом ✓"
+- [ ] Log in with "2 h": the balance goes down by the price at once; "⏹ END THE SESSION" → Yes: the PC locks,
+      unused time is not refunded, the audit log has `player.logout`
+- [ ] Five wrong PINs for one player (on one or two PCs): the sixth try, also with the right PIN, says "Too many
+      failed attempts. Try again in 15 min"; the audit log has `player.login_locked`; another player still logs in
+- [ ] Ten wrong logins with different names on one PC: that PC refuses logins for 15 minutes, another PC works
+- [ ] Stop the agent (`sc.exe stop ClubAgent`): the lock screen says the agent does not answer and hides the
+      login form; start the agent: the form comes back
+- [ ] As the player, run a small program that creates the pipe `\\.\pipe\ClubAgent.Launcher` while the agent
+      runs: it fails (access denied / pipe busy)
+- [ ] A session started by the cashier for a guest: the PC unlocks without a login; the session screen shows
+      "Guest", the tariff and the time; there is no "End the session" button
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

@@ -95,8 +95,9 @@ GET  /api/audit                             → audit log, read-only, with the h
 GET  /api/audit/verify                      → recompute the hash chain, first broken row         [Owner]
 
 POST /api/devices/register       → Register a PC: enrollment token, current key, or "pending"   [agent]
-POST /api/devices/heartbeat      → Agent heartbeat; returns status, staff PIN hash and the club settings
-                                   of the lock screen (client: language, currency)              [X-Device-Key]
+POST /api/devices/heartbeat      → Agent heartbeat; returns status, staff PIN hash, the club settings of the lock
+                                   screen (client: language, currency) and the active session (player, tariff,
+                                   package, planned end, balances) for display                  [X-Device-Key]
 GET  /api/devices/{id}/commands  → Poll pending commands                          [X-Device-Key, approved]
 POST /api/devices/{id}/commands/{cmdId}/ack → Acknowledge command                 [X-Device-Key, approved]
 GET  /api/devices                → List all devices                               [all staff]
@@ -143,7 +144,11 @@ POST /api/products/{id}/correction → Stock count with a reason                
 GET  /api/products/stock/check   → Stock against the stock log                                  [Owner, Manager]
 POST /api/sales, GET /api/sales[/{id}] → Bar checkout (cash | card | balance), receipt log      [front desk]
 POST /api/sales/{id}/refund      → Refund of a receipt with a reason                            [Owner, Manager]
-POST /api/users/login            → Player login on the lock screen (password or PIN required)   [public, rate limited]
+POST /api/users/login            → Check a player password or PIN (older launchers; starts nothing)   [public, rate limited]
+GET  /api/devices/{id}/login-offers → Zone tariff now, 1 / 2 / 3 h prices, packages on sale    [X-Device-Key, approved, own PC]
+POST /api/devices/{id}/player-login → Player login on the lock screen + session start, paid from the balance:
+                                   offer balance (until used up) | minutes | package; lockout  [X-Device-Key, approved, own PC]
+POST /api/devices/{id}/player-logout → The player ends the session of a registered player     [X-Device-Key, approved, own PC]
 
 GET  /health, /api/health        → Health check                                   [public]
 GET  /api/demo                   → Demo mode status (banner in the admin UI)      [public]
@@ -178,7 +183,7 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 **Local State Communication** (written every second, also while the server is unreachable):
 ```
 %ProgramData%\ClubAgent\          # players: read only (installer ACL)
-├── state.json           # Lock state, remaining seconds, time of the last lock change
+├── state.json           # Lock state, remaining seconds, time of the last lock change, agent PID, active session
 ├── agent_heartbeat.txt  # Agent liveness marker (the launcher locks when it is older than 15 s)
 ├── staff-pin.json       # PBKDF2 hash of the staff PIN (from the server)
 ├── client-settings.json # club settings for the lock screen: language (uk, en), currency (from the heartbeat)
@@ -223,6 +228,27 @@ http, file or Windows shell schemes). `GameTracker` follows the started process 
 in the player's session and writes `game_started` / `game_stopped` notes into the agent inbox; the server keeps
 one open play per PC (table `GamePlays`), closes it when the session ends, and the PC map and the analytics
 ("top games": hours inside the period per game) read it.
+
+**Player login** (`MainWindow.Login.cs`, pipe protocol in `Cms.Client/AgentPipe.cs`): a locked PC without a
+session shows the login form in the lock screen: user name, PIN or password, and how to pay (from the balance
+while it lasts, 1 / 2 / 3 h, or a package of the zone that is on sale now, with prices from
+`GET /api/devices/{id}/login-offers`). The lock screen sends the request through the named pipe
+`ClubAgent.Launcher` (one JSON line each way, at most 16 KB, 5 s to read; Users: read and write, no
+create-instance right; the lock screen checks the pipe server PID against `state.json`). The agent adds its
+device key and calls the server. On success the server queues `session_set` and `unlock`; the agent sends a
+heartbeat at once, so the session screen shows the player, the balances, the tariff and the time.
+
+**Time from the balance** (`Sessions.LimitToBalance`, `BalanceEndUtc`): an open-ended session billed per minute
+at the end like any post-paid session. The server computes when the played time would cost the balances
+(bonus + real; the exact post-paid price with rules, step rounding and minimum charge, by binary search over
+minutes) and sends that time as the session end, so the agent locks the PC on time also without the server.
+Every 5 s the expiry service re-computes it: a top-up moves the end (sent when it moved by 30 s or more), and when
+the money is used up the session ends, paid from the balances (a rest after a bar purchase from the balance
+becomes debt), audited "balance used up". Pause keeps the end; resume and transfer send the new one.
+
+**Warnings**: at 10, 5 and 1 minute left the lock screen plays a sound and shows a small window on top of other
+windows (also over a game in borderless mode) for 10 s; the banner on the session screen stays in the last 10
+minutes. When the end moves (extension, top-up), warnings that lie behind are not repeated.
 
 **State Polling**:
 - Reads `state.json` every 2 seconds
