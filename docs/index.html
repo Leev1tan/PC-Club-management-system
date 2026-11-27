@@ -76,6 +76,11 @@
   .stack-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
   .stack-item { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 14px; }
   .stack-item strong { color: var(--cyan); display: block; margin-bottom: 2px; }
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; margin: 36px 0; }
+  .shot { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .shot img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; }
+  .shot figcaption { padding: 10px 14px; font-size: 13px; color: var(--muted); }
+  .shots-title { margin: 44px 0 0; font-size: 22px; color: #fff; }
   footer { border-top: 1px solid var(--border); padding: 26px 0 40px; text-align: center; color: var(--muted); font-size: 13px; margin-top: 40px; }
   footer a { color: var(--cyan); text-decoration: none; }
 </style>
@@ -129,6 +134,26 @@
     </div>
   </section>
 
+  <h2 class="shots-title" data-en="Screenshots (live demo data)" data-uk="Знімки екрана (дані демо)">Screenshots (live demo data)</h2>
+  <section class="shots">
+    <figure class="shot">
+      <a href="screenshots/analytics-en.png"><img src="screenshots/analytics-en.png" data-src-en="screenshots/analytics-en.png" data-src-uk="screenshots/analytics-uk.png" alt="Owner analytics" loading="lazy"></a>
+      <figcaption data-en="Owner analytics: revenue by day, payment methods, occupancy by zone and hour" data-uk="Аналітика власника: виручка за днями, способи оплати, завантаженість за зонами й годинами">Owner analytics: revenue by day, payment methods, occupancy by zone and hour</figcaption>
+    </figure>
+    <figure class="shot">
+      <a href="screenshots/pc-map.png"><img src="screenshots/pc-map.png" alt="PC map" loading="lazy"></a>
+      <figcaption data-en="PC map: every PC by zone, live state, packages and time left" data-uk="Карта ПК: усі ПК за зонами, стан наживо, пакети й залишок часу">PC map: every PC by zone, live state, packages and time left</figcaption>
+    </figure>
+    <figure class="shot">
+      <a href="screenshots/bar-checkout.png"><img src="screenshots/bar-checkout.png" alt="Bar checkout" loading="lazy"></a>
+      <figcaption data-en="Bar checkout: touch tiles, stock, cash, card or player balance" data-uk="Каса бару: плитки товарів, склад, готівка, картка або баланс гравця">Bar checkout: touch tiles, stock, cash, card or player balance</figcaption>
+    </figure>
+    <figure class="shot">
+      <a href="screenshots/z-report.png"><img src="screenshots/z-report.png" alt="Z-report" loading="lazy"></a>
+      <figcaption data-en="Z-report of a shift: cash variance, reconciled with the ledger, audit anchor" data-uk="Z-звіт зміни: розбіжність каси, звірка з журналом, якір журналу дій">Z-report of a shift: cash variance, reconciled with the ledger, audit anchor</figcaption>
+    </figure>
+  </section>
+
   <section class="stack-box">
     <h2 data-en="Clean Production Architecture" data-uk="Архітектура системи">Clean Production Architecture</h2>
     <div class="stack-list">
@@ -156,6 +181,7 @@ function toggleLang() {
     const val = el.getAttribute('data-' + lang);
     if (val) el.innerHTML = val;
   });
+  document.querySelectorAll('[data-src-en]').forEach(el => { el.src = el.getAttribute('data-src-' + lang); });
 }
 </script>
 </body>
