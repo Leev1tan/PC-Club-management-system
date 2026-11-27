@@ -24,9 +24,11 @@ export type LedgerEntry = {
   id: number; createdUtc: string; userId: string | null; type: string; method: string; amount: number;
   balanceDelta: number; bonusDelta: number; deskAmount: number; balanceAfter: number | null; bonusAfter: number | null;
   sessionId: string | null; packageId: string | null; deviceId: string | null; description: string | null; reason: string | null;
-  actorUsername: string | null;
+  actorUsername: string | null; shiftId?: number | null; saleId?: number | null; debtDelta?: number; debtAfter?: number | null;
 };
-export type LedgerCheck = { balance: number; ledgerBalance: number; bonus: number; ledgerBonus: number; ok: boolean; brokenRowId: number | null };
+export type LedgerCheck = {
+  balance: number; ledgerBalance: number; bonus: number; ledgerBonus: number; ok: boolean; brokenRowId: number | null; debt?: number; ledgerDebt?: number;
+};
 
 /** Cashback of a top-up by the tiers (same rule as the server: highest reached tier). */
 export function cashbackFor(tiers: BonusTier[], amount: number): number {
@@ -34,4 +36,4 @@ export function cashbackFor(tiers: BonusTier[], amount: number): number {
   return tier && amount > 0 ? Math.round(amount * tier.percent) / 100 : 0;
 }
 
-export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+export { clock as clockTime } from './i18n';

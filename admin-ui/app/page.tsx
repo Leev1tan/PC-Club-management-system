@@ -4,14 +4,17 @@ import { AuthStatus, Me, api, errorText, getJson, permissions, postJson, setUnau
 import { LoginScreen, SetupScreen, roleLabel } from './auth';
 import { AuditTab, SettingsTab, StaffTab } from './admin-tabs';
 import { Tariff } from './billing';
-import { fmt as fmtText, methodLabel, money, t } from './i18n';
+import { fmt as fmtText, lang, methodLabel, money, setLang, t } from './i18n';
 import { PlayerCard } from './player-card';
+import { PosTab } from './pos-tab';
 import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-dialogs';
+import { ShiftTab } from './shift-tab';
+import { StockTab } from './stock-tab';
 import { TariffsTab } from './tariffs-tab';
 
 // ===== Types =====
 type Zone = { id: string; name: string; color: string; sortOrder: number };
-type User = { id: string; username: string; displayName: string; balance: number; bonusPoints: number; createdUtc: string };
+type User = { id: string; username: string; displayName: string; balance: number; bonusPoints: number; createdUtc: string; debt?: number };
 type Device = {
   id: string; hostname: string; osVersion: string; agentVersion: string;
   lastSeenUtc: string | null; lastIp: string | null; status: string;
@@ -37,21 +40,24 @@ type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' }
 type DemoInfo = { enabled: boolean; resetIntervalHours: number | null; lastResetUtc: string | null; nextResetUtc: string | null };
 
 // ===== Tab IDs =====
-type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'users' | 'tariffs' | 'finance' | 'audit' | 'staff' | 'settings';
+type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'finance' | 'audit' | 'staff' | 'settings';
 type Need = 'any' | 'frontDesk' | 'management' | 'owner';
 
 // Each tab is shown only to the roles that may use it (the server checks every request again)
 const allTabs: { id: Tab; label: string; icon: string; section?: string; need: Need }[] = [
-  { id: 'dashboard', label: 'Дашборд', icon: '📊', section: 'ОСНОВНЕ', need: 'frontDesk' },
-  { id: 'map', label: 'Карта ПК', icon: '🗺️', need: 'any' },
-  { id: 'sessions', label: 'Сесії', icon: '⏱️', need: 'frontDesk' },
-  { id: 'devices', label: 'Пристрої', icon: '🖥️', section: 'УПРАВЛІННЯ', need: 'any' },
-  { id: 'users', label: 'Гравці', icon: '👥', need: 'frontDesk' },
-  { id: 'tariffs', label: 'Тарифи', icon: '💰', need: 'frontDesk' },
-  { id: 'finance', label: 'Фінанси', icon: '📈', section: 'АНАЛІТИКА', need: 'management' },
-  { id: 'audit', label: 'Журнал дій', icon: '📜', need: 'management' },
-  { id: 'staff', label: 'Персонал', icon: '🧑‍💼', section: 'АДМІНІСТРУВАННЯ', need: 'owner' },
-  { id: 'settings', label: 'Налаштування', icon: '⚙️', need: 'owner' },
+  { id: 'dashboard', label: t.nav.dashboard, icon: '📊', section: t.nav.sectionMain, need: 'frontDesk' },
+  { id: 'map', label: t.nav.map, icon: '🗺️', need: 'any' },
+  { id: 'sessions', label: t.nav.sessions, icon: '⏱️', need: 'frontDesk' },
+  { id: 'pos', label: t.nav.pos, icon: '🛒', section: t.nav.sectionDesk, need: 'frontDesk' },
+  { id: 'shift', label: t.nav.shift, icon: '🧾', need: 'frontDesk' },
+  { id: 'stock', label: t.nav.stock, icon: '📦', need: 'frontDesk' },
+  { id: 'devices', label: t.nav.devices, icon: '🖥️', section: t.nav.sectionManage, need: 'any' },
+  { id: 'users', label: t.nav.users, icon: '👥', need: 'frontDesk' },
+  { id: 'tariffs', label: t.nav.tariffs, icon: '💰', need: 'frontDesk' },
+  { id: 'finance', label: t.nav.finance, icon: '📈', section: t.nav.sectionAnalytics, need: 'management' },
+  { id: 'audit', label: t.nav.audit, icon: '📜', need: 'management' },
+  { id: 'staff', label: t.nav.staff, icon: '🧑‍💼', section: t.nav.sectionAdmin, need: 'owner' },
+  { id: 'settings', label: t.nav.settings, icon: '⚙️', need: 'owner' },
 ];
 
 // ===== Helpers =====
@@ -93,6 +99,7 @@ export default function Page() {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { document.documentElement.lang = lang; }, []);
   useEffect(() => {
     // The cookie expired or the account changed: back to the login page
     setUnauthorizedHandler(() => setMe(null));
@@ -306,6 +313,9 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'users': return <UsersTab />;
       case 'tariffs': return <TariffsTab can={can} zones={zones} devices={devices} tariffs={tariffs} toast={toast}
         onChanged={fetchAll} onAddZone={() => setZoneModal(true)} onDeleteZone={deleteZone} />;
+      case 'pos': return <PosTab can={can} players={users} toast={toast} onChanged={fetchAll} />;
+      case 'shift': return <ShiftTab can={can} toast={toast} onChanged={fetchAll} />;
+      case 'stock': return <StockTab can={can} toast={toast} />;
       case 'finance': return <FinanceTab />;
       case 'audit': return <AuditTab />;
       case 'staff': return <StaffTab me={me} toast={toast} />;
@@ -661,7 +671,10 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                     <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>@{u.username}</td>
                     <td>{u.displayName}</td>
                     <td style={{ fontWeight: 600, color: u.balance > 0 ? 'var(--green)' : 'var(--text-muted)' }}>{fmt(u.balance)} ₴</td>
-                    <td style={{ color: u.bonusPoints > 0 ? 'var(--amber)' : 'var(--text-muted)' }}>{money(u.bonusPoints)} ₴ 🎁</td>
+                    <td style={{ color: u.bonusPoints > 0 ? 'var(--amber)' : 'var(--text-muted)' }}>
+                      {money(u.bonusPoints)} ₴ 🎁
+                      {(u.debt ?? 0) > 0 && <div><span className="badge badge-red">{t.player.debt}: {money(u.debt)} ₴</span></div>}
+                    </td>
                     <td>{fmtDate(u.createdUtc)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
@@ -924,8 +937,13 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {onlineDevices.length}/{devices.length} ПК онлайн
             </span>
+            <span className="lang-switch" role="group" aria-label={t.lang.label}>
+              {(['uk', 'en'] as const).map(l => (
+                <button key={l} className={`btn btn-sm ${lang === l ? 'active' : ''}`} aria-pressed={lang === l} onClick={() => lang !== l && setLang(l)}>{t.lang[l]}</button>
+              ))}
+            </span>
             <span className="user-chip" title={roleLabel(me.role)}>👤 {me.displayName} · {roleLabel(me.role)}</span>
-            <button className="btn btn-sm" onClick={onLogout}>Вийти</button>
+            <button className="btn btn-sm" onClick={onLogout}>{t.nav.logout}</button>
           </div>
         </div>
         <div className="content-area">
