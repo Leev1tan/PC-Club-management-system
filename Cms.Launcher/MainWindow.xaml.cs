@@ -240,6 +240,7 @@ public partial class MainWindow : Window
         {
             settings = ClientSettings.Default;
         }
+        ApplyTheme(settings); // theme, accent and logo follow at once (cheap when nothing changed)
         if (settings.SameAs(_settings) && _texts.Language == LauncherTexts.For(_languageOverride ?? settings.Language).Language) return;
         _settings = settings;
         ApplyTexts();
@@ -281,16 +282,7 @@ public partial class MainWindow : Window
     // ──── INITIALIZATION ────
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // Build cyberpunk lock overlay
-        var overlayBrush = new SolidColorBrush(Color.FromArgb(248, 5, 5, 8)); // Near-black
-
-        // Neon cyan for text glow
-        var neonCyan = new SolidColorBrush(Color.FromRgb(0, 240, 255));
-        var neonMagenta = new SolidColorBrush(Color.FromRgb(255, 45, 120));
-        var mutedText = new SolidColorBrush(Color.FromRgb(85, 85, 112));
-        var monoFont = new FontFamily("Consolas");
-
-        // Lock icon with glow
+        // The lock overlay, in the colours and fonts of the club theme (resource keys of Themes/*.xaml)
         var lockIcon = new TextBlock
         {
             Text = "⛔",
@@ -298,64 +290,49 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 0, 0, 16)
         };
-        lockIcon.Effect = new System.Windows.Media.Effects.DropShadowEffect
-        {
-            Color = Color.FromRgb(255, 45, 120), BlurRadius = 20, ShadowDepth = 0, Opacity = 0.6
-        };
+        Glow(lockIcon, "Color.Danger", 20);
 
-        // Main title with neon glow
         var lockTitle = _lockTitle = new TextBlock
         {
             Text = _texts.LockedTitle,
-            Foreground = neonCyan,
             FontSize = 42,
             FontWeight = FontWeights.Bold,
             HorizontalAlignment = HorizontalAlignment.Center,
-            FontFamily = monoFont
-        };
-        lockTitle.Effect = new System.Windows.Media.Effects.DropShadowEffect
-        {
-            Color = Color.FromRgb(0, 240, 255), BlurRadius = 24, ShadowDepth = 0, Opacity = 0.6
-        };
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
+        }.Text("Brush.AccentText", "Font.Display");
+        Glow(lockTitle, "Color.Accent", 24);
 
         _lockCountdown = new TextBlock
         {
             Text = string.Empty,
-            Foreground = neonMagenta,
             FontSize = 22,
             FontWeight = FontWeights.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 14, 0, 0),
-            FontFamily = monoFont
-        };
+            Margin = new Thickness(0, 14, 0, 0)
+        }.Text("Brush.Danger", "Font.Mono");
 
         _lockReservedText = new TextBlock
         {
             Text = string.Empty,
-            Foreground = new SolidColorBrush(Color.FromRgb(255, 224, 25)),
             FontSize = 18,
             FontWeight = FontWeights.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 14, 0, 0),
-            FontFamily = monoFont,
             Visibility = Visibility.Collapsed
-        };
+        }.Text("Brush.Warn");
 
         _lockReasonText = new TextBlock
         {
             Text = string.Empty,
-            Foreground = neonMagenta,
             FontSize = 15,
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 14, 0, 0),
-            FontFamily = monoFont,
             Visibility = Visibility.Collapsed
-        };
+        }.Text("Brush.Danger");
 
         _lockOverlay = new Border
         {
-            Background = overlayBrush,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(34, 34, 53)),
             BorderThickness = new Thickness(0),
             Child = new StackPanel
             {
@@ -370,20 +347,17 @@ public partial class MainWindow : Window
                     _lockReasonText,
                     (_lockHint = new TextBlock
                     {
-                        Foreground = mutedText,
                         FontSize = 13,
                         HorizontalAlignment = HorizontalAlignment.Center,
-                        Margin = new Thickness(0, 24, 0, 0),
-                        FontFamily = monoFont
-                    }),
+                        Margin = new Thickness(0, 24, 0, 0)
+                    }.Text("Brush.TextMuted")),
+                    // Staff hint: hardly visible on purpose
                     (_lockStaffHint = new TextBlock
                     {
-                        Foreground = new SolidColorBrush(Color.FromRgb(26, 26, 48)),
                         FontSize = 10,
                         HorizontalAlignment = HorizontalAlignment.Center,
-                        Margin = new Thickness(0, 20, 0, 0),
-                        FontFamily = monoFont
-                    }),
+                        Margin = new Thickness(0, 20, 0, 0)
+                    }.Text("Brush.Border", "Font.Mono")),
                     (_languageButton = new Button
                     {
                         Style = (Style)FindResource("CyberButton"),
@@ -398,6 +372,7 @@ public partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Stretch,
             IsHitTestVisible = true
         };
+        _lockOverlay.SetResourceReference(Border.BackgroundProperty, "Brush.Overlay");
 
         if (Content is Grid grid)
         {

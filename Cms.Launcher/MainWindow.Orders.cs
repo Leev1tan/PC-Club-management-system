@@ -23,8 +23,6 @@ public partial class MainWindow
     private BarCart? _cart;
     private bool _orderBusy;
 
-    private static readonly SolidColorBrush OrderText = new(Color.FromRgb(232, 232, 240));
-    private static readonly SolidColorBrush OrderMuted = new(Color.FromRgb(136, 136, 168));
 
     private async void OnOrderClick(object sender, RoutedEventArgs e)
     {
@@ -37,13 +35,12 @@ public partial class MainWindow
     private void EnsureOrderPanel()
     {
         if (_orderPanel != null) return;
-        var mono = new FontFamily("Consolas");
-        _orderTitle = new TextBlock { Foreground = new SolidColorBrush(Color.FromRgb(0, 240, 255)), FontFamily = mono, FontSize = 18, Margin = new Thickness(0, 0, 0, 12) };
+        _orderTitle = new TextBlock { FontSize = 18, Margin = new Thickness(0, 0, 0, 12) }.Text("Brush.AccentText", "Font.Display");
         _orderProducts = new StackPanel();
-        _orderTotal = new TextBlock { Foreground = new SolidColorBrush(Color.FromRgb(255, 224, 25)), FontFamily = mono, FontSize = 15, Margin = new Thickness(0, 10, 0, 6) };
-        _payBalance = new RadioButton { GroupName = "orderpay", Foreground = OrderText, FontFamily = mono, Margin = new Thickness(0, 2, 0, 2) };
-        _payDesk = new RadioButton { GroupName = "orderpay", Foreground = OrderText, FontFamily = mono, Margin = new Thickness(0, 2, 0, 2), IsChecked = true };
-        _orderMessage = new TextBlock { Foreground = new SolidColorBrush(Color.FromRgb(255, 45, 120)), FontFamily = mono, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+        _orderTotal = new TextBlock { FontSize = 15, Margin = new Thickness(0, 10, 0, 6) }.Text("Brush.Warn", "Font.Mono");
+        _payBalance = new RadioButton { GroupName = "orderpay", Margin = new Thickness(0, 2, 0, 2) }.Text("Brush.Text");
+        _payDesk = new RadioButton { GroupName = "orderpay", Margin = new Thickness(0, 2, 0, 2), IsChecked = true }.Text("Brush.Text");
+        _orderMessage = new TextBlock { FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) }.Text("Brush.Danger");
         _orderPlace = new Button { Style = (Style)FindResource("NeonButton"), Margin = new Thickness(0, 4, 10, 0) };
         _orderCancel = new Button { Style = (Style)FindResource("CyberButton"), Margin = new Thickness(0, 4, 10, 0), Visibility = Visibility.Collapsed };
         _orderClose = new Button { Style = (Style)FindResource("CyberButton"), Margin = new Thickness(0, 4, 0, 0) };
@@ -52,7 +49,6 @@ public partial class MainWindow
         _orderClose.Click += (_, _) => _orderPanel!.Visibility = Visibility.Collapsed;
         _orderPanel = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(245, 13, 13, 21)), BorderBrush = new SolidColorBrush(Color.FromRgb(0, 240, 255)),
             BorderThickness = new Thickness(1), Padding = new Thickness(24), Width = 560, MaxHeight = 640,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed,
             Child = new StackPanel
@@ -66,6 +62,8 @@ public partial class MainWindow
                 }
             }
         };
+        _orderPanel.SetResourceReference(Border.BackgroundProperty, "Brush.BgPanel");
+        _orderPanel.SetResourceReference(Border.BorderBrushProperty, "Brush.Accent");
         Grid.SetRowSpan(_orderPanel, 4);
         Panel.SetZIndex(_orderPanel, 500);
         SessionPanel.Children.Add(_orderPanel);
@@ -104,19 +102,19 @@ public partial class MainWindow
         if (_menu != null && _cart != null)
         {
             if (_menu.Products.Count == 0)
-                _orderProducts.Children.Add(new TextBlock { Text = _texts.OrderEmptyMenu, Foreground = OrderMuted, FontFamily = new FontFamily("Consolas") });
+                _orderProducts.Children.Add(new TextBlock { Text = _texts.OrderEmptyMenu }.Text("Brush.TextSecondary"));
             foreach (var p in _menu.Products)
             {
                 var row = new DockPanel { Margin = new Thickness(0, 3, 0, 3) };
                 var plus = new Button { Content = "+", Width = 34, Style = (Style)FindResource("CyberButton") };
                 var minus = new Button { Content = "−", Width = 34, Style = (Style)FindResource("CyberButton") };
-                var count = new TextBlock { Text = _cart.Count(p.Id).ToString(), Width = 30, TextAlignment = TextAlignment.Center, Foreground = OrderText, VerticalAlignment = VerticalAlignment.Center };
+                var count = new TextBlock { Text = _cart.Count(p.Id).ToString(), Width = 30, TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center }.Text("Brush.Text", "Font.Mono");
                 plus.Click += (_, _) => { if (!_cart.Add(p.Id)) _orderMessage!.Text = LauncherTexts.Format(_texts.OrderMax, Money(_menu.MaxAmount)); RenderOrder(); };
                 minus.Click += (_, _) => { _cart.Remove(p.Id); RenderOrder(); };
                 var buttons = new StackPanel { Orientation = Orientation.Horizontal, Children = { minus, count, plus } };
                 DockPanel.SetDock(buttons, Dock.Right);
                 row.Children.Add(buttons);
-                row.Children.Add(new TextBlock { Text = $"{p.Name}  ·  {Money(p.Price)}", Foreground = OrderText, FontFamily = new FontFamily("Consolas"), FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
+                row.Children.Add(new TextBlock { Text = $"{p.Name}  ·  {Money(p.Price)}", FontSize = 14, VerticalAlignment = VerticalAlignment.Center }.Text("Brush.Text"));
                 _orderProducts.Children.Add(row);
             }
         }
@@ -142,13 +140,13 @@ public partial class MainWindow
             if (res.Ok)
             {
                 _cart.Clear();
-                _orderMessage!.Foreground = new SolidColorBrush(Color.FromRgb(57, 255, 20));
+                _orderMessage!.SetResourceReference(TextBlock.ForegroundProperty, "Brush.Ok");
                 _orderMessage.Text = _texts.OrderPlaced;
                 await LoadMenuAsync();
             }
             else
             {
-                _orderMessage!.Foreground = new SolidColorBrush(Color.FromRgb(255, 45, 120));
+                _orderMessage!.SetResourceReference(TextBlock.ForegroundProperty, "Brush.Danger");
                 _orderMessage.Text = LoginMessages.For(res, _texts);
             }
         }

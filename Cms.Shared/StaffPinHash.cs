@@ -83,6 +83,8 @@ public static class AgentFiles
     public const string StaffPinFile = "staff-pin.json";
     /// <summary>Club settings for the lock screen: language and currency (Cms.Shared.ClientSettings).</summary>
     public const string ClientSettingsFile = "client-settings.json";
+    /// <summary>The club logo for the lock screen (PNG or JPEG bytes; Cms.Shared.LogoLoader checks them against the hash in client-settings.json).</summary>
+    public const string ClubLogoFile = "club-logo.img";
     /// <summary>Game catalog of this PC (Cms.Shared.CatalogFile), written by the agent.</summary>
     public const string CatalogFile = "games.json";
     /// <summary>What the lock screen closes and cleans up when a session ends (Cms.Client.TeardownSettings), from the agent's appsettings.json.</summary>

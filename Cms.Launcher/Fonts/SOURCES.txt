@@ -1,0 +1,15 @@
+Fonts of the lock screen themes (embedded in Cms.Launcher.exe as WPF resources). Every family is licensed under the
+SIL Open Font License 1.1; the licence of each family is the file <Family>-OFL.txt in this folder. Every file has the
+Latin and the Cyrillic letters of Ukrainian.
+
+Exo 2            Exo2-Regular.ttf, Exo2-Bold.ttf                github.com/googlefonts/Exo-2.0 fonts/ttf (unchanged)
+JetBrains Mono   JetBrainsMono-Regular.ttf, -Bold.ttf           github.com/JetBrains/JetBrainsMono release v2.304 (unchanged)
+Inter            Inter-Regular.ttf, Inter-Bold.ttf              github.com/rsms/inter release v4.1, extras/ttf (unchanged)
+IBM Plex Sans    IBMPlexSans-Regular.ttf, -Bold.ttf             github.com/IBM/plex release @ibm/plex-sans 1.3.6 (unchanged; Reserved Font Name "Plex")
+IBM Plex Mono    IBMPlexMono-Regular.ttf, -Bold.ttf             github.com/google/fonts ofl/ibmplexmono (unchanged; Reserved Font Name "Plex")
+Press Start 2P   PressStart2P-Regular.ttf                       github.com/google/fonts ofl/pressstart2p (unchanged; Reserved Font Name "Press Start 2P")
+Rubik            Rubik-Regular.ttf, Rubik-Bold.ttf              static instances (wght 400 and 700) of Rubik[wght].ttf from github.com/google/fonts
+                                                                ofl/rubik, made with fontTools 4.55.3 varLib.instancer. The Rubik licence has no
+                                                                Reserved Font Name, so the instances keep the name Rubik.
+
+The admin UI uses the same families through next/font (downloaded at build time, served by the club server).

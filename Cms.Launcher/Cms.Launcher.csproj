@@ -13,4 +13,10 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 
+  <!-- Theme fonts (SIL OFL, Latin + Cyrillic) are embedded; their licences and sources ship next to the exe -->
+  <ItemGroup>
+    <Resource Include="Fonts\*.ttf" />
+    <None Include="Fonts\*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
 </Project>

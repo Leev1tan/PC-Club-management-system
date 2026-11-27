@@ -99,10 +99,9 @@ public partial class MainWindow
         {
             var radio = new RadioButton
             {
-                Content = text, GroupName = "offer", Tag = key, IsChecked = key == _offerChoice,
-                Foreground = new SolidColorBrush(Color.FromRgb(232, 232, 240)), FontFamily = new FontFamily("Consolas"), FontSize = 13,
+                Content = text, GroupName = "offer", Tag = key, IsChecked = key == _offerChoice, FontSize = 13,
                 Margin = new Thickness(0, 2, 0, 2)
-            };
+            }.Text("Brush.Text");
             radio.Checked += (_, _) => _offerChoice = key;
             OffersPanel.Children.Add(radio);
         }
@@ -127,7 +126,7 @@ public partial class MainWindow
     private void ShowLoginError(string message, bool error = true)
     {
         LoginError.Text = message;
-        LoginError.Foreground = error ? new SolidColorBrush(Color.FromRgb(255, 45, 120)) : new SolidColorBrush(Color.FromRgb(57, 255, 20));
+        LoginError.SetResourceReference(TextBlock.ForegroundProperty, error ? "Brush.Danger" : "Brush.Ok");
         LoginError.Visibility = Visibility.Visible;
     }
 
@@ -232,14 +231,13 @@ internal sealed class WarningToast : Window
         ShowActivated = false;
         Focusable = false;
         SizeToContent = SizeToContent.WidthAndHeight;
-        Background = new SolidColorBrush(Color.FromRgb(20, 6, 14));
-        BorderBrush = new SolidColorBrush(Color.FromRgb(255, 45, 120));
+        SetResourceReference(BackgroundProperty, "Brush.BgPanel");
+        SetResourceReference(BorderBrushProperty, "Brush.Danger");
         BorderThickness = new Thickness(2);
         Content = new TextBlock
         {
-            Text = text, Foreground = new SolidColorBrush(Color.FromRgb(255, 224, 230)), FontFamily = new FontFamily("Consolas"),
-            FontSize = 20, FontWeight = FontWeights.Bold, Margin = new Thickness(24, 14, 24, 14), MaxWidth = 900, TextWrapping = TextWrapping.Wrap
-        };
+            Text = text, FontSize = 20, FontWeight = FontWeights.Bold, Margin = new Thickness(24, 14, 24, 14), MaxWidth = 900, TextWrapping = TextWrapping.Wrap
+        }.Text("Brush.Text");
         Loaded += (_, _) =>
         {
             var area = SystemParameters.WorkArea;

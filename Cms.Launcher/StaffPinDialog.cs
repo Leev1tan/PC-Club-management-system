@@ -27,33 +27,30 @@ internal sealed class StaffPinDialog : Window
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Topmost = true;
         ShowInTaskbar = false;
-        Background = new SolidColorBrush(Color.FromRgb(13, 13, 21));
-        BorderBrush = new SolidColorBrush(Color.FromRgb(0, 240, 255));
+        SetResourceReference(BackgroundProperty, "Brush.BgPanel");
+        SetResourceReference(BorderBrushProperty, "Brush.Accent");
+        SetResourceReference(FontFamilyProperty, "Font.Body");
         BorderThickness = new Thickness(1);
-
-        var font = new FontFamily("Consolas");
-        var text = new SolidColorBrush(Color.FromRgb(232, 232, 240));
 
         _pin = new PasswordBox
         {
             Width = 280,
             FontSize = 20,
-            FontFamily = font,
             Margin = new Thickness(0, 12, 0, 12),
             MaxLength = Cms.Shared.StaffPinHash.MaxLength
         };
 
-        var ok = new Button { Content = texts.Ok, IsDefault = true, Width = 120, Margin = new Thickness(0, 0, 8, 0), FontFamily = font };
+        var ok = new Button { Content = texts.Ok, IsDefault = true, Width = 120, Margin = new Thickness(0, 0, 8, 0) };
         ok.Click += (_, _) => DialogResult = true;
-        var cancel = new Button { Content = texts.Cancel, IsCancel = true, Width = 140, FontFamily = font };
+        var cancel = new Button { Content = texts.Cancel, IsCancel = true, Width = 140 };
 
         Content = new StackPanel
         {
             Margin = new Thickness(24),
             Children =
             {
-                new TextBlock { Text = texts.PinDialogHeader, Foreground = new SolidColorBrush(Color.FromRgb(0, 240, 255)), FontFamily = font, FontSize = 16 },
-                new TextBlock { Text = texts.PinPrompt, Foreground = text, FontFamily = font, FontSize = 12, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap, MaxWidth = 280 },
+                new TextBlock { Text = texts.PinDialogHeader, FontSize = 16 }.Text("Brush.AccentText", "Font.Display"),
+                new TextBlock { Text = texts.PinPrompt, FontSize = 12, Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap, MaxWidth = 280 }.Text("Brush.Text"),
                 _pin,
                 new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { ok, cancel } }
             }

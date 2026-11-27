@@ -1,0 +1,35 @@
+<!-- Lock screen theme "cyber" (neon cyan and magenta on near black, glow). The colours are the dark block of admin-ui/app/themes.css
+     ([data-theme="cyber"][data-mode="dark"]); tests/Cms.Client.Tests/LauncherThemeTests.cs keeps them equal.
+     Cms.Launcher/ThemeManager puts this dictionary at App.Resources.MergedDictionaries[0]; an owner accent replaces the accent keys. -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <SolidColorBrush x:Key="Brush.BgAbyss" Color="#050508"/>
+    <SolidColorBrush x:Key="Brush.BgDark" Color="#0A0A10"/>
+    <SolidColorBrush x:Key="Brush.BgPanel" Color="#0D0D15"/>
+    <SolidColorBrush x:Key="Brush.BgCard" Color="#111119"/>
+    <SolidColorBrush x:Key="Brush.BgElevated" Color="#16161F"/>
+    <SolidColorBrush x:Key="Brush.Border" Color="#222235"/>
+    <SolidColorBrush x:Key="Brush.Text" Color="#E8E8F0"/>
+    <SolidColorBrush x:Key="Brush.TextSecondary" Color="#9D9DBD"/>
+    <SolidColorBrush x:Key="Brush.TextMuted" Color="#8A8AAA"/>
+    <SolidColorBrush x:Key="Brush.Accent" Color="#00F0FF"/>
+    <SolidColorBrush x:Key="Brush.AccentText" Color="#00F0FF"/>
+    <SolidColorBrush x:Key="Brush.AccentContrast" Color="#050508"/>
+    <SolidColorBrush x:Key="Brush.Ok" Color="#39FF14"/>
+    <SolidColorBrush x:Key="Brush.Warn" Color="#FFE019"/>
+    <SolidColorBrush x:Key="Brush.Danger" Color="#FE5693"/>
+    <SolidColorBrush x:Key="Brush.Event" Color="#C77DFF"/>
+    <SolidColorBrush x:Key="Brush.Overlay" Color="#F8050508"/>
+    <Color x:Key="Color.Accent">#00F0FF</Color>
+    <Color x:Key="Color.Danger">#FE5693</Color>
+    <Color x:Key="Color.Ok">#39FF14</Color>
+    <Color x:Key="Color.Warn">#FFE019</Color>
+    <FontFamily x:Key="Font.Display">pack://application:,,,/Cms.Launcher;component/Fonts/#Exo 2</FontFamily>
+    <FontFamily x:Key="Font.Body">pack://application:,,,/Cms.Launcher;component/Fonts/#Exo 2</FontFamily>
+    <FontFamily x:Key="Font.Mono">pack://application:,,,/Cms.Launcher;component/Fonts/#JetBrains Mono</FontFamily>
+    <FontFamily x:Key="Font.Wordmark">pack://application:,,,/Cms.Launcher;component/Fonts/#Exo 2</FontFamily>
+    <CornerRadius x:Key="Radius.Small">0</CornerRadius>
+    <CornerRadius x:Key="Radius.Medium">0</CornerRadius>
+    <sys:Double x:Key="Glow.Opacity">0.5</sys:Double>
+</ResourceDictionary>

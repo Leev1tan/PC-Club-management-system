@@ -791,7 +791,11 @@ public partial class Worker : BackgroundService
                 if (_enrollmentStatus == "approved" && root.TryGetProperty("staffPinHash", out var pin))
                     UpdateStaffPin(pin.ValueKind == JsonValueKind.String ? pin.GetString() : null);
                 if (_enrollmentStatus == "approved" && root.TryGetProperty("client", out var client) && client.ValueKind == JsonValueKind.Object)
+                {
+                    // The logo first: when the lock screen reads the new settings, the logo file is already there
+                    if (ClientSettings.Parse(client.GetRawText()) is { } received) await SyncClubLogoAsync(http, received.LogoSha256, ct);
                     UpdateClientSettings(client.GetRawText());
+                }
                 if (_enrollmentStatus == "approved" && root.TryGetProperty("session", out var session))
                 {
                     var info = session.ValueKind == JsonValueKind.Object ? session.Deserialize<ClientSessionInfo>(JsonOptions) : null;
@@ -855,9 +859,9 @@ public partial class Worker : BackgroundService
     }
 
     /// <summary>
-    /// Keeps client-settings.json equal to the club settings of the lock screen (language, currency).
-    /// The file stays when the server is down, so the lock screen keeps the last known club language;
-    /// without the file (the server was never reached) it shows Ukrainian.
+    /// Keeps client-settings.json equal to the club settings of the lock screen (language, currency, theme, accent and
+    /// the hash of the logo). The file stays when the server is down, so the lock screen keeps the last known club
+    /// settings; without the file (the server was never reached) it shows Ukrainian and the Cyber theme.
     /// </summary>
     private void UpdateClientSettings(string json)
     {
@@ -868,13 +872,48 @@ public partial class Worker : BackgroundService
             if (received == null) return;
             var current = File.Exists(path) ? ClientSettings.Parse(File.ReadAllText(path)) : null;
             if (received.SameAs(current)) return;
-            var settings = new ClientSettings { Language = received.Language, Currency = received.Currency, ReceivedUtc = DateTimeOffset.UtcNow };
+            var settings = new ClientSettings
+            {
+                Language = received.Language, Currency = received.Currency, Theme = received.Theme, Accent = received.Accent,
+                LogoSha256 = received.LogoSha256, ReceivedUtc = DateTimeOffset.UtcNow
+            };
             WriteAtomic(path, settings.ToJson());
-            _logger.LogInformation("Lock screen settings from the server: language {Language}, currency {Currency}", settings.Language, settings.Currency);
+            _logger.LogInformation("Lock screen settings from the server: language {Language}, currency {Currency}, theme {Theme}, accent {Accent}, logo {Logo}",
+                settings.Language, settings.Currency, settings.Theme, settings.Accent ?? "-", settings.LogoSha256?[..12] ?? "-");
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to update {Path}", path);
+        }
+    }
+
+    private string? _logoSynced = "(not checked)";
+    private DateTimeOffset _logoRetryUtc;
+
+    /// <summary>
+    /// club-logo.img follows the logo hash of the heartbeat (Cms.Client.ClubLogoSync: HTTP 200 only, at most 512 KB, the
+    /// SHA-256 must match, temporary file and move). A failed download keeps the old file and is tried again after 60 s.
+    /// </summary>
+    private async Task SyncClubLogoAsync(HttpClient http, string? sha256, CancellationToken ct)
+    {
+        if (sha256 == _logoSynced || DateTimeOffset.UtcNow < _logoRetryUtc) return;
+        try
+        {
+            var result = await ClubLogoSync.SyncAsync(http, AgentDir, sha256, ct);
+            if (result == ClubLogoSync.Result.Failed)
+            {
+                _logoRetryUtc = DateTimeOffset.UtcNow.AddSeconds(60);
+                _logger.LogWarning("Club logo {Hash}: the download failed or the bytes did not match; next try in 60 s", sha256?[..12]);
+                return;
+            }
+            _logoSynced = sha256;
+            if (result != ClubLogoSync.Result.Unchanged)
+                _logger.LogInformation("Club logo {Result}: {Hash}", result, sha256?[..12] ?? "-");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logoRetryUtc = DateTimeOffset.UtcNow.AddSeconds(60);
+            _logger.LogWarning(ex, "Club logo {Hash}: failed; next try in 60 s", sha256?[..12]);
         }
     }
 

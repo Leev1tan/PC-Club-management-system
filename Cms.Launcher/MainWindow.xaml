@@ -6,13 +6,13 @@
         xmlns:local="clr-namespace:Cms.Launcher"
         mc:Ignorable="d"
         Title="PC Club" WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="False" AllowsTransparency="False" Background="#050508">
+        Topmost="False" AllowsTransparency="False" Background="{DynamicResource Brush.BgAbyss}">
     <Window.Resources>
-        <!-- ══ CYBERPUNK BUTTON ══ -->
+        <!-- ══ BUTTON (colours, fonts and corners of the club theme: Themes/*.xaml) ══ -->
         <Style x:Key="CyberButton" TargetType="Button">
-            <Setter Property="Foreground" Value="#e8e8f0"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}"/>
             <Setter Property="FontSize" Value="13"/>
-            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontFamily" Value="{DynamicResource Font.Body}"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Padding" Value="24,12"/>
@@ -20,17 +20,13 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Grid>
-                            <!-- Outer glow border -->
-                            <Border x:Name="glowBorder" Background="Transparent" BorderBrush="#222235" BorderThickness="1"
-                                    Padding="{TemplateBinding Padding}">
-                                <Border.Effect>
-                                    <DropShadowEffect Color="#00f0ff" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
-                                </Border.Effect>
+                            <Border x:Name="glowBorder" Background="Transparent" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1"
+                                    CornerRadius="{DynamicResource Radius.Small}" Padding="{TemplateBinding Padding}">
                                 <Grid>
-                                    <!-- Angular cut accent — top left -->
-                                    <Border Background="#00f0ff" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                    <!-- Corner accent — top left -->
+                                    <Border Background="{DynamicResource Brush.Accent}" HorizontalAlignment="Left" VerticalAlignment="Top"
                                             Width="12" Height="2" Margin="-1,-1,0,0"/>
-                                    <Border Background="#00f0ff" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                    <Border Background="{DynamicResource Brush.Accent}" HorizontalAlignment="Left" VerticalAlignment="Top"
                                             Width="2" Height="12" Margin="-1,-1,0,0"/>
                                     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Grid>
@@ -38,13 +34,8 @@
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="glowBorder" Property="Background" Value="#0d1520"/>
-                                <Setter TargetName="glowBorder" Property="BorderBrush" Value="#00f0ff"/>
-                                <Setter TargetName="glowBorder" Property="Effect">
-                                    <Setter.Value>
-                                        <DropShadowEffect Color="#00f0ff" BlurRadius="12" ShadowDepth="0" Opacity="0.4"/>
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter TargetName="glowBorder" Property="Background" Value="{DynamicResource Brush.BgElevated}"/>
+                                <Setter TargetName="glowBorder" Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="glowBorder" Property="Opacity" Value="0.3"/>
@@ -55,44 +46,31 @@
             </Setter>
         </Style>
 
-        <!-- ══ PRIMARY NEON BUTTON ══ -->
+        <!-- ══ PRIMARY BUTTON ══ -->
         <Style x:Key="NeonButton" TargetType="Button">
-            <Setter Property="Foreground" Value="#00f0ff"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.AccentText}"/>
             <Setter Property="FontSize" Value="15"/>
-            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontFamily" Value="{DynamicResource Font.Display}"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Padding" Value="32,14"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="border" BorderBrush="#00f0ff" BorderThickness="2"
-                                Padding="{TemplateBinding Padding}">
-                            <Border.Background>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                    <GradientStop Color="#0a1525" Offset="0"/>
-                                    <GradientStop Color="#0d1a30" Offset="1"/>
-                                </LinearGradientBrush>
-                            </Border.Background>
-                            <Border.Effect>
-                                <DropShadowEffect Color="#00f0ff" BlurRadius="16" ShadowDepth="0" Opacity="0.3"/>
-                            </Border.Effect>
+                        <Border x:Name="border" BorderBrush="{DynamicResource Brush.Accent}" BorderThickness="2" Background="{DynamicResource Brush.BgElevated}"
+                                CornerRadius="{DynamicResource Radius.Medium}" Padding="{TemplateBinding Padding}">
                             <Grid>
                                 <!-- Corner marks -->
-                                <Border Background="#00f0ff" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                <Border Background="{DynamicResource Brush.Accent}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                         Width="16" Height="2" Margin="0,0,-2,-2"/>
-                                <Border Background="#00f0ff" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                <Border Background="{DynamicResource Brush.Accent}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                         Width="2" Height="16" Margin="0,0,-2,-2"/>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="border" Property="Effect">
-                                    <Setter.Value>
-                                        <DropShadowEffect Color="#00f0ff" BlurRadius="24" ShadowDepth="0" Opacity="0.5"/>
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource Brush.BgCard}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="border" Property="Opacity" Value="0.3"/>
@@ -105,14 +83,14 @@
 
         <!-- ══ CYBER TEXTBOX ══ -->
         <Style x:Key="CyberTextBox" TargetType="TextBox">
-            <Setter Property="Background" Value="#0a0a14"/>
-            <Setter Property="Foreground" Value="#e8e8f0"/>
+            <Setter Property="Background" Value="{DynamicResource Brush.BgDark}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}"/>
             <Setter Property="FontSize" Value="16"/>
-            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontFamily" Value="{DynamicResource Font.Body}"/>
             <Setter Property="Padding" Value="14,12"/>
-            <Setter Property="BorderBrush" Value="#222235"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CaretBrush" Value="#00f0ff"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource Brush.Accent}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
@@ -124,11 +102,11 @@
                                 <ScrollViewer x:Name="PART_ContentHost" Margin="0"/>
                             </Border>
                             <!-- Left accent line -->
-                            <Border Background="#00f0ff" Width="3" HorizontalAlignment="Left" Opacity="0.4"/>
+                            <Border Background="{DynamicResource Brush.Accent}" Width="3" HorizontalAlignment="Left" Opacity="0.4"/>
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsFocused" Value="True">
-                                <Setter Property="BorderBrush" Value="#00f0ff"/>
+                                <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -138,14 +116,14 @@
 
         <!-- ══ CYBER PASSWORDBOX ══ -->
         <Style x:Key="CyberPasswordBox" TargetType="PasswordBox">
-            <Setter Property="Background" Value="#0a0a14"/>
-            <Setter Property="Foreground" Value="#e8e8f0"/>
+            <Setter Property="Background" Value="{DynamicResource Brush.BgDark}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}"/>
             <Setter Property="FontSize" Value="16"/>
-            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontFamily" Value="{DynamicResource Font.Body}"/>
             <Setter Property="Padding" Value="14,12"/>
-            <Setter Property="BorderBrush" Value="#222235"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CaretBrush" Value="#00f0ff"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource Brush.Accent}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="PasswordBox">
@@ -156,11 +134,11 @@
                                     BorderThickness="{TemplateBinding BorderThickness}">
                                 <ScrollViewer x:Name="PART_ContentHost" Margin="0"/>
                             </Border>
-                            <Border Background="#ff2d78" Width="3" HorizontalAlignment="Left" Opacity="0.4"/>
+                            <Border Background="{DynamicResource Brush.Accent}" Width="3" HorizontalAlignment="Left" Opacity="0.4"/>
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsFocused" Value="True">
-                                <Setter Property="BorderBrush" Value="#ff2d78"/>
+                                <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -169,59 +147,36 @@
         </Style>
     </Window.Resources>
 
-    <Grid>
-        <Grid.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#050508" Offset="0"/>
-                <GradientStop Color="#0a0a14" Offset="0.5"/>
-                <GradientStop Color="#050510" Offset="1"/>
-            </LinearGradientBrush>
-        </Grid.Background>
-
-        <!-- ========== SCANLINE OVERLAY (subtle) ========== -->
-        <Canvas IsHitTestVisible="False" Opacity="0.04">
-            <Canvas.Background>
-                <DrawingBrush TileMode="Tile" Viewport="0,0,1,4" ViewportUnits="Absolute">
-                    <DrawingBrush.Drawing>
-                        <GeometryDrawing Brush="#00f0ff">
-                            <GeometryDrawing.Geometry>
-                                <RectangleGeometry Rect="0,0,1,1"/>
-                            </GeometryDrawing.Geometry>
-                        </GeometryDrawing>
-                    </DrawingBrush.Drawing>
-                </DrawingBrush>
-            </Canvas.Background>
-        </Canvas>
+    <Grid Background="{DynamicResource Brush.BgAbyss}">
 
         <!-- ========== PLAYER LOGIN (moved into the lock overlay at start; shown while the PC is locked without a session) ========== -->
         <Grid x:Name="LoginPanel" Visibility="Collapsed">
             <StackPanel HorizontalAlignment="Center" Width="440" Margin="0,22,0,0">
-                <TextBlock Text="PC  CLUB" Foreground="#00f0ff" FontSize="26" FontWeight="Bold"
-                           HorizontalAlignment="Center" FontFamily="Consolas">
+                <!-- The club logo (club-logo.img, checked by its hash) or the club name text -->
+                <Image x:Name="LoginLogo" MaxHeight="96" MaxWidth="320" Stretch="Uniform" HorizontalAlignment="Center"
+                       Margin="0,0,0,4" Visibility="Collapsed"/>
+                <TextBlock x:Name="LoginWordmark" Text="PC  CLUB" Foreground="{DynamicResource Brush.AccentText}" FontSize="26" FontWeight="Bold"
+                           HorizontalAlignment="Center" FontFamily="{DynamicResource Font.Wordmark}">
                     <TextBlock.Effect>
-                        <DropShadowEffect Color="#00f0ff" BlurRadius="16" ShadowDepth="0" Opacity="0.5"/>
+                        <DropShadowEffect Color="{DynamicResource Color.Accent}" BlurRadius="16" ShadowDepth="0" Opacity="{DynamicResource Glow.Opacity}"/>
                     </TextBlock.Effect>
                 </TextBlock>
-                <TextBlock x:Name="LoginRequiredText" Foreground="#555570" FontSize="12"
-                           HorizontalAlignment="Center" FontFamily="Consolas" Margin="0,6,0,18"/>
+                <TextBlock x:Name="LoginRequiredText" Foreground="{DynamicResource Brush.TextMuted}" FontSize="12"
+                           HorizontalAlignment="Center" FontFamily="{DynamicResource Font.Body}" Margin="0,6,0,18"/>
 
-                <TextBlock x:Name="UsernameLabel" Foreground="#8888a8" FontSize="11" FontFamily="Consolas" Margin="0,0,0,6"/>
+                <TextBlock x:Name="UsernameLabel" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" FontFamily="{DynamicResource Font.Body}" Margin="0,0,0,6"/>
                 <TextBox x:Name="UsernameBox" Style="{StaticResource CyberTextBox}" Margin="0,0,0,14" MaxLength="100"/>
 
-                <TextBlock x:Name="SecretLabel" Foreground="#8888a8" FontSize="11" FontFamily="Consolas" Margin="0,0,0,6"/>
+                <TextBlock x:Name="SecretLabel" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" FontFamily="{DynamicResource Font.Body}" Margin="0,0,0,6"/>
                 <PasswordBox x:Name="PasswordBox" Style="{StaticResource CyberPasswordBox}" Margin="0,0,0,14" MaxLength="128"/>
 
-                <TextBlock x:Name="OffersTitleText" Foreground="#8888a8" FontSize="11" FontFamily="Consolas" Margin="0,0,0,6"/>
+                <TextBlock x:Name="OffersTitleText" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="11" FontFamily="{DynamicResource Font.Body}" Margin="0,0,0,6"/>
                 <StackPanel x:Name="OffersPanel" Margin="0,0,0,4"/>
-                <TextBlock x:Name="OffersHintText" Foreground="#555570" FontSize="11" FontFamily="Consolas"
+                <TextBlock x:Name="OffersHintText" Foreground="{DynamicResource Brush.TextMuted}" FontSize="11" FontFamily="{DynamicResource Font.Body}"
                            TextWrapping="Wrap" Margin="0,0,0,8"/>
 
-                <TextBlock x:Name="LoginError" Foreground="#ff2d78" FontSize="12" FontFamily="Consolas" TextWrapping="Wrap"
-                           TextAlignment="Center" HorizontalAlignment="Center" Margin="0,4,0,8" Visibility="Collapsed">
-                    <TextBlock.Effect>
-                        <DropShadowEffect Color="#ff2d78" BlurRadius="8" ShadowDepth="0" Opacity="0.5"/>
-                    </TextBlock.Effect>
-                </TextBlock>
+                <TextBlock x:Name="LoginError" Foreground="{DynamicResource Brush.Danger}" FontSize="12" FontFamily="{DynamicResource Font.Body}" TextWrapping="Wrap"
+                           TextAlignment="Center" HorizontalAlignment="Center" Margin="0,4,0,8" Visibility="Collapsed"/>
 
                 <Button x:Name="LoginButton" Style="{StaticResource NeonButton}" Margin="0,6,0,4" Click="OnLoginClick"/>
             </StackPanel>
@@ -237,33 +192,33 @@
             </Grid.RowDefinitions>
 
             <!-- Top bar -->
-            <Border Grid.Row="0" Padding="24,0" BorderBrush="#222235" BorderThickness="0,0,0,1">
-                <Border.Background>
-                    <SolidColorBrush Color="#0a0a10" Opacity="0.95"/>
-                </Border.Background>
+            <Border Grid.Row="0" Padding="24,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1"
+                    Background="{DynamicResource Brush.BgDark}">
                 <Grid>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="⌘" Foreground="#00f0ff" FontSize="18" FontWeight="Bold"
-                                   FontFamily="Consolas" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                        <TextBlock Text="PC CLUB" Foreground="#e8e8f0" FontSize="14" FontWeight="Bold"
-                                   VerticalAlignment="Center" FontFamily="Consolas"/>
-                        <Border Background="#222235" Width="1" Height="24" Margin="16,0"/>
-                        <TextBlock x:Name="SessionActiveText" Foreground="#39ff14" FontSize="10" FontWeight="Bold"
-                                   VerticalAlignment="Center" FontFamily="Consolas">
+                        <Image x:Name="TopLogo" Height="32" MaxWidth="160" Stretch="Uniform" VerticalAlignment="Center"
+                               Margin="0,0,10,0" Visibility="Collapsed"/>
+                        <TextBlock x:Name="TopIcon" Text="⌘" Foreground="{DynamicResource Brush.AccentText}" FontSize="18" FontWeight="Bold"
+                                   FontFamily="{DynamicResource Font.Mono}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <TextBlock x:Name="TopWordmark" Text="PC CLUB" Foreground="{DynamicResource Brush.Text}" FontSize="14" FontWeight="Bold"
+                                   VerticalAlignment="Center" FontFamily="{DynamicResource Font.Wordmark}"/>
+                        <Border Background="{DynamicResource Brush.Border}" Width="1" Height="24" Margin="16,0"/>
+                        <TextBlock x:Name="SessionActiveText" Foreground="{DynamicResource Brush.Ok}" FontSize="10" FontWeight="Bold"
+                                   VerticalAlignment="Center" FontFamily="{DynamicResource Font.Body}">
                             <TextBlock.Effect>
-                                <DropShadowEffect Color="#39ff14" BlurRadius="6" ShadowDepth="0" Opacity="0.5"/>
+                                <DropShadowEffect Color="{DynamicResource Color.Ok}" BlurRadius="6" ShadowDepth="0" Opacity="{DynamicResource Glow.Opacity}"/>
                             </TextBlock.Effect>
                         </TextBlock>
-                        <TextBlock x:Name="GameNowText" Foreground="#bf5af2" FontSize="12" Margin="16,0,0,0"
-                                   VerticalAlignment="Center" FontFamily="Consolas"/>
+                        <TextBlock x:Name="GameNowText" Foreground="{DynamicResource Brush.Event}" FontSize="12" Margin="16,0,0,0"
+                                   VerticalAlignment="Center" FontFamily="{DynamicResource Font.Body}"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <TextBlock x:Name="SessionUser" Foreground="#8888a8" FontSize="12"
-                                   VerticalAlignment="Center" FontFamily="Consolas" Margin="0,0,20,0"/>
-                        <TextBlock x:Name="SessionBalance" Foreground="#ffe019" FontSize="13" FontWeight="Bold"
-                                   VerticalAlignment="Center" FontFamily="Consolas">
+                        <TextBlock x:Name="SessionUser" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="12"
+                                   VerticalAlignment="Center" FontFamily="{DynamicResource Font.Body}" Margin="0,0,20,0"/>
+                        <TextBlock x:Name="SessionBalance" Foreground="{DynamicResource Brush.Warn}" FontSize="13" FontWeight="Bold"
+                                   VerticalAlignment="Center" FontFamily="{DynamicResource Font.Mono}">
                             <TextBlock.Effect>
-                                <DropShadowEffect Color="#ffe019" BlurRadius="8" ShadowDepth="0" Opacity="0.3"/>
+                                <DropShadowEffect Color="{DynamicResource Color.Warn}" BlurRadius="8" ShadowDepth="0" Opacity="{DynamicResource Glow.Opacity}"/>
                             </TextBlock.Effect>
                         </TextBlock>
                     </StackPanel>
@@ -272,25 +227,25 @@
 
             <!-- Countdown, tariff, extend -->
             <StackPanel Grid.Row="1" HorizontalAlignment="Center" Margin="0,24,0,8">
-                <TextBlock x:Name="SessionTimeLabel" Foreground="#555570"
-                           FontSize="12" HorizontalAlignment="Center" FontFamily="Consolas"/>
-                <TextBlock x:Name="SessionCountdown" Text="00:00:00" Foreground="#00f0ff"
+                <TextBlock x:Name="SessionTimeLabel" Foreground="{DynamicResource Brush.TextMuted}"
+                           FontSize="12" HorizontalAlignment="Center" FontFamily="{DynamicResource Font.Body}"/>
+                <TextBlock x:Name="SessionCountdown" Text="00:00:00" Foreground="{DynamicResource Brush.AccentText}"
                            FontSize="64" FontWeight="Bold" HorizontalAlignment="Center"
-                           FontFamily="Consolas" Margin="0,4,0,4">
+                           FontFamily="{DynamicResource Font.Mono}" Margin="0,4,0,4">
                     <TextBlock.Effect>
-                        <DropShadowEffect Color="#00f0ff" BlurRadius="32" ShadowDepth="0" Opacity="0.5"/>
+                        <DropShadowEffect Color="{DynamicResource Color.Accent}" BlurRadius="32" ShadowDepth="0" Opacity="{DynamicResource Glow.Opacity}"/>
                     </TextBlock.Effect>
                 </TextBlock>
-                <TextBlock x:Name="SessionTariff" Text="" Foreground="#bf5af2" FontSize="13"
-                           HorizontalAlignment="Center" FontFamily="Consolas" Margin="0,0,0,4"/>
-                <TextBlock x:Name="SessionCost" Text="" Foreground="#8888a8" FontSize="12"
-                           HorizontalAlignment="Center" FontFamily="Consolas" Margin="0,0,0,12"/>
+                <TextBlock x:Name="SessionTariff" Text="" Foreground="{DynamicResource Brush.Event}" FontSize="13"
+                           HorizontalAlignment="Center" FontFamily="{DynamicResource Font.Body}" Margin="0,0,0,4"/>
+                <TextBlock x:Name="SessionCost" Text="" Foreground="{DynamicResource Brush.TextSecondary}" FontSize="12"
+                           HorizontalAlignment="Center" FontFamily="{DynamicResource Font.Mono}" Margin="0,0,0,12"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <Button x:Name="ExtendButton" Style="{StaticResource CyberButton}" Click="OnExtendClick" Margin="0,0,10,0"/>
                     <Button x:Name="EndSessionButton" Style="{StaticResource CyberButton}" Click="OnEndSessionClick" Visibility="Collapsed" Margin="0,0,10,0"/>
                     <Button x:Name="OrderButton" Style="{StaticResource CyberButton}" Click="OnOrderClick" Visibility="Collapsed"/>
                 </StackPanel>
-                <TextBlock x:Name="OrderStatusText" Foreground="#ffe019" FontSize="12" FontFamily="Consolas" HorizontalAlignment="Center"
+                <TextBlock x:Name="OrderStatusText" Foreground="{DynamicResource Brush.Warn}" FontSize="12" FontFamily="{DynamicResource Font.Body}" HorizontalAlignment="Center"
                            Margin="0,10,0,0" Visibility="Collapsed"/>
             </StackPanel>
 
@@ -302,51 +257,44 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
                 <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,10">
-                    <TextBlock x:Name="GamesTitleText" DockPanel.Dock="Left" Foreground="#555570" FontSize="13"
-                               FontFamily="Consolas" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="GamesTitleText" DockPanel.Dock="Left" Foreground="{DynamicResource Brush.TextMuted}" FontSize="13"
+                               FontFamily="{DynamicResource Font.Display}" VerticalAlignment="Center"/>
                     <TextBox x:Name="GameSearchBox" DockPanel.Dock="Right" Width="280" Style="{StaticResource CyberTextBox}"
                              FontSize="14" Padding="10,6" TextChanged="OnGameSearchChanged"/>
-                    <TextBlock x:Name="GameSearchHint" DockPanel.Dock="Right" Foreground="#555570" FontSize="11"
-                               FontFamily="Consolas" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock x:Name="GameSearchHint" DockPanel.Dock="Right" Foreground="{DynamicResource Brush.TextMuted}" FontSize="11"
+                               FontFamily="{DynamicResource Font.Body}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                 </DockPanel>
                 <WrapPanel x:Name="GameCategories" Grid.Row="1" Margin="0,0,0,10"/>
                 <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
                         <WrapPanel x:Name="GameTiles"/>
-                        <TextBlock x:Name="GamesEmptyText" Foreground="#555570" FontSize="13" FontFamily="Consolas"
+                        <TextBlock x:Name="GamesEmptyText" Foreground="{DynamicResource Brush.TextMuted}" FontSize="13" FontFamily="{DynamicResource Font.Body}"
                                    HorizontalAlignment="Center" Margin="0,24,0,0" Visibility="Collapsed"/>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>
 
             <!-- Bottom bar -->
-            <Border Grid.Row="3" Padding="24,0" BorderBrush="#222235" BorderThickness="0,1,0,0">
-                <Border.Background>
-                    <SolidColorBrush Color="#0a0a10" Opacity="0.8"/>
-                </Border.Background>
+            <Border Grid.Row="3" Padding="24,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0"
+                    Background="{DynamicResource Brush.BgDark}">
                 <Grid>
-                    <TextBlock x:Name="SessionHostname" Foreground="#333350" FontSize="10"
-                               VerticalAlignment="Center" FontFamily="Consolas"/>
-                    <TextBlock x:Name="SessionStaffHint" Foreground="#1a1a30"
+                    <TextBlock x:Name="SessionHostname" Foreground="{DynamicResource Brush.TextMuted}" FontSize="10"
+                               VerticalAlignment="Center" FontFamily="{DynamicResource Font.Mono}"/>
+                    <!-- Staff hint: hardly visible on purpose (the border colour on the bar) -->
+                    <TextBlock x:Name="SessionStaffHint" Foreground="{DynamicResource Brush.Border}"
                                FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"
-                               FontFamily="Consolas"/>
+                               FontFamily="{DynamicResource Font.Mono}"/>
                 </Grid>
             </Border>
         </Grid>
 
         <!-- ========== LOW-TIME WARNING BANNER ========== -->
         <Border x:Name="WarningBanner" VerticalAlignment="Top" Margin="0,52,0,0" Visibility="Collapsed"
-                Padding="16,8" HorizontalAlignment="Stretch" BorderBrush="#ff2d78" BorderThickness="0,0,0,2">
-            <Border.Background>
-                <SolidColorBrush Color="#ff2d78" Opacity="0.08"/>
-            </Border.Background>
+                Padding="16,8" HorizontalAlignment="Stretch" BorderBrush="{DynamicResource Brush.Danger}" BorderThickness="0,0,0,2"
+                Background="{DynamicResource Brush.BgPanel}">
             <TextBlock x:Name="WarningText"
-                       Foreground="#ff2d78" FontSize="12" FontWeight="Bold"
-                       HorizontalAlignment="Center" FontFamily="Consolas">
-                <TextBlock.Effect>
-                    <DropShadowEffect Color="#ff2d78" BlurRadius="8" ShadowDepth="0" Opacity="0.4"/>
-                </TextBlock.Effect>
-            </TextBlock>
+                       Foreground="{DynamicResource Brush.Danger}" FontSize="12" FontWeight="Bold"
+                       HorizontalAlignment="Center" FontFamily="{DynamicResource Font.Body}"/>
         </Border>
     </Grid>
 </Window>
