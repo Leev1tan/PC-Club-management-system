@@ -97,7 +97,7 @@ public class GamesController : ControllerBase
         ["workingDirectory"] = g.WorkingDirectory, ["steamAppId"] = g.SteamAppId, ["launchUrl"] = g.LaunchUrl,
         ["processName"] = g.ProcessName, ["allZones"] = g.AllZones,
         ["zones"] = g.AllZones ? null : zoneIds?.Distinct().OrderBy(z => z).ToList(),
-        ["color"] = g.Color, ["sortOrder"] = g.SortOrder, ["active"] = g.IsActive
+        ["color"] = g.Color, ["sortOrder"] = g.SortOrder, ["active"] = g.IsActive, ["accountPlatform"] = g.AccountPlatform
     };
 
     private static string? Text(object? value) => value switch

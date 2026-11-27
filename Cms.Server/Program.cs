@@ -98,6 +98,8 @@ if (demo.Enabled)
 else
     builder.Services.AddSingleton<Cms.Server.Devices.IWakeOnLanSender, Cms.Server.Devices.UdpWakeOnLanSender>();
 builder.Services.AddScoped<Cms.Server.Repositories.IDeviceRepository, Cms.Server.Repositories.EfDeviceRepository>();
+// Club game accounts: encrypted at rest with Data Protection (the key ring of the data directory)
+builder.Services.AddSingleton<Cms.Server.Accounts.GameAccountVault>();
 builder.Services.AddScoped<Cms.Server.Repositories.ISessionRepository, Cms.Server.Repositories.EfSessionRepository>();
 
 // Background services
@@ -134,6 +136,13 @@ if (sqliteCopiedFrom != null)
 
 // Create or migrate the database (PostgreSQL: EF Core migrations; SQLite: EnsureCreated + additive upgrade)
 await DatabaseInitializer.InitializeAsync(app.Services, app.Logger);
+
+// Recovery: club game accounts of sessions that ended while the server was down go back to the pool
+using (var scope = app.Services.CreateScope())
+{
+    var ended = await Cms.Server.Accounts.GameAccountService.EndStaleAsync(scope.ServiceProvider.GetRequiredService<CmsDbContext>(), DateTimeOffset.UtcNow, "recovery");
+    if (ended > 0) app.Logger.LogInformation("Ended {Count} club account lease(s) of sessions that are gone", ended);
+}
 
 if (demo.Enabled)
 {

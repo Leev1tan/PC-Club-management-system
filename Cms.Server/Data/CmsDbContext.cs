@@ -152,6 +152,11 @@ public partial class CmsDbContext : DbContext
             if (entry.State == EntityState.Modified)
                 entry.Entity.ConcurrencyStamp = Guid.NewGuid();
         }
+        foreach (var entry in ChangeTracker.Entries<GameAccountEntity>())
+        {
+            if (entry.State == EntityState.Modified)
+                entry.Entity.ConcurrencyStamp = Guid.NewGuid();
+        }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -519,6 +524,7 @@ public partial class CmsDbContext : DbContext
         });
 
         ConfigureEvents(modelBuilder);
+        ConfigureAccounts(modelBuilder);
     }
 }
 
@@ -984,6 +990,8 @@ public class GameEntity
     public string? ProcessName { get; set; }
     /// <summary>On the lock screens of all zones; otherwise only the zones in GameZones.</summary>
     public bool AllZones { get; set; } = true;
+    /// <summary>The game needs a club account of this platform (steam, epic, ...): the PC leases one when the player opens it.</summary>
+    public string? AccountPlatform { get; set; }
     public string Color { get; set; } = "#6366f1";
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;

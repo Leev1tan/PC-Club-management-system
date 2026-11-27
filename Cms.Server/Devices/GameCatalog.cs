@@ -25,6 +25,7 @@ public static class GameErrors
     public static readonly BillingError BadColor = new("game_bad_color", "The colour must be #rrggbb.");
     public static readonly BillingError BadZone = new("game_bad_zone", "Choose at least one zone, or all zones.");
     public static readonly BillingError HasHistory = new("game_has_history", "The game has play history; take it off the catalog (inactive) instead.", StatusCodes.Status409Conflict);
+    public static readonly BillingError BadAccountPlatform = new("game_bad_account_platform", "The club account platform must be empty or one of: {0}.");
 
     public static BillingError ForRule(string code) => code switch
     {
@@ -42,12 +43,17 @@ public sealed record GameRequest(
     string? Name, string? Category, string? Kind,
     string? ExePath = null, string? Arguments = null, string? WorkingDirectory = null,
     int? SteamAppId = null, string? LaunchUrl = null, string? ProcessName = null,
-    bool AllZones = true, IReadOnlyList<Guid>? ZoneIds = null, string? Color = null, int SortOrder = 0, bool IsActive = true);
+    bool AllZones = true, IReadOnlyList<Guid>? ZoneIds = null, string? Color = null, int SortOrder = 0, bool IsActive = true,
+    string? AccountPlatform = null);
 
 public sealed record GameView(
     Guid Id, string Name, string Category, string Kind, string? ExePath, string? Arguments, string? WorkingDirectory,
     int? SteamAppId, string? LaunchUrl, string? ProcessName, bool AllZones, IReadOnlyList<Guid> ZoneIds,
-    string Color, string Initials, int SortOrder, bool IsActive, DateTimeOffset UpdatedUtc, int Plays);
+    string Color, string Initials, int SortOrder, bool IsActive, DateTimeOffset UpdatedUtc, int Plays)
+{
+    /// <summary>The game needs a club account of this platform (account pool); null = none.</summary>
+    public string? AccountPlatform { get; init; }
+}
 
 public static class GameCatalog
 {
@@ -80,6 +86,12 @@ public static class GameCatalog
         }
         var color = Clean(req.Color);
         if (color != null && !GameTile.IsColor(color)) return GameErrors.BadColor;
+        string? accountPlatform = null;
+        if (Clean(req.AccountPlatform) is { } ap)
+        {
+            accountPlatform = AccountPlatforms.Normalize(ap);
+            if (accountPlatform == null) return GameErrors.BadAccountPlatform.With(string.Join(", ", AccountPlatforms.All));
+        }
 
         var zoneIds = (req.ZoneIds ?? Array.Empty<Guid>()).Distinct().ToList();
         if (!req.AllZones)
@@ -106,6 +118,7 @@ public static class GameCatalog
         game.Color = color?.ToLowerInvariant() ?? (GameTile.IsColor(game.Color) && game.CreatedUtc != default ? game.Color : GameTile.DefaultColor(name));
         game.SortOrder = Math.Clamp(req.SortOrder, -10_000, 10_000);
         game.IsActive = req.IsActive;
+        game.AccountPlatform = accountPlatform;
 
         var current = await db.GameZones.Where(z => z.GameId == game.Id).ToListAsync(ct);
         var wanted = req.AllZones ? new List<Guid>() : zoneIds;
@@ -127,7 +140,8 @@ public static class GameCatalog
             .OrderBy(g => g.SortOrder).ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase)
             .Select(g => new GameView(g.Id, g.Name, g.Category, g.LaunchKind, g.ExePath, g.Arguments, g.WorkingDirectory,
                 g.SteamAppId, g.LaunchUrl, g.ProcessName, g.AllZones, zones.TryGetValue(g.Id, out var z) ? z : Array.Empty<Guid>(),
-                g.Color, GameTile.Initials(g.Name), g.SortOrder, g.IsActive, g.UpdatedUtc, plays.TryGetValue(g.Id, out var n) ? n : 0))
+                g.Color, GameTile.Initials(g.Name), g.SortOrder, g.IsActive, g.UpdatedUtc, plays.TryGetValue(g.Id, out var n) ? n : 0)
+            { AccountPlatform = g.AccountPlatform })
             .ToList();
     }
 
@@ -144,7 +158,7 @@ public static class GameCatalog
                 Id = g.Id, Name = g.Name, Category = g.Category, Kind = g.LaunchKind, ExePath = g.ExePath, Arguments = g.Arguments,
                 WorkingDirectory = g.WorkingDirectory, SteamAppId = g.SteamAppId, LaunchUrl = g.LaunchUrl,
                 ProcessName = g.ProcessName ?? (g.LaunchKind == GameLaunchKinds.Exe ? GameLaunchRules.NormalizeProcessName(Path.GetFileName(g.ExePath?.Replace('\\', '/'))) : null),
-                Color = g.Color, Initials = GameTile.Initials(g.Name), SortOrder = g.SortOrder
+                Color = g.Color, Initials = GameTile.Initials(g.Name), SortOrder = g.SortOrder, AccountPlatform = g.AccountPlatform
             })
             .ToList();
     }

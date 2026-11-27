@@ -166,8 +166,32 @@ public sealed class CatalogGame
     public string Color { get; init; } = "#6366f1";
     public string Initials { get; init; } = "?";
     public int SortOrder { get; init; }
+    /// <summary>The game needs a club account of this platform (AccountPlatforms); null = the player's own account or none.</summary>
+    public string? AccountPlatform { get; init; }
 
     public GameLaunch Launch => new(Kind, ExePath, Arguments, WorkingDirectory, SteamAppId, LaunchUrl);
+}
+
+/// <summary>Game platforms of the club account pool (spec area 8). The server and the lock screen use the same ids.</summary>
+public static class AccountPlatforms
+{
+    public const string Steam = "steam";
+    public const string Epic = "epic";
+    public const string BattleNet = "battlenet";
+    public const string Riot = "riot";
+    public const string Ea = "ea";
+    public const string Ubisoft = "ubisoft";
+    public const string Gog = "gog";
+    public const string Other = "other";
+
+    public static readonly IReadOnlyList<string> All = new[] { Steam, Epic, BattleNet, Riot, Ea, Ubisoft, Gog, Other };
+
+    /// <summary>The id in lower case, or null for an unknown platform.</summary>
+    public static string? Normalize(string? platform)
+    {
+        var p = platform?.Trim().ToLowerInvariant();
+        return p != null && All.Contains(p) ? p : null;
+    }
 }
 
 /// <summary>Content of games.json (written by the agent, read by the lock screen).</summary>

@@ -134,6 +134,17 @@ public static class AuditActions
     public const string EventResult = "event.result";
     /// <summary>A manager or the owner started a session on a PC booked for an event.</summary>
     public const string EventHoldOverridden = "event.hold_overridden";
+
+    /// <summary>Club game-account pool: platform and masked login only, never the login or the secret.</summary>
+    public const string GameAccountAdded = "game_account.added";
+    public const string GameAccountRotated = "game_account.secret_rotated";
+    public const string GameAccountUpdated = "game_account.updated";
+    public const string GameAccountRemoved = "game_account.removed";
+    /// <summary>Staff freed an account that a PC kept.</summary>
+    public const string GameAccountReleased = "game_account.released";
+    public const string GameAccountLeased = "game_account.leased";
+    /// <summary>The agent of the leased PC fetched the credentials (once per lease).</summary>
+    public const string GameAccountDelivered = "game_account.delivered";
 }
 
 /// <summary>

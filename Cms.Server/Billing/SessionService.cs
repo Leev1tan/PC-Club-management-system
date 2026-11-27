@@ -436,6 +436,8 @@ public sealed class SessionService
                 await _db.SaveChangesAsync();
             }
 
+            // A club game account of the session goes back to the pool
+            await Cms.Server.Accounts.GameAccountService.EndForSessionAsync(_db, session.Id, now, "session_end");
             await AuditAsync(AuditActions.SessionEnded, session.Id,
                 $"Session on {device?.Hostname ?? "?"} ended: {session.TotalCost} {cur}" + (amountDue > 0 ? $", {amountDue} {cur} due at the desk" : "") +
                 (debt > 0 ? $", {debt} {cur} recorded as debt" : "") + (why != null ? $" ({why})" : ""),
@@ -697,6 +699,8 @@ public sealed class SessionService
                 return BillingErrors.DeviceBusy; // the target PC got a session at the same moment
             }
 
+            // A club game account stays on the old PC (its client is logged in there) and ends with the move
+            await Cms.Server.Accounts.GameAccountService.EndForSessionAsync(_db, session.Id, now, "transfer", fromDeviceId);
             await AuditAsync(AuditActions.SessionTransferred, session.Id,
                 $"Session moved from {plan.FromHostname} to {quote.TargetHostname}" +
                 (quote.Surcharge > 0 ? $", price difference {quote.Surcharge} {cur} " + PaidText(method) : ", no price difference"),
@@ -838,6 +842,7 @@ public sealed class SessionService
                 continue;
             }
             closed++;
+            await Cms.Server.Accounts.GameAccountService.EndForSessionAsync(_db, session.Id, now, "session_end", ct: ct);
             _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = now }));
             _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.Lock, null));
         }

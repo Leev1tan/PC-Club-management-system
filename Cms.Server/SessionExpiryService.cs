@@ -7,7 +7,7 @@ namespace Cms.Server;
 /// <summary>
 /// Every 5 s: ends prepaid and package sessions whose time ran out and locks their PCs. A paused
 /// session waits (its time stands still) unless its package cut-off (night pack 08:00) has passed.
-/// It also closes the game plays of sessions that ended.
+/// It also closes the game plays of sessions that ended and ends their club account leases.
 /// </summary>
 public sealed class SessionExpiryService : BackgroundService
 {
@@ -53,5 +53,7 @@ public sealed class SessionExpiryService : BackgroundService
         // Games of ended sessions: the play ends with the session (the lock screen kills the game too)
         db.ChangeTracker.Clear();
         await Cms.Server.Devices.GamePlays.CloseStaleAsync(db, clock.UtcNow, ct);
+        // Club game accounts of sessions that are gone go back to the pool
+        await Cms.Server.Accounts.GameAccountService.EndStaleAsync(db, clock.UtcNow, "session_end", ct);
     }
 }
