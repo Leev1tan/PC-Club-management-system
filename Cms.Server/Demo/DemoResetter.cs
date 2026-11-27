@@ -1,3 +1,4 @@
+using Cms.Server.Billing;
 using Cms.Server.Data;
 using Cms.Server.Repositories;
 
@@ -12,9 +13,10 @@ public sealed class DemoResetter
     private readonly DemoSimulator _simulator;
     private readonly DeviceRuntimeState _runtime;
     private readonly ILogger<DemoResetter> _logger;
+    private readonly ClubClock _clock;
 
     public DemoResetter(IServiceScopeFactory scopes, DemoOptions options, DemoState state,
-        DemoSimulator simulator, DeviceRuntimeState runtime, ILogger<DemoResetter> logger)
+        DemoSimulator simulator, DeviceRuntimeState runtime, ILogger<DemoResetter> logger, ClubClock clock)
     {
         _scopes = scopes;
         _options = options;
@@ -22,6 +24,7 @@ public sealed class DemoResetter
         _simulator = simulator;
         _runtime = runtime;
         _logger = logger;
+        _clock = clock;
     }
 
     /// <summary>Startup reset. Throws if the database holds data that demo mode did not create.</summary>
@@ -41,8 +44,8 @@ public sealed class DemoResetter
 
     public async Task ResetAsync(CmsDbContext db, CancellationToken ct = default)
     {
-        var now = DateTimeOffset.UtcNow;
-        var seed = await DemoSeeder.ResetAsync(db, now, Random.Shared, ct);
+        var now = _clock.UtcNow;
+        var seed = await DemoSeeder.ResetAsync(db, now, Random.Shared, _clock.Zone, ct);
         _runtime.Clear();
         _simulator.Load(seed, now);
         _state.MarkReset(now, _options.ResetInterval);

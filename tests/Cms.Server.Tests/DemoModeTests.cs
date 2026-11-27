@@ -1,3 +1,4 @@
+using Cms.Server.Billing;
 using Cms.Server.Controllers;
 using Cms.Server.Data;
 using Cms.Server.Demo;
@@ -59,6 +60,57 @@ public sealed class DemoModeTests : IDisposable
         Assert.True(sessions.Count(s => s.Status == "active") >= 8);
         Assert.True(sessions.Count(s => s.Status == "ended") >= 100);
         Assert.DoesNotContain(sessions.Where(s => s.Status == "active").GroupBy(s => s.DeviceId), g => g.Count() > 1);
+    }
+
+    [Fact]
+    public async Task Seed_has_zone_prices_packages_and_balances_explained_by_the_ledger()
+    {
+        await SeedAsync(DateTimeOffset.UtcNow);
+
+        await using var db = _testDb.NewContext();
+        var zones = await db.Zones.ToListAsync();
+        var packages = await db.Packages.ToListAsync();
+        Assert.All(zones, z => Assert.True(packages.Count(p => p.ZoneId == z.Id) >= 3));
+        Assert.All(zones, z => Assert.Contains(packages, p => p.ZoneId == z.Id && p.WindowStartMinute == 22 * 60 && p.WindowEndMinute == 8 * 60));
+        Assert.Contains(packages, p => p.DurationMinutes == 180 && p.WindowStartMinute == null);
+        Assert.Contains(packages, p => p.DurationMinutes == 300);
+        Assert.True(await db.TariffRules.CountAsync() >= 12);
+        Assert.NotEmpty(await BonusRules.LoadAsync(db));
+
+        // Every balance and bonus equals its ledger history; the chains of BalanceAfter hold
+        Assert.Empty(await Ledger.ReconcileAsync(db));
+        var users = await db.Users.AsNoTracking().ToListAsync();
+        foreach (var user in users) Assert.Null(await Ledger.CheckChainAsync(db, user.Id));
+        var ledger = await db.Ledger.AsNoTracking().ToListAsync();
+        foreach (var type in new[] { LedgerTypes.TopUp, LedgerTypes.BonusAccrual, LedgerTypes.SessionCharge, LedgerTypes.PackagePurchase, LedgerTypes.Refund, LedgerTypes.Adjustment })
+            Assert.Contains(ledger, l => l.Type == type);
+        Assert.Contains(ledger, l => l.UserId == null && l.Method is PaymentMethods.Cash or PaymentMethods.Card && l.DeskAmount > 0);
+        Assert.Contains(ledger, l => l.UserId != null && l.BonusDelta < 0); // bonus spent on PC time
+        Assert.Contains(users, u => u.BonusPoints > 0);
+
+        var sessions = await db.Sessions.AsNoTracking().ToListAsync();
+        Assert.Contains(sessions, s => s.Status == "active" && s.PausedUtc != null);
+        Assert.Contains(sessions, s => s.PackageId != null);
+        Assert.All(sessions.Where(s => s.IsPrepaid && s.UserId == null), s => Assert.Contains(s.PaymentMethod, new[] { PaymentMethods.Cash, PaymentMethods.Card }));
+    }
+
+    [Fact]
+    public async Task Simulator_pauses_and_resumes_sessions()
+    {
+        // Fixed time: the random path of the simulator depends on which packages are on sale
+        var now = new DateTimeOffset(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
+        var (sim, seed) = await SeedAsync(now);
+        var seededPause = Assert.Single(seed.PausedSessions!);
+
+        for (var t = 1; t <= 420; t += 3) await TickAsync(sim, now.AddSeconds(t)); // 7 minutes
+
+        await using var db = _testDb.NewContext();
+        // Resumed after 2.5-4 minutes: a second segment (the simulator may pause it again later)
+        var segments = await db.SessionSegments.AsNoTracking().Where(s => s.SessionId == seededPause).ToListAsync();
+        Assert.True(segments.Count >= 2, $"{segments.Count} segment(s)");
+        // The simulator paused another session on its own (lock and an empty end time on the PC)
+        var paused = await db.Commands.AsNoTracking().Where(c => c.Type == CommandTypes.SessionSet && c.PayloadJson == "{\"endUtc\":null}").ToListAsync();
+        Assert.NotEmpty(paused);
     }
 
     [Fact]
