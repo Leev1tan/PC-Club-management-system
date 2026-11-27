@@ -341,6 +341,24 @@ Prepare: two players with PINs and 200 ₴ each; the PC locked without a session
       "Не прийшов" and the PC map shows no reservation any more
 - [ ] UA / EN: the lock screen texts, the timeline, the dialogs and the errors are in one language
 
+### Test 21: Bar Order From the Lock Screen (phase 7)
+Prepare: a player with 200 ₴ and 100 bonus; products with stock (one with stock 1) and coffee without stock;
+the cashier signed in on the admin PC with the sound on; an open shift.
+- [ ] Start a session for the player (or log in on the lock screen): the session screen shows "🥤 ЗАМОВИТИ"
+- [ ] The panel lists only active products in stock; + stops at the stock (1) and at 10; the total grows in the club
+      currency; above the most per order (500 ₴) + does nothing and the panel says so
+- [ ] "З мого балансу (200.00 ₴)" → ЗАМОВИТИ: "Замовлення прийнято"; the line under the buttons says "Замовлення №N:
+      прийнято · … · оплачено з балансу"; the player card shows −total ("Замовлення бару (утримано)"); the bonus is
+      unchanged
+- [ ] Within 5 s the admin UI plays a short tone and the tab "Замовлення" shows the badge 1; a second order from the
+      same PC is refused ("У вас уже є відкрите замовлення")
+- [ ] The cashier clicks "Готується": the lock screen line says "готується" within 10 s and the player cannot cancel any
+      more; "Видано": a receipt appears in Каса / Бар (balance), the stock goes down, the Z-report counts it
+- [ ] A guest session: only "Оплачу на касі"; the cashier delivers with "Видано: готівка" → a cash receipt
+- [ ] A new order cancelled by the player on the lock screen returns the money at once; a cancel by the cashier too
+- [ ] Owner → Замовлення → settings: orders off → the button disappears from the lock screens within 30 s
+- [ ] UA / EN: the panel, the status line and the errors are in the club language
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

@@ -156,6 +156,12 @@ POST /api/reservations/{id}/confirm | decline | cancel | check-in  → requests;
                                    check-in starts the session (mode minutes | package | open | balance)  [front desk]
 GET/PUT /api/reservations/settings → hold, grace period, deposit of a no-show (PUT: Owner, Manager; audited)
 GET  /api/ledger/holds           → reservation deposits against their ledger rows                [Owner, Manager]
+GET  /api/devices/{id}/bar-menu  → products in stock, limits, can the player pay from the balance   [X-Device-Key, own PC]
+POST /api/devices/{id}/orders    → bar order {items, payment balance | desk} during a session    [X-Device-Key, own PC]
+POST /api/devices/{id}/orders/cancel → the player cancels the new order                            [X-Device-Key, own PC]
+GET  /api/orders                 → the queue: open orders, the last closed ones, the count of new ones  [front desk]
+POST /api/orders/{id}/preparing | deliver {paymentMethod for desk orders} | cancel {reason}         [front desk]
+GET/PUT /api/orders/settings     → on/off, the most per order (PUT: Owner, Manager; audited)
 GET  /api/public/booking         → booking page: on/off, zones (PCs, price now), days, durations   [public, 120/min per IP]
 GET  /api/public/booking/availability?date=&duration= → free capacity per zone and start, nothing else  [public]
 POST /api/public/booking         → request (zone, date, time, duration, name, phone; honeypot "website")  [public, 5 per
@@ -477,6 +483,20 @@ erDiagram
   `deposit_kept` (no balance change; PC time revenue paid from the balance). `LedgerTotals` has the three sums (the
   Z-report, the analytics and both CSVs show them); the average session leaves kept deposits out. `Billing/Holds`
   checks every reservation: hold − release − kept = the deposit while held, else 0.
+
+### Bar orders from the lock screen (phase 7)
+
+- `BarOrders` + `BarOrderItems` (name and price copied when ordered): status new, preparing, delivered, cancelled;
+  payment balance (prepaid) or desk; one open order per PC (partial unique index `IX_BarOrders_DeviceId_Open`).
+- `Pos/BarOrderService`: a prepaid order takes the money from the real balance at once (`Wallet.TryChargeAsync`,
+  purpose bar) and writes `order_hold`; the delivery claims the order (concurrency stamp), releases the hold
+  (`order_release`) and calls `SaleService.SellAsync` with the order prices inside the same transaction (it joins it),
+  so a sale that fails (sold out, no shift for a desk order) leaves the order and the hold as they were. `LedgerTotals`
+  counts the held and released orders (not revenue; the bar sale is the revenue); `Billing/Holds` checks each order.
+- The heartbeat brings the order of the session (`ClientSessionInfo.Order`) to `state.json`; the lock screen shows
+  its state (`Cms.Client.OrderNotice`). The cart and its limits are `Cms.Client.BarCart`; the WPF panel
+  (`MainWindow.Orders.cs`) only draws them. The admin UI polls `GET /api/orders` with the other data (badge, a Web Audio
+  tone when the number of new orders grows).
 
 ### Public booking page (phase 7)
 
