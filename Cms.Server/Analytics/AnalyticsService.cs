@@ -174,7 +174,8 @@ public static class AnalyticsService
             {
                 var start = ClubTimeZone.LocalToUtc(day.AddHours(h), zone);
                 var end = ClubTimeZone.LocalToUtc(day.AddHours(h + 1), zone);
-                if (start >= period.EndUtc) break;
+                // The hour that starts exactly now is in the series (empty), like the hours that started before
+                if (start > period.EndUtc) break;
                 if (end > start) list.Add(new Slot(start, end, $"{h:00}:00"));
             }
             return list;
@@ -182,7 +183,8 @@ public static class AnalyticsService
         for (var d = period.From; d <= period.To; d = d.AddDays(1))
         {
             var start = ClubTimeZone.LocalToUtc(d.ToDateTime(TimeOnly.MinValue), zone);
-            if (start >= period.EndUtc) break;
+            // At 00:00:00 club time today has no second yet, but it is a day of the period ("30d" = 30 points)
+            if (start > period.EndUtc) break;
             list.Add(new Slot(start, ClubTimeZone.LocalToUtc(d.AddDays(1).ToDateTime(TimeOnly.MinValue), zone), d.ToString("yyyy-MM-dd")));
         }
         return list;
@@ -366,6 +368,12 @@ public static class AnalyticsService
         var ids = inside.ToList();
         var shiftRows = ids.Count == 0 ? new List<LedgerEntryEntity>()
             : await db.Ledger.AsNoTracking().Where(l => l.ShiftId != null && ids.Contains(l.ShiftId.Value)).ToListAsync(ct);
+        // A shift with a row at the end of the period or later is not fully inside: at the exact instant of a shift
+        // change (now = the close of one shift and the open of the next) a row written at "now" is not a row of the
+        // period [from, end), so its shift counts with the rows outside the shifts
+        foreach (var id in shiftRows.Where(r => r.CreatedUtc >= period.EndUtc || r.CreatedUtc < period.FromUtc).Select(r => r.ShiftId!.Value).Distinct().ToList())
+            inside.Remove(id);
+        shiftRows = shiftRows.Where(r => inside.Contains(r.ShiftId!.Value)).ToList();
         var z = LedgerTotals.Of(shiftRows);
         var outside = LedgerTotals.Of(rows.Where(r => r.ShiftId is not { } id || !inside.Contains(id)));
 
