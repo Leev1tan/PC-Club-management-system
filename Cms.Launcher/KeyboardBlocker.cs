@@ -22,6 +22,7 @@ internal static class KeyboardBlocker
     {
         _onStaffChord = onStaffChord;
         if (_enabled) return;
+        Chord.Reset();
         _proc = HookCallback;
         _hookId = SetHook(_proc);
         _enabled = true;

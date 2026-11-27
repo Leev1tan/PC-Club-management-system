@@ -14,6 +14,8 @@ public sealed class StaffChordTests
         Assert.Equal((false, true), chord.OnKey(StaffChord.VkU, true, true, true, false, false));   // key repeat: no second prompt
         Assert.Equal((false, false), chord.OnKey(StaffChord.VkU, false, true, true, false, false)); // key up
         Assert.Equal((true, true), chord.OnKey(StaffChord.VkU, true, true, true, false, false));    // the next press
+        chord.Reset();                                                                            // the hook missed the key-up (unlocked)
+        Assert.Equal((true, true), chord.OnKey(StaffChord.VkU, true, true, true, false, false));
     }
 
     [Fact]

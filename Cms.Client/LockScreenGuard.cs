@@ -31,6 +31,11 @@ public static class WindowsParts
         new(Place.SystemApps, "StartMenuExperienceHost.exe", false, "the Start menu; Windows starts it again at once, and the Win key is blocked while locked"),
         new(Place.SystemApps, "SearchHost.exe", false, "Windows search; Windows starts it again at once"),
         new(Place.SystemApps, "LockApp.exe", false, "the Windows lock screen (Win+L), above all windows anyway"),
+        // Host processes of Windows that run as the player: system processes; ending one breaks the Windows session
+        new(Place.System32, "svchost.exe", false, "the services of the player's session (clipboard, notifications, sync)"),
+        new(Place.System32, "sihost.exe", false, "Shell Infrastructure Host of the session"),
+        new(Place.System32, "taskhostw.exe", false, "host of the scheduled tasks of the session"),
+        new(Place.System32, "RuntimeBroker.exe", false, "permission broker of the Windows apps"),
         // Text input: the player types the login and staff type the PIN with these
         new(Place.SystemApps, "TextInputHost.exe", true, "Windows 11 touch keyboard, emoji panel and IME candidate window"),
         new(Place.Ink, "TabTip.exe", true, "Windows 10 touch keyboard"),

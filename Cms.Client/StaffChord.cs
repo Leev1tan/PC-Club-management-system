@@ -11,6 +11,9 @@ public sealed class StaffChord
     public const int VkU = 0x55;
     private bool _held;
 
+    /// <summary>The hook is installed again (a new lock): a key-up that the hook did not see does not lose the next press.</summary>
+    public void Reset() => _held = false;
+
     /// <summary>A key event in the hook. True: start the PIN prompt now. Swallow: the key does not go on to a window.</summary>
     public (bool Fire, bool Swallow) OnKey(int vk, bool down, bool ctrl, bool shift, bool alt, bool win)
     {

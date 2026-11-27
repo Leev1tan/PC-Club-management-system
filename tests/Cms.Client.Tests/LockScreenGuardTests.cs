@@ -31,6 +31,8 @@ public sealed class LockScreenGuardTests
     [InlineData(@"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\TextInputHost.exe", true)]
     [InlineData(@"C:\Windows\SystemApps\Microsoft.LockApp_cw5n1h2txyewy\LockApp.exe", false)]
     [InlineData(@"C:\Program Files\Common Files\microsoft shared\ink\TabTip.exe", true)]
+    [InlineData(@"C:\Windows\System32\svchost.exe", false)]                // a host process of Windows, never ended
+    [InlineData(@"C:\Windows\System32\sihost.exe", false)]
     [InlineData(@"\\?\C:\Windows\System32\osk.exe", true)]
     public void Real_programs_of_windows_are_trusted(string path, bool mayHoldForeground)
     {
@@ -49,6 +51,7 @@ public sealed class LockScreenGuardTests
     [InlineData(@"C:\Windows\System32\OpenWith.exe")]                        // a Windows program, but not a helper: the defect
     [InlineData(@"C:\Windows\System32\cmd.exe")]
     [InlineData(@"C:\Windows\System32\notepad.exe")]
+    [InlineData(@"C:\Users\player\svchost.exe")]                           // the name of a host process elsewhere
     [InlineData(@"C:\Windows\osk.exe")]                                      // the right name in the wrong folder
     [InlineData(@"C:\Windows\SystemApps\TextInputHost.exe")]                 // no package folder
     [InlineData(@"C:\Windows\SystemApps\a\b\TextInputHost.exe")]             // two folder levels
