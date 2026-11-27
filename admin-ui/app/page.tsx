@@ -36,6 +36,7 @@ type Session = {
   totalCost: number; isPrepaid: boolean;
   packageId?: string | null; packageName?: string | null; pausedUtc?: string | null; cutoffUtc?: string | null;
   paymentMethod?: string | null; paidMinutes?: number | null; currentCost?: number | null;
+  limitToBalance?: boolean; balanceEndUtc?: string | null;
 };
 type Revenue = { today: number; week: number; month: number; currency: string };
 type Transaction = { id: string; userId: string; amount: number; type: string; description: string | null; createdUtc: string };
@@ -302,9 +303,11 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const sessionLabel = (s: Session) => s.packageName
     ? <><span className="badge badge-amber">{t.session.packageBadge}</span> {s.packageName}</>
     : <span className="badge badge-blue">{s.tariffName || '—'}</span>;
+  // A session from the balance (player login) ends when the balance is used up: its planned end
   const sessionLeft = (s: Session) => s.pausedUtc
-    ? <span style={{ color: 'var(--amber)' }}>⏸ {t.session.paused} · {timeRemaining(s.endUtc, s.pausedUtc)}</span>
-    : <span style={{ color: 'var(--blue)' }}>{timeRemaining(s.endUtc)}</span>;
+    ? <span style={{ color: 'var(--amber)' }}>⏸ {t.session.paused} · {timeRemaining(s.endUtc ?? s.balanceEndUtc ?? null, s.pausedUtc)}</span>
+    : <span style={{ color: 'var(--blue)' }}>{timeRemaining(s.endUtc ?? s.balanceEndUtc ?? null)}
+        {s.limitToBalance && <span className="badge badge-green" style={{ marginLeft: 6 }} title={t.session.fromBalanceHint}>{t.session.fromBalance}</span>}</span>;
   const sessionCost = (s: Session) => s.status === 'active' && !s.isPrepaid
     ? <span title={t.session.current}>{cash(s.currentCost ?? 0)} …</span>
     : <>{cash(s.totalCost)}</>;

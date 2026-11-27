@@ -130,6 +130,8 @@ export const uk = {
   },
 
   session: {
+    fromBalance: 'з балансу',
+    fromBalanceHint: 'Гравець увійшов на ПК: час іде з балансу й закінчується, коли кошти вичерпано',
     startTitle: '🎮 Нова сесія — {host}',
     modeTariff: 'Тариф',
     modePackage: 'Пакет',
@@ -740,6 +742,7 @@ export const uk = {
   },
 
   errors: {
+    balance_limit_needs_player: 'Час з балансу — лише для гравця, без передоплати, з оплатою з балансу',
     game_not_found: 'Гру не знайдено',
     game_bad_name: 'Назва обов\'язкова (до 100 символів)',
     game_bad_category: 'Категорія обов\'язкова (до 50 символів)',
@@ -951,6 +954,8 @@ export const en: typeof uk = {
   },
 
   session: {
+    fromBalance: 'from the balance',
+    fromBalanceHint: 'The player logged in on the PC: the time runs from the balance and ends when the money is used up',
     startTitle: '🎮 New session — {host}',
     modeTariff: 'Tariff',
     modePackage: 'Package',
@@ -1561,6 +1566,7 @@ export const en: typeof uk = {
   },
 
   errors: {
+    balance_limit_needs_player: 'Time from the balance needs a player, no prepaid time and payment from the balance',
     game_not_found: 'Game not found',
     game_bad_name: 'The name is required (at most 100 characters)',
     game_bad_category: 'The category is required (at most 50 characters)',
