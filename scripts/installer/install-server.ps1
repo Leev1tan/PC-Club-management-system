@@ -145,6 +145,12 @@ $exePath = Join-Path $InstallPath "Cms.Server.exe"
 $binPath = "`"$exePath`""
 sc.exe create $serviceName binPath= $binPath start= auto | Out-Null
 sc.exe description $serviceName "Club Management System Server" | Out-Null
+# Restart actions: when the server ends with an error, Windows starts it again after 5 s, 5 s, then 30 s (the count
+# goes back to zero after one day). failureflag 1: also when the service stops itself with an error code.
+sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/5000/restart/30000 | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the restart actions of the service $serviceName (sc.exe failure)" }
+sc.exe failureflag $serviceName 1 | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the failure flag of the service $serviceName (sc.exe failureflag)" }
 sc.exe start $serviceName | Out-Null
 
 Write-Host ""

@@ -276,6 +276,15 @@ function Set-KioskUserPolicies([string]$Root, [string]$LauncherExe) {
     New-ItemProperty -Path $explorer -Name 'DisableContextMenusInStart' -Value 1 -PropertyType DWord -Force | Out-Null
 }
 
+# Restart actions of a service: when it ends with an error, Windows starts it again after 5 s, 5 s, then 30 s (the
+# count goes back to zero after one day). failureflag 1: also when the service stops itself with an error code.
+function Set-ServiceRecovery([string]$Name) {
+    sc.exe failure $Name reset= 86400 actions= restart/5000/restart/5000/restart/30000 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the restart actions of the service $Name (sc.exe failure)" }
+    sc.exe failureflag $Name 1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the failure flag of the service $Name (sc.exe failureflag)" }
+}
+
 # Removes a machine-wide value that an older installer wrote (it applied to every account, also ClubAdmin).
 function Remove-MachineValue([string]$Path, [string]$Name, [string]$What) {
     if ($null -ne (Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue)) {
@@ -426,6 +435,7 @@ Start-Sleep -Seconds 1
 $binPath = "`"$exePath`""
 sc.exe create $serviceName binPath= $binPath start= auto obj= "NT AUTHORITY\LocalService" type= own | Out-Null
 sc.exe description $serviceName "Club Agent Service - Gaming PC management agent" | Out-Null
+Set-ServiceRecovery $serviceName
 sc.exe start $serviceName | Out-Null
 
 # Step 6: Configure Launcher autostart

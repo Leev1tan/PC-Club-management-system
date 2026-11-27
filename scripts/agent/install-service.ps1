@@ -36,6 +36,9 @@ if ($existing) {
 $escaped = '"' + $BinaryPath + '"'
 sc.exe create $ServiceName binPath= $escaped start= auto obj= 'NT AUTHORITY\LocalService' type= own | Out-Null
 sc.exe description $ServiceName 'Cybersport club agent' | Out-Null
+# Restart actions (the same as scripts/installer/install-client.ps1): 5 s, 5 s, 30 s; reset after one day
+sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/30000 | Out-Null
+sc.exe failureflag $ServiceName 1 | Out-Null
 sc.exe start $ServiceName | Out-Null
 
 Write-Host "Service '$ServiceName' installed and started." -ForegroundColor Green
