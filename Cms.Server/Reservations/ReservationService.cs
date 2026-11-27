@@ -34,6 +34,12 @@ public static class ReservationErrors
     public static readonly BillingError BadDeposit = new("bad_deposit", "The deposit must be 0 to 10000.");
     public static readonly BillingError InsufficientDeposit = new("insufficient_balance_deposit", "Not enough real balance for the deposit: need {0}, have {1}.", Conflict);
     public static readonly BillingError BadSettings = new("bad_reservation_settings", "{0}");
+    public static readonly BillingError BookingDisabled = new("booking_disabled", "Online booking is off.", StatusCodes.Status404NotFound);
+    public static readonly BillingError SlotFull = new("slot_full", "This time is fully booked. Choose another time.", Conflict);
+    public static readonly BillingError OpenLimit = new("booking_open_limit", "This phone number already has {0} open requests or reservations.", Conflict);
+    public static readonly BillingError PhoneLimit = new("booking_phone_limit", "Too many requests for this phone number. Try again tomorrow or call the club.", StatusCodes.Status429TooManyRequests);
+    public static readonly BillingError BadName = new("booking_bad_name", "Enter your name: 2 to 60 letters.");
+    public static readonly BillingError BadPhone = new("booking_bad_phone", "Enter a phone number with 9 to 15 digits.");
 }
 
 public sealed record CreateReservationRequest(Guid? DeviceId, Guid? ZoneId, string? Date, string? Time, int DurationMinutes,
@@ -360,6 +366,118 @@ public sealed class ReservationService
     private async Task<string> HostAsync(Guid id) =>
         await _db.Devices.AsNoTracking().Where(d => d.Id == id).Select(d => d.Hostname).FirstOrDefaultAsync() ?? "?";
 
+    // ===== Public requests =====
+
+    /// <summary>
+    /// A request of the public booking page for any PC of a zone: status requested (holds no PC until staff confirm
+    /// it), name and phone stored for staff only. The caller checked the limits and the free capacity; the audit row
+    /// has no name, no phone and no IP.
+    /// </summary>
+    public async Task<BillingResult<ReservationEntity>> RequestAsync(Guid zoneId, DateTimeOffset startUtc, int minutes, string name, string phone, int maxOpenPerPhone)
+    {
+        var now = _clock.UtcNow;
+        var zone = await _db.Zones.AsNoTracking().FirstOrDefaultAsync(z => z.Id == zoneId);
+        if (zone == null) return new BillingError("zone_not_found", "Zone not found", StatusCodes.Status404NotFound);
+        var r = new ReservationEntity
+        {
+            Status = ReservationStatuses.Requested, Source = "public", ZoneId = zone.Id, StartUtc = startUtc, EndUtc = startUtc.AddMinutes(minutes),
+            DurationMinutes = minutes, StartDay = DayOf(startUtc, _clock), GuestName = name, Phone = phone, CreatedUtc = now, UpdatedUtc = now
+        };
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        await LockAsync();
+        // Open requests and reservations of this phone number (under the lock: two requests at once count both)
+        var key = PhoneKey(phone);
+        var open = (await _db.Reservations.AsNoTracking()
+                .Where(x => x.Phone != null && (x.Status == ReservationStatuses.Requested || x.Status == ReservationStatuses.Confirmed))
+                .Select(x => new { x.Phone, x.EndUtc }).ToListAsync())
+            .Count(x => x.EndUtc > now && PhoneKey(x.Phone) == key);
+        if (open >= maxOpenPerPhone) return ReservationErrors.OpenLimit.With(maxOpenPerPhone);
+        var free = await FreeCapacityAsync(new[] { zone.Id }, new[] { (startUtc, r.EndUtc) });
+        if (free[zone.Id][0] <= 0) return ReservationErrors.SlotFull;
+        _db.Reservations.Add(r);
+        await _db.SaveChangesAsync();
+        await AuditAsync(AuditActions.ReservationRequested, r.Id,
+            $"Reservation request #{r.Id} from the booking page: any PC of {zone.Name}, {Local(r.StartUtc, "dd.MM HH:mm")}-{Local(r.EndUtc)}",
+            new { id = r.Id, zone = zone.Name, startUtc = r.StartUtc, minutes });
+        await tx.CommitAsync();
+        return BillingResult<ReservationEntity>.Success(r);
+    }
+
+    /// <summary>The last 9 digits of a phone number: "+380 67 ...", "067 ..." and "380-67..." are one number for the limits.</summary>
+    public static string PhoneKey(string? phone)
+    {
+        var digits = new string((phone ?? string.Empty).Where(char.IsAsciiDigit).ToArray());
+        return digits.Length > 9 ? digits[^9..] : digits;
+    }
+
+    /// <summary>
+    /// How many more any-PC reservations each zone takes in each slot: the plan of the confirmed and checked-in
+    /// reservations, and the running sessions (until their planned end; open-ended ones count one hour; never into a
+    /// reservation of the PC). Requests hold nothing, so they do not count.
+    /// </summary>
+    public async Task<Dictionary<Guid, int[]>> FreeCapacityAsync(IReadOnlyList<Guid> zoneIds, IReadOnlyList<(DateTimeOffset Start, DateTimeOffset End)> slots)
+    {
+        var result = new Dictionary<Guid, int[]>();
+        if (slots.Count == 0) { foreach (var z in zoneIds) result[z] = Array.Empty<int>(); return result; }
+        var from = slots.Min(x => x.Start);
+        var to = slots.Max(x => x.End);
+        var now = _clock.UtcNow;
+        var occupying = await OccupyingAsync(from < now ? from : now, to, null);
+        var floatingIds = occupying.Where(i => !i.Pc.HasValue).Select(i => i.Id).ToList();
+        var floatingZone = await _db.Reservations.AsNoTracking().Where(r => floatingIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, r => r.ZoneId);
+        var sessions = await _db.Sessions.AsNoTracking().Where(s => s.Status == "active").ToListAsync();
+        foreach (var zoneId in zoneIds)
+        {
+            var pcs = await ZonePcsAsync(zoneId);
+            var items = occupying.Where(i => i.Pc.HasValue ? pcs.Contains(i.Pc.Value) : floatingZone.GetValueOrDefault(i.Id) == zoneId).ToList();
+            var n = 0;
+            foreach (var s in sessions.Where(s => pcs.Contains(s.DeviceId)))
+            {
+                var end = s.PausedUtc == null && s.IsPrepaid && s.EndUtc is { } planned ? planned : now.AddHours(1);
+                var next = items.Where(i => i.Pc == s.DeviceId && i.Start >= now).Select(i => i.Start).DefaultIfEmpty(DateTimeOffset.MaxValue).Min();
+                if (next < end) end = next;
+                if (items.Any(i => i.Pc == s.DeviceId && i.Overlaps(now, end))) continue;
+                if (end > now) items.Add(new PlanItem(-1_000_000 - n++, s.DeviceId, now, end));
+            }
+            // Per slot only the items that overlap it (the same scope as the check of a new reservation): a conflict at
+            // another time of the day never closes this slot
+            result[zoneId] = slots.Select(slot =>
+                ReservationPlan.FreeCapacity(pcs, items.Where(i => i.Overlaps(slot.Start, slot.End)).ToList(), slot.Start, slot.End)).ToArray();
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Erases the name, the phone and the note of reservations whose slot ended EraseAfterDays ago (the row stays for
+    /// the statistics). One audit row with the ids, never with the data.
+    /// </summary>
+    public async Task<int> ErasePersonalDataAsync(ReservationSettings settings, CancellationToken ct = default)
+    {
+        var now = _clock.UtcNow;
+        var limit = now.AddDays(-settings.EraseAfterDays);
+        var maxDay = DayOf(limit, _clock) + 1;
+        var candidates = (await _db.Reservations
+                .Where(r => r.ErasedUtc == null && (r.GuestName != null || r.Phone != null) && r.StartDay <= maxDay).ToListAsync(ct))
+            .Where(r => r.EndUtc <= limit && r.Status is not (ReservationStatuses.Confirmed or ReservationStatuses.Requested)).ToList();
+        if (candidates.Count == 0) return 0;
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        foreach (var r in candidates)
+        {
+            r.GuestName = null;
+            r.Phone = null;
+            if (r.Source == "public") r.Note = null;
+            r.ErasedUtc = now;
+            r.UpdatedUtc = now;
+        }
+        await _db.SaveChangesAsync(ct);
+        if (_audit != null)
+            await _audit.WriteAsync(AuditActions.ReservationDataErased, "reservations", null,
+                $"Names and phone numbers of {candidates.Count} reservation(s) erased: slots ended {settings.EraseAfterDays} days ago or earlier",
+                new { ids = candidates.Select(r => r.Id).Take(500), eraseAfterDays = settings.EraseAfterDays }, _auditActor, ct);
+        await tx.CommitAsync(ct);
+        return candidates.Count;
+    }
+
     // ===== Requests: confirm, decline =====
 
     /// <summary>A request becomes a confirmed reservation (it holds a PC then); the PC or the zone must have room.</summary>
@@ -551,8 +669,8 @@ public sealed class ReservationService
 
     /// <summary>
     /// Every 15 s: confirmed reservations without check-in become no-shows when the grace period ends (the deposit
-    /// is kept or returned by the club setting), requests that nobody confirmed expire at their start, and an
-    /// any-PC reservation gets a PC when its hold begins.
+    /// is kept or returned by the club setting), requests that nobody confirmed expire at their start, an any-PC
+    /// reservation gets a PC when its hold begins, and personal data of old slots is erased.
     /// </summary>
     public async Task<ReservationJobResult> RunJobsAsync(CancellationToken ct = default)
     {
@@ -572,7 +690,8 @@ public sealed class ReservationService
             else if (r.Status == ReservationStatuses.Confirmed && r.DeviceId == null && r.AssignedDeviceId == null && now >= r.StartUtc.AddMinutes(-settings.HoldMinutes))
                 assigned += await AssignAsync(r.Id, settings, ct) ? 1 : 0;
         }
-        return new ReservationJobResult(noShows, expired, assigned, 0);
+        var erased = await ErasePersonalDataAsync(settings, ct);
+        return new ReservationJobResult(noShows, expired, assigned, erased);
     }
 
     private async Task<bool> NoShowAsync(long id, ReservationSettings settings, CancellationToken ct)

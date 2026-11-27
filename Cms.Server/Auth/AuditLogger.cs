@@ -93,6 +93,10 @@ public static class AuditActions
     /// <summary>A manager or the owner started a session on a PC held for a reservation of someone else.</summary>
     public const string ReservationHoldOverridden = "reservation.hold_overridden";
     public const string ReservationSettingsChanged = "reservation.settings_changed";
+    /// <summary>A request of the public booking page (no name, no phone, no IP in the audit row).</summary>
+    public const string ReservationRequested = "reservation.requested";
+    /// <summary>Names and phone numbers of reservations erased some days after the slot (ids only).</summary>
+    public const string ReservationDataErased = "reservation.personal_data_erased";
 
     public const string GameCreated = "game.created";
     public const string GameUpdated = "game.updated";

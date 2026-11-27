@@ -22,6 +22,10 @@ public static class AuthConstants
     public const string StampClaim = "ccms:stamp";
     public const string DisplayNameClaim = "ccms:display_name";
     public const string AuthRateLimitPolicy = "auth";
+    /// <summary>Requests of the public booking page per client IP (Booking:RequestsPerIpPer10Minutes, default 5 in 10 minutes).</summary>
+    public const string BookingWritePolicy = "booking-write";
+    /// <summary>Reads of the public booking page per client IP (Booking:ReadsPerIpPerMinute, default 120 a minute).</summary>
+    public const string BookingReadPolicy = "booking-read";
 }
 
 /// <summary>
@@ -96,9 +100,17 @@ public static class AuthSetup
         });
 
         var perMinute = config.GetValue("Auth:LoginRateLimitPerMinute", demoMode ? 300 : 20);
+        var bookingWrites = Math.Max(1, config.GetValue("Booking:RequestsPerIpPer10Minutes", 5));
+        var bookingReads = Math.Max(1, config.GetValue("Booking:ReadsPerIpPerMinute", 120));
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddPolicy(AuthConstants.BookingWritePolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
+                ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = bookingWrites, Window = TimeSpan.FromMinutes(10), QueueLimit = 0 }));
+            options.AddPolicy(AuthConstants.BookingReadPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
+                ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = bookingReads, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
             options.AddPolicy(AuthConstants.AuthRateLimitPolicy, ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions

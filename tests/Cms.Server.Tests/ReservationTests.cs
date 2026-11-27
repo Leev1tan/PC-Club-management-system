@@ -245,6 +245,42 @@ public sealed class ReservationTests : IDisposable
     }
 
     [Fact]
+    public async Task Names_and_phones_are_erased_some_days_after_the_slot()
+    {
+        long request, walkIn, player;
+        await using (var db = _testDb.NewContext())
+        {
+            var service = Service(db);
+            request = (await service.RequestAsync(_vip, Local(0, 18), 60, "Леся Гордієнко", "+447700900456", 2)).Value!.Id;
+            walkIn = (await BookAsync(_std1, null, "18:00", 60, guest: "Остап Вишняк")).Value!.Id;
+            player = (await BookAsync(_std2, null, "18:00", 60, (await PlayerAsync(100m)).Id)).Value!.Id;
+            Assert.True((await service.DeclineAsync(request, "немає місць")).Ok);
+        }
+        // Not yet: 29 days after the slot; the walk-in becomes a no-show on the way
+        At(Local(29, 19));
+        await using (var db = _testDb.NewContext()) Assert.Equal(0, (await Service(db).RunJobsAsync()).Erased);
+        Assert.Equal("Остап Вишняк", (await GetAsync(walkIn)).GuestName);
+        At(Local(30, 19));
+        await using (var db = _testDb.NewContext()) Assert.Equal(2, (await Service(db).RunJobsAsync()).Erased);
+        foreach (var id in new[] { request, walkIn })
+        {
+            var r = await GetAsync(id);
+            Assert.Equal((null, null), (r.GuestName, r.Phone));
+            Assert.NotNull(r.ErasedUtc);
+        }
+        Assert.Null((await GetAsync(player)).ErasedUtc); // a player reservation has no name or phone to erase
+        await using (var db = _testDb.NewContext())
+        {
+            var row = await db.AuditLog.AsNoTracking().SingleAsync(a => a.Action == AuditActions.ReservationDataErased);
+            Assert.Contains($"{request}", row.DetailsJson);
+            Assert.DoesNotContain("Остап", row.Summary + row.DetailsJson);
+            Assert.DoesNotContain("7700", row.Summary + row.DetailsJson);
+            Assert.DoesNotContain(await db.AuditLog.AsNoTracking().ToListAsync(), a => (a.Summary + a.DetailsJson).Contains("Леся") || (a.Summary + a.DetailsJson).Contains("Остап"));
+            Assert.Equal(0, (await Service(db).RunJobsAsync()).Erased);
+        }
+    }
+
+    [Fact]
     public async Task Any_pc_reservations_get_a_pc_at_the_hold_and_requests_expire()
     {
         var zoneWide = (await BookAsync(null, _std, "12:00", 60)).Value!;

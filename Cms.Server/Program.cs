@@ -90,6 +90,7 @@ builder.Services.AddSingleton(sp => Cms.Server.Billing.ClubClock.FromConfigurati
 // Repositories
 builder.Services.AddSingleton<DeviceRuntimeState>();
 builder.Services.AddSingleton<Cms.Server.Devices.PlayerLoginLimiter>();
+builder.Services.AddSingleton<Cms.Server.Reservations.BookingPhoneLimiter>();
 // Wake-on-LAN: UDP to Power:WakeBroadcast / Power:WakePort; the demo simulates it (no network traffic)
 builder.Services.AddSingleton(Cms.Server.Devices.PowerOptions.FromConfiguration(builder.Configuration));
 if (demo.Enabled)
@@ -160,6 +161,47 @@ app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Club Manage
 
 app.UseCors();
 app.UseDemoRestrictions(demo);
+// The public booking page takes small JSON bodies only: over 2 KB is refused (413) before the JSON is read; a body
+// without a length (chunked) is read up to the limit (Kestrel also enforces [RequestSizeLimit]; this covers every host)
+app.Use(async (context, next) =>
+{
+    var request = context.Request;
+    if (HttpMethods.IsPost(request.Method) && request.Path.StartsWithSegments("/api/public/booking"))
+    {
+        const int max = Cms.Server.Controllers.PublicBookingController.MaxBodyBytes;
+        if (request.ContentLength > max)
+        {
+            context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            return;
+        }
+        if (request.ContentLength == null)
+        {
+            var buffer = new MemoryStream();
+            var chunk = new byte[512];
+            int read;
+            while ((read = await request.Body.ReadAsync(chunk, context.RequestAborted)) > 0)
+            {
+                if (buffer.Length + read > max)
+                {
+                    context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                    return;
+                }
+                buffer.Write(chunk, 0, read);
+            }
+            buffer.Position = 0;
+            request.Body = buffer;
+            request.ContentLength = buffer.Length;
+        }
+    }
+    await next(context);
+});
+// The public booking page: /book is the static book.html (Windows install: wwwroot; the admin-ui container does the same)
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.Equals("/book", StringComparison.OrdinalIgnoreCase) || context.Request.Path.Equals("/book/", StringComparison.OrdinalIgnoreCase))
+        context.Request.Path = "/book.html";
+    await next(context);
+});
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseCsrfProtection(corsOrigins);
