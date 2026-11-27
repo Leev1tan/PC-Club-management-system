@@ -117,6 +117,21 @@ public static class AuditActions
     /// <summary>A bar order cancelled (prepaid: the money back on the balance).</summary>
     public const string OrderCancelled = "order.cancelled";
     public const string OrderSettingsChanged = "order.settings_changed";
+
+    /// <summary>Events and tournaments (ids, PCs, times and amounts only: never the names of events, teams or people).</summary>
+    public const string EventCreated = "event.created";
+    public const string EventUpdated = "event.updated";
+    public const string EventCancelled = "event.cancelled";
+    public const string EventStarted = "event.started";
+    public const string EventFinished = "event.finished";
+    public const string EventTeamRegistered = "event.team_registered";
+    public const string EventTeamWithdrawn = "event.team_withdrawn";
+    /// <summary>The session of one player of a running event started later (after a top-up, a free PC).</summary>
+    public const string EventSeatStarted = "event.seat_started";
+    public const string EventBracketCreated = "event.bracket_created";
+    public const string EventResult = "event.result";
+    /// <summary>A manager or the owner started a session on a PC booked for an event.</summary>
+    public const string EventHoldOverridden = "event.hold_overridden";
 }
 
 /// <summary>

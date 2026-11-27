@@ -72,12 +72,17 @@ public class DevicesController : ControllerBase
         // and the club settings of the lock screen (language, currency)
         if (status != DeviceStatuses.Approved) return Ok(new DeviceHeartbeatResponse(status, null));
         var pinHash = await KioskSettings.GetStaffPinHashAsync(_db);
-        var hold = User.DeviceId() is { } held ? await Cms.Server.Reservations.ReservationHolds.ActiveAsync(_db, held, _clock ?? Cms.Server.Billing.ClubClock.System()) : null;
+        var clock = _clock ?? Cms.Server.Billing.ClubClock.System();
+        // An event booking of the PC comes first (events and reservations never overlap on a PC)
+        var booked = User.DeviceId() is { } pc ? await Cms.Server.Events.EventHolds.ActiveAsync(_db, pc, clock) : null;
+        var hold = booked == null && User.DeviceId() is { } held ? await Cms.Server.Reservations.ReservationHolds.ActiveAsync(_db, held, clock) : null;
         return Ok(new DeviceHeartbeatResponse(status, pinHash)
         {
             Client = await Cms.Server.Devices.ClubLanguage.ClientSettingsAsync(_db),
             Session = User.DeviceId() is { } deviceId ? await Cms.Server.Devices.PlayerSessions.InfoAsync(_db, deviceId) : null,
-            Reservation = hold == null ? null : new ClientReservationInfo { Id = hold.Id, Name = hold.Name, StartUtc = hold.StartUtc, StartLocal = hold.StartLocal }
+            Reservation = booked != null
+                ? new ClientReservationInfo { Id = booked.Id, Name = booked.Name, StartUtc = booked.StartUtc, StartLocal = booked.StartLocal, IsEvent = true, EndUtc = booked.EndUtc }
+                : hold == null ? null : new ClientReservationInfo { Id = hold.Id, Name = hold.Name, StartUtc = hold.StartUtc, StartLocal = hold.StartLocal }
         });
     }
 
@@ -109,6 +114,7 @@ public class DevicesController : ControllerBase
         // The next reservation of each PC (held now, or starting within 12 hours): "reserved at HH:MM" on the map
         var clock = _clock ?? Cms.Server.Billing.ClubClock.System();
         var reservations = await Cms.Server.Reservations.ReservationMap.NextByPcAsync(_db, clock);
+        var events = await Cms.Server.Events.EventHolds.NextByPcAsync(_db, clock);
 
         var pendingCommands = await _db.Commands.AsNoTracking()
             .Where(c => c.Status == "pending" || c.Status == "delivered")
@@ -146,7 +152,8 @@ public class DevicesController : ControllerBase
                 MacAddress = d.MacAddress,
                 CurrentGameColor = game?.Color,
                 CurrentGameStartedUtc = game?.StartUtc,
-                Reservation = reservations.TryGetValue(d.Id, out var next) ? next : null
+                Reservation = reservations.TryGetValue(d.Id, out var next) ? next : null,
+                Event = events.TryGetValue(d.Id, out var ev) ? ev : null
             };
         }));
     }
@@ -438,6 +445,8 @@ public record DeviceDetailView(
     public DateTimeOffset? CurrentGameStartedUtc { get; init; }
     /// <summary>The next confirmed reservation of the PC (held now or within 12 hours); null = none.</summary>
     public Cms.Server.Reservations.PcReservationView? Reservation { get; init; }
+    /// <summary>The next open event that books the PC (held or running now, or within 12 hours); null = none.</summary>
+    public Cms.Server.Events.PcEventView? Event { get; init; }
 }
 public record EnqueueCommandRequest(string Type, object? Payload);
 /// <summary>Event of the PC (Cms.Shared.LauncherEvent): Id (for de-duplication), Type staff_unlock, when, why the PC was locked.</summary>

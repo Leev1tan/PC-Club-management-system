@@ -20,6 +20,8 @@ public static class ReservationErrors
     public static readonly BillingError NeedsGuest = new("reservation_needs_guest", "Choose a player or enter a name (at most 60 characters).");
     public static readonly BillingError NoteTooLong = new("reservation_note_too_long", "The note may have at most 200 characters.");
     public static readonly BillingError PcTaken = new("pc_already_reserved", "{0} is already reserved {1}-{2}.", Conflict);
+    public static readonly BillingError PcEventBooked = new("pc_event_booked", "{0} is booked for an event {1}-{2}.", Conflict);
+    public static readonly BillingError EventZoneFull = new("event_zone_reserved", "Zone {0} has reservations for any PC at this time: the event leaves too few PCs for them.", Conflict);
     public static readonly BillingError ZoneFull = new("zone_full", "Zone {0} has no free PC for this time.", Conflict);
     public static readonly BillingError ZoneEmpty = new("zone_no_pcs", "The zone has no approved PC.", Conflict);
     public static readonly BillingError PcReserved = new("pc_reserved", "This PC is reserved for {0} at {1}. Check in the reservation, or a manager overrides the hold.", Conflict);
@@ -138,10 +140,16 @@ public sealed class ReservationService
     private Task AuditAsync(string action, long id, string summary, object details) =>
         _audit?.WriteAsync(action, "reservation", id, summary, details, _auditActor) ?? Task.CompletedTask;
 
-    private async Task LockAsync()
+    private Task LockAsync() => BookingLockAsync(_db);
+
+    /// <summary>
+    /// The lock of reservations and events (PostgreSQL: a transaction advisory lock; SQLite: one writer at a time).
+    /// Call inside a transaction; it is held until the transaction ends.
+    /// </summary>
+    public static async Task BookingLockAsync(CmsDbContext db)
     {
-        if (_db.Database.IsNpgsql())
-            await _db.Database.ExecuteSqlRawAsync($"SELECT pg_advisory_xact_lock({LockKey})");
+        if (db.Database.IsNpgsql())
+            await db.Database.ExecuteSqlRawAsync($"SELECT pg_advisory_xact_lock({LockKey})");
     }
 
     private string Local(DateTimeOffset utc, string format = "HH:mm") => _clock.ToLocal(utc).ToString(format, CultureInfo.InvariantCulture);
@@ -181,8 +189,11 @@ public sealed class ReservationService
 
     private string Where(Target t) => t.Pc != null ? t.Pc.Hostname : $"any PC of {t.Zone?.Name ?? "?"}";
 
-    /// <summary>Reservations that occupy PCs in [from, to): confirmed and checked in (a checked-in one where its session runs, until the session ended).</summary>
-    private async Task<List<PlanItem>> OccupyingAsync(DateTimeOffset from, DateTimeOffset to, long? except)
+    /// <summary>
+    /// Reservations that occupy PCs in [from, to): confirmed and checked in (a checked-in one where its session runs, until
+    /// the session ended), and the PCs of the open events (fixed items, Events/EventHolds.PlanItemsAsync).
+    /// </summary>
+    private async Task<List<PlanItem>> OccupyingAsync(DateTimeOffset from, DateTimeOffset to, long? except, long? exceptEvent = null)
     {
         var lo = DayOf(from.AddMinutes(-MaxMinutes), _clock);
         var hi = DayOf(to, _clock);
@@ -204,6 +215,7 @@ public sealed class ReservationService
             }
             if (r.StartUtc < to && from < end) items.Add(new PlanItem(r.Id, pc, r.StartUtc, end));
         }
+        items.AddRange(await Cms.Server.Events.EventHolds.PlanItemsAsync(_db, _clock, from, to, exceptEvent));
         return items;
     }
 
@@ -217,7 +229,8 @@ public sealed class ReservationService
             if (clash != null)
             {
                 var host = await _db.Devices.AsNoTracking().Where(d => d.Id == pcId).Select(d => d.Hostname).FirstOrDefaultAsync() ?? "?";
-                return ReservationErrors.PcTaken.With(host, Local(clash.Start), Local(clash.End));
+                return (Cms.Server.Events.EventHolds.IsEventPlanId(clash.Id) ? ReservationErrors.PcEventBooked : ReservationErrors.PcTaken)
+                    .With(host, Local(clash.Start), Local(clash.End));
             }
         }
         if (zoneId.HasValue)
@@ -232,6 +245,39 @@ public sealed class ReservationService
             {
                 var name = await _db.Zones.AsNoTracking().Where(z => z.Id == zoneId).Select(z => z.Name).FirstOrDefaultAsync() ?? "?";
                 return ReservationErrors.ZoneFull.With(name);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Null when an event can book these PCs for [start, end): no reservation or other event on them, and every zone
+    /// keeps a PC for each of its any-PC reservations. Call under the booking lock (eventId 0 for a new event).
+    /// </summary>
+    public async Task<BillingError?> CheckEventFitAsync(long eventId, IReadOnlyList<Guid> pcs, DateTimeOffset start, DateTimeOffset end)
+    {
+        var occupying = await OccupyingAsync(start, end, null, eventId);
+        foreach (var pc in pcs)
+        {
+            var clash = occupying.Where(i => i.Pc == pc && i.Overlaps(start, end)).OrderBy(i => i.Start).FirstOrDefault();
+            if (clash == null) continue;
+            var host = await HostAsync(pc);
+            return (Cms.Server.Events.EventHolds.IsEventPlanId(clash.Id) ? ReservationErrors.PcEventBooked : ReservationErrors.PcTaken)
+                .With(host, Local(clash.Start), Local(clash.End));
+        }
+        var zoneIds = await _db.Devices.AsNoTracking().Where(d => pcs.Contains(d.Id) && d.ZoneId != null).Select(d => d.ZoneId!.Value).Distinct().ToListAsync();
+        var floating = occupying.Where(i => !i.Pc.HasValue).Select(i => i.Id).ToList();
+        foreach (var zoneId in zoneIds)
+        {
+            var zonePcs = await ZonePcsAsync(zoneId);
+            var floatingIds = (await _db.Reservations.AsNoTracking().Where(r => floating.Contains(r.Id) && r.ZoneId == zoneId).Select(r => r.Id).ToListAsync()).ToHashSet();
+            if (floatingIds.Count == 0) continue;
+            var items = occupying.Where(i => i.Pc.HasValue ? zonePcs.Contains(i.Pc.Value) : floatingIds.Contains(i.Id)).ToList();
+            items.AddRange(pcs.Where(zonePcs.Contains).Select((pc, i) => new PlanItem(Cms.Server.Events.EventHolds.PlanId(eventId == 0 ? 999_999 : eventId, i), pc, start, end)));
+            if (ReservationPlan.Assign(zonePcs, items) == null)
+            {
+                var name = await _db.Zones.AsNoTracking().Where(z => z.Id == zoneId).Select(z => z.Name).FirstOrDefaultAsync() ?? "?";
+                return ReservationErrors.EventZoneFull.With(name);
             }
         }
         return null;

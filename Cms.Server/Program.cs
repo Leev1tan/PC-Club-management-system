@@ -109,6 +109,8 @@ if (!demo.Enabled)
 builder.Services.AddHostedService<SessionExpiryService>();
 // Reservations: no-shows, expired requests, the PC of an any-PC reservation at its hold
 builder.Services.AddHostedService<Cms.Server.Reservations.ReservationJobService>();
+// Events: start at the start time, finish at the end (entry fees kept), cancel when never started
+builder.Services.AddHostedService<Cms.Server.Events.EventJobService>();
 
 // Retention: heartbeat samples and finished commands are deleted after a configurable time
 builder.Services.AddSingleton(RetentionOptions.FromConfiguration(builder.Configuration));

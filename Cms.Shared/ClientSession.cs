@@ -24,6 +24,16 @@ public sealed class ClientSessionInfo
     public decimal? Bonus { get; init; }
     /// <summary>The bar order of this session: open, or closed in the last 15 minutes (the lock screen shows its state).</summary>
     public ClientOrderInfo? Order { get; init; }
+    /// <summary>The event (tournament) of this session: its name and the common end; null = a normal session.</summary>
+    public ClientEventInfo? Event { get; init; }
+}
+
+/// <summary>An event (tournament) on the lock screen: the name that staff gave it and the common end of its sessions.</summary>
+public sealed class ClientEventInfo
+{
+    public long Id { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public DateTimeOffset EndUtc { get; init; }
 }
 
 /// <summary>A bar order on the lock screen: new, preparing, delivered or cancelled; paid from the balance or at the desk.</summary>
@@ -50,6 +60,8 @@ public sealed class LogoffRequest
 /// <summary>
 /// The reservation that holds the PC now (heartbeat response, then state.json): the lock screen shows "Reserved for
 /// {Name} at {StartLocal}". Name is the nickname of a player or the first name of a guest: never a phone or a surname.
+/// For an event (IsEvent) Name is the name of the event: "Event «{Name}» at {StartLocal}", and while the event runs
+/// the time left until EndUtc.
 /// </summary>
 public sealed class ClientReservationInfo
 {
@@ -58,4 +70,8 @@ public sealed class ClientReservationInfo
     public DateTimeOffset StartUtc { get; init; }
     /// <summary>Start in club time, "HH:mm".</summary>
     public string StartLocal { get; init; } = string.Empty;
+    /// <summary>The PC is booked for an event (tournament), not for a reservation.</summary>
+    public bool IsEvent { get; init; }
+    /// <summary>Events: the common end.</summary>
+    public DateTimeOffset? EndUtc { get; init; }
 }

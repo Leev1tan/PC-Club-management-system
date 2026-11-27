@@ -95,6 +95,14 @@ public sealed class CsvTexts
         LedgerTypes.DebtPayment => T("Сплата боргу", "Debt payment"),
         LedgerTypes.DebtWriteOff => T("Списання боргу", "Debt write-off"),
         LedgerTypes.Legacy => T("Стара операція", "Legacy row"),
+        LedgerTypes.DepositHold => T("Депозит броні: утримано", "Deposit held"),
+        LedgerTypes.DepositRelease => T("Депозит броні: повернуто", "Deposit released"),
+        LedgerTypes.DepositKept => T("Депозит броні: залишено клубу", "Deposit kept"),
+        LedgerTypes.OrderHold => T("Замовлення з ПК: утримано", "Order held"),
+        LedgerTypes.OrderRelease => T("Замовлення з ПК: знято з утримання", "Order released"),
+        LedgerTypes.EventFeeHold => T("Внесок за подію: утримано", "Event fee held"),
+        LedgerTypes.EventFeeRelease => T("Внесок за подію: повернуто", "Event fee returned"),
+        LedgerTypes.EventFeeKept => T("Внесок за подію: залишено клубу", "Event fee kept"),
         _ => type
     };
 }
@@ -172,6 +180,10 @@ public static class CsvExport
         var orders = t.T("Замовлення бару з ПК (передоплата)", "Bar orders from the PCs (prepaid)");
         csv.Row(orders, t.T("Утримано з балансу", "Held from balances"), z.Holds.OrdersHeld);
         csv.Row(orders, t.T("Знято з утримання (видано або скасовано)", "Released (delivered or cancelled)"), z.Holds.OrdersReleased);
+        var fees = t.T("Внески за участь у подіях", "Event entry fees");
+        csv.Row(fees, t.T("Утримано з балансу", "Held from balances"), z.Holds.EventFeesHeld);
+        csv.Row(fees, t.T("Повернуто на баланс", "Back on balances"), z.Holds.EventFeesReleased);
+        csv.Row(fees, t.T("Залишено клубу (подія відбулася, у виручці за час)", "Kept (event held, in PC time revenue)"), z.Holds.EventFeesKept);
         var staff = t.T("Персонал", "Staff");
         foreach (var p in z.ByStaff)
         {

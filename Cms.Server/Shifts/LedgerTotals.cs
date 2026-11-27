@@ -9,7 +9,8 @@ namespace Cms.Server.Shifts;
 ///  - PC time (sessions and packages) by how it was paid: cash, card, balance, bonus, debt;
 ///  - bar sales and refunds by method, receipts; top-ups and balance refunds; bonus issued and spent;
 ///    debt recorded, paid and written off; cash payouts; balance corrections; other rows;
-///  - reservation deposits held, released and kept (a kept deposit is PC time revenue paid from the balance);
+///  - reservation deposits held, released and kept (a kept deposit is PC time revenue paid from the balance), and the
+///    entry fees of events the same way (a kept entry fee counts like a kept deposit);
 ///  - cash and card at the desk (in, out, net). Every desk amount is in exactly one section, so the
 ///    sections add up to the desk money of the rows (<see cref="Reconciled"/>).
 /// </summary>
@@ -56,6 +57,12 @@ public sealed class LedgerTotals
     public decimal OrdersHeld { get; private set; }
     /// <summary>Held orders back on the balances: at the delivery (the bar sale takes it) or a cancel.</summary>
     public decimal OrdersReleased { get; private set; }
+    /// <summary>Entry fees of events taken off the balances and held (not revenue).</summary>
+    public decimal EventFeesHeld { get; private set; }
+    /// <summary>Held entry fees back on the balances (team withdrawn, event cancelled).</summary>
+    public decimal EventFeesReleased { get; private set; }
+    /// <summary>Entry fees kept when the event was over: revenue paid from the balance (in Time and TimeTotal, like kept deposits).</summary>
+    public decimal EventFeesKept { get; private set; }
     public int Rows { get; private set; }
     public long? FirstId { get; private set; }
     public long? LastId { get; private set; }
@@ -171,6 +178,18 @@ public sealed class LedgerTotals
                 break;
             case LedgerTypes.OrderRelease:
                 OrdersReleased += r.Amount;
+                break;
+            case LedgerTypes.EventFeeHold:
+                EventFeesHeld += r.Amount;
+                break;
+            case LedgerTypes.EventFeeRelease:
+                EventFeesReleased += r.Amount;
+                break;
+            case LedgerTypes.EventFeeKept:
+                // The entry fee of an event that took place: revenue, paid from the balance when it was held
+                EventFeesKept += r.Amount;
+                TimeTotal += r.Amount;
+                Time = Time.Add(PaymentMethods.Balance, r.Amount);
                 break;
             case LedgerTypes.CashPayout:
                 _payouts.Add(new ZPayout(r.Id, r.CreatedUtc, -r.DeskAmount, r.Reason, r.ActorUsername));

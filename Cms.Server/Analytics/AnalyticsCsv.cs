@@ -59,6 +59,10 @@ public static class AnalyticsCsv
         var orders = t.T("Замовлення бару з ПК (передоплата)", "Bar orders from the PCs (prepaid)");
         csv.Row(orders, t.T("Утримано з балансу", "Held from balances"), a.Holds.OrdersHeld);
         csv.Row(orders, t.T("Знято з утримання (видано або скасовано)", "Released (delivered or cancelled)"), a.Holds.OrdersReleased);
+        var fees = t.T("Внески за участь у подіях", "Event entry fees");
+        csv.Row(fees, t.T("Утримано з балансу", "Held from balances"), a.Holds.EventFeesHeld);
+        csv.Row(fees, t.T("Повернуто на баланс", "Back on balances"), a.Holds.EventFeesReleased);
+        csv.Row(fees, t.T("Залишено клубу (подія відбулася, у виручці за час)", "Kept (event held, in PC time revenue)"), a.Holds.EventFeesKept);
         var average = t.T("Середній чек", "Average ticket");
         csv.Row(average, t.T("Сесія (час на ПК)", "Session (PC time)"), a.AverageTicket.Session, a.AverageTicket.Sessions);
         csv.Row(average, t.T("Чек бару", "Bar receipt"), a.AverageTicket.Receipt, a.AverageTicket.Receipts);

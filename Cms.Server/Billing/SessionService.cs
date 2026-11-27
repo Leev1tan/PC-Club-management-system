@@ -8,6 +8,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cms.Server.Billing;
 
+/// <summary>
+/// The session of a player of an event (Events/EventService): the PC time costs Price (from the balances, bonus first) or
+/// nothing (free, audited as free time of the event), and the session ends at the common end of the event.
+/// </summary>
+public sealed record EventTerms(long EventId, DateTimeOffset EndUtc, bool Free, decimal Price);
+
+/// <summary>A hold that a manager overrode: of a reservation or of an event.</summary>
+public sealed record HoldOverride(ReservationHold? Reservation, Cms.Server.Events.EventHold? Event);
+
 /// <summary>AmountDue: paid at the desk now; Debt: recorded on the player account instead (deskMethod debt).</summary>
 public sealed record EndResult(SessionEntity Session, decimal AmountDue, Charge FromBalances, decimal Debt = 0);
 
@@ -56,24 +65,45 @@ public sealed class SessionService
     /// <summary>Set by the check-in of this reservation: its own hold does not block the start.</summary>
     public long? CheckInReservationId { get; init; }
 
+    /// <summary>Set by an event for the session of one of its players: price, end, and the event's own hold does not block it.</summary>
+    public EventTerms? Event { get; init; }
+
     /// <summary>
-    /// A PC held for a reservation (from the hold until the grace period ends) takes no other session: the check-in
-    /// of the reservation starts it, or the owner or a manager overrides the hold (the caller audits it).
+    /// A PC held for a reservation (from the hold until the grace period ends) or for an event (from the hold until
+    /// the event ends) takes no other session: the check-in of the reservation or the event starts it, or the owner or
+    /// a manager overrides the hold (the caller audits it).
     /// </summary>
-    private async Task<BillingResult<ReservationHold?>> CheckHoldAsync(Guid deviceId, bool overrideRequested)
+    private async Task<BillingResult<HoldOverride?>> CheckHoldAsync(Guid deviceId, bool overrideRequested)
     {
-        if (CheckInReservationId.HasValue) return BillingResult<ReservationHold?>.Success(null);
+        if (Event != null) return BillingResult<HoldOverride?>.Success(null); // the event owns its PCs until its end
+        var booked = await Cms.Server.Events.EventHolds.ActiveAsync(_db, deviceId, _clock);
+        if (booked != null)
+        {
+            if (!overrideRequested) return Cms.Server.Events.EventErrors.PcEvent.With(booked.Name, booked.StartLocal, booked.Id);
+            if (!CanOverrideReservation) return ReservationErrors.OverrideNeedsManager;
+            return BillingResult<HoldOverride?>.Success(new HoldOverride(null, booked));
+        }
+        if (CheckInReservationId.HasValue) return BillingResult<HoldOverride?>.Success(null);
         var hold = await ReservationHolds.ActiveAsync(_db, deviceId, _clock);
-        if (hold == null) return BillingResult<ReservationHold?>.Success(null);
+        if (hold == null) return BillingResult<HoldOverride?>.Success(null);
         if (!overrideRequested) return ReservationErrors.PcReserved.With(hold.Name, hold.StartLocal, hold.Id);
         if (!CanOverrideReservation) return ReservationErrors.OverrideNeedsManager;
-        return BillingResult<ReservationHold?>.Success(hold);
+        return BillingResult<HoldOverride?>.Success(new HoldOverride(hold, null));
     }
 
-    private Task AuditOverrideAsync(ReservationHold hold, string hostname, Guid sessionId, string? player) =>
-        _audit?.WriteAsync(AuditActions.ReservationHoldOverridden, "reservation", hold.Id,
-            $"Hold of reservation #{hold.Id} ({hold.StartLocal}) overridden on {hostname}: a session for {(player != null ? "@" + player : "a guest")} started",
-            new { reservation = hold.Id, device = hostname, sessionId, player, reservedAt = hold.StartUtc }) ?? Task.CompletedTask;
+    private Task AuditOverrideAsync(HoldOverride hold, string hostname, Guid sessionId, string? player)
+    {
+        if (_audit == null) return Task.CompletedTask;
+        var who = player != null ? "@" + player : "a guest";
+        if (hold.Event is { } e)
+            return _audit.WriteAsync(AuditActions.EventHoldOverridden, "event", e.Id,
+                $"Booking of event #{e.Id} ({e.StartLocal}-{e.EndLocal}) overridden on {hostname}: a session for {who} started",
+                new { eventId = e.Id, device = hostname, sessionId, player, eventStartUtc = e.StartUtc });
+        var r = hold.Reservation!;
+        return _audit.WriteAsync(AuditActions.ReservationHoldOverridden, "reservation", r.Id,
+            $"Hold of reservation #{r.Id} ({r.StartLocal}) overridden on {hostname}: a session for {who} started",
+            new { reservation = r.Id, device = hostname, sessionId, player, reservedAt = r.StartUtc });
+    }
 
     private Task AuditAsync(string action, Guid sessionId, string summary, object details) =>
         _audit?.WriteAsync(action, "session", sessionId, summary, details) ?? Task.CompletedTask;
@@ -115,7 +145,15 @@ public sealed class SessionService
         decimal price;
         int? minutes = null;
 
-        if (req.PackageId.HasValue)
+        if (Event is { } ev)
+        {
+            // An event session: the zone tariff prices a later extension; the event sets the price and the common end
+            tariff = await ZoneTariffAsync(_db, device.ZoneId);
+            minutes = Math.Max(1, (int)Math.Ceiling((ev.EndUtc - now).TotalMinutes));
+            if (ev.EndUtc <= now) return Cms.Server.Events.EventErrors.EventOver;
+            price = ev.Free ? 0m : ev.Price;
+        }
+        else if (req.PackageId.HasValue)
         {
             package = await _db.Packages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == req.PackageId.Value);
             if (package == null) return BillingErrors.PackageNotFound;
@@ -171,7 +209,15 @@ public sealed class SessionService
         string? method = null;
         string? freeReason = null;
         var value = price;
-        if (IsFree(req.PaymentMethod))
+        if (Event is { Free: true } freeEvent)
+        {
+            // Free PC time of an event that a manager created: audited as free time with the event as the reason
+            value = tariff != null ? TariffCalculator.QuoteFixed(await PricingAsync(tariff), now, minutes!.Value, _clock.Zone).Total : 0m;
+            freeReason = $"event #{freeEvent.EventId}";
+            method = PaymentMethods.Free;
+            price = 0m;
+        }
+        else if (IsFree(req.PaymentMethod))
         {
             if (!prepaid) return BillingErrors.FreeNeedsPrepaid;
             var free = CheckFree(req.Reason);
@@ -194,7 +240,7 @@ public sealed class SessionService
             TariffId = tariff?.Id,
             UserId = user?.Id,
             StartUtc = now,
-            EndUtc = terms?.EndUtc ?? (minutes.HasValue ? now.AddMinutes(minutes.Value) : null),
+            EndUtc = Event?.EndUtc ?? terms?.EndUtc ?? (minutes.HasValue ? now.AddMinutes(minutes.Value) : null),
             CutoffUtc = terms?.CutoffUtc,
             Status = "active",
             TotalCost = price,
@@ -228,7 +274,9 @@ public sealed class SessionService
                         package != null ? LedgerTypes.PackagePurchase : LedgerTypes.SessionCharge, session, now,
                         package != null
                             ? $"Пакет «{package.Name}» на {device.Hostname} — {price} {cur}"
-                            : $"Сесія на {device.Hostname} ({minutes} хв, {tariff!.Name}) — {price} {cur}");
+                            : Event != null
+                                ? $"Подія №{Event.EventId} на {device.Hostname} (до {_clock.ToLocal(Event.EndUtc):HH:mm}) — {price} {cur}"
+                                : $"Сесія на {device.Hostname} ({minutes} хв, {tariff!.Name}) — {price} {cur}");
                     if (!paid.Ok) return paid.Error!;
                 }
 
@@ -242,7 +290,8 @@ public sealed class SessionService
                 return BillingErrors.DeviceBusy;
             }
 
-            var what = package != null ? $"package '{package.Name}' until {_clock.ToLocal(session.EndUtc!.Value):HH:mm}"
+            var what = Event != null ? $"event #{Event.EventId} until {_clock.ToLocal(session.EndUtc!.Value):HH:mm}"
+                : package != null ? $"package '{package.Name}' until {_clock.ToLocal(session.EndUtc!.Value):HH:mm}"
                 : prepaid ? $"{minutes} min"
                 : balanceEnd.HasValue ? $"from the balance, until about {_clock.ToLocal(balanceEnd.Value):HH:mm}" : "open-ended";
             await AuditAsync(AuditActions.SessionStarted, session.Id,
@@ -252,7 +301,7 @@ public sealed class SessionService
                 {
                     device.Hostname, deviceId = device.Id, tariff = tariff?.Name, package = package?.Name, minutes, cost = price,
                     prepaid, player = user?.Username, paymentMethod = method, endUtc = session.EndUtc, cutoffUtc = session.CutoffUtc,
-                    limitToBalance = session.LimitToBalance, balanceEndUtc = session.BalanceEndUtc
+                    limitToBalance = session.LimitToBalance, balanceEndUtc = session.BalanceEndUtc, eventId = Event?.EventId
                 });
             if (prepaid && price == 0)
             {

@@ -138,8 +138,8 @@ public static class AnalyticsService
             new ZDebt(total.DebtRecorded, total.DebtPaid, total.DebtWrittenOff),
             total.Payouts,
             new AnalyticsAverage(
-                // Kept deposits of no-shows are PC time revenue but no session
-                total.Sessions > 0 ? TariffCalculator.Round((total.TimeTotal - total.DepositsKept) / total.Sessions) : null, total.Sessions,
+                // Kept deposits of no-shows and kept entry fees of events are PC time revenue but no session
+                total.Sessions > 0 ? TariffCalculator.Round((total.TimeTotal - total.DepositsKept - total.EventFeesKept) / total.Sessions) : null, total.Sessions,
                 total.Receipts > 0 ? TariffCalculator.Round(total.BarSales.Total / total.Receipts) : null, total.Receipts),
             new ZDesk(total.CashIn, total.CashOut, total.CashNet), new ZDesk(total.CardIn, total.CardOut, total.CardNet),
             hourly ? "hour" : "day", series,

@@ -39,10 +39,12 @@ public sealed record ZStaff(string Username, int Rows, decimal CashNet, decimal 
 /// <summary>Rows of other types (opening balances, legacy rows) with their desk money, so the sums always add up.</summary>
 public sealed record ZOther(int Rows, decimal Cash, decimal Card);
 /// <summary>Money held on player balances: reservation deposits (held, released, kept for a no-show) and prepaid bar orders.</summary>
-public sealed record ZHolds(decimal DepositsHeld, decimal DepositsReleased, decimal DepositsKept, decimal OrdersHeld = 0, decimal OrdersReleased = 0)
+public sealed record ZHolds(decimal DepositsHeld, decimal DepositsReleased, decimal DepositsKept, decimal OrdersHeld = 0, decimal OrdersReleased = 0,
+    decimal EventFeesHeld = 0, decimal EventFeesReleased = 0, decimal EventFeesKept = 0)
 {
     public static readonly ZHolds Zero = new(0, 0, 0);
-    public static ZHolds Of(LedgerTotals t) => new(t.DepositsHeld, t.DepositsReleased, t.DepositsKept, t.OrdersHeld, t.OrdersReleased);
+    public static ZHolds Of(LedgerTotals t) => new(t.DepositsHeld, t.DepositsReleased, t.DepositsKept, t.OrdersHeld, t.OrdersReleased,
+        t.EventFeesHeld, t.EventFeesReleased, t.EventFeesKept);
 }
 /// <summary>Reconciled: the cash and card of all sections equal the desk sums of the ledger rows of the shift.</summary>
 public sealed record ZLedger(int Rows, long? FirstId, long? LastId, bool Reconciled);

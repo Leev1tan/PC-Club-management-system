@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cms.Server.Data;
 
-public class CmsDbContext : DbContext
+public partial class CmsDbContext : DbContext
 {
     public CmsDbContext(DbContextOptions<CmsDbContext> options) : base(options) { }
 
@@ -32,6 +32,11 @@ public class CmsDbContext : DbContext
     public DbSet<ReservationEntity> Reservations => Set<ReservationEntity>();
     public DbSet<BarOrderEntity> BarOrders => Set<BarOrderEntity>();
     public DbSet<BarOrderItemEntity> BarOrderItems => Set<BarOrderItemEntity>();
+    public DbSet<EventEntity> Events => Set<EventEntity>();
+    public DbSet<EventDeviceEntity> EventDevices => Set<EventDeviceEntity>();
+    public DbSet<EventTeamEntity> EventTeams => Set<EventTeamEntity>();
+    public DbSet<EventPlayerEntity> EventPlayers => Set<EventPlayerEntity>();
+    public DbSet<EventMatchEntity> EventMatches => Set<EventMatchEntity>();
 
     /// <summary>
     /// Cash and card rows of the ledger need an open shift (Shifts:RequireOpenShift, default true).
@@ -142,6 +147,11 @@ public class CmsDbContext : DbContext
             if (entry.State == EntityState.Modified)
                 entry.Entity.ConcurrencyStamp = Guid.NewGuid();
         }
+        foreach (var entry in ChangeTracker.Entries<EventEntity>())
+        {
+            if (entry.State == EntityState.Modified)
+                entry.Entity.ConcurrencyStamp = Guid.NewGuid();
+        }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -233,6 +243,7 @@ public class CmsDbContext : DbContext
             entity.HasIndex(e => e.SaleId);
             entity.HasIndex(e => e.ReservationId);
             entity.HasIndex(e => e.BarOrderId);
+            entity.HasIndex(e => e.EventId);
         });
 
         modelBuilder.Entity<BarOrderEntity>(entity =>
@@ -505,6 +516,8 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.Value).HasMaxLength(4000);
             entity.Property(e => e.UpdatedBy).HasMaxLength(64);
         });
+
+        ConfigureEvents(modelBuilder);
     }
 }
 
@@ -694,6 +707,8 @@ public class LedgerEntryEntity
     public long? ReservationId { get; set; }
     /// <summary>Bar order of a prepaid order row (order_hold, order_release).</summary>
     public long? BarOrderId { get; set; }
+    /// <summary>Event (tournament) of an entry fee row (event_fee_hold, event_fee_release, event_fee_kept).</summary>
+    public long? EventId { get; set; }
 }
 
 public static class BarOrderStatuses

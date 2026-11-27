@@ -19,12 +19,16 @@ public static class PlayerSessions
         var order = orders.FirstOrDefault(o => o.Status is BarOrderStatuses.New or BarOrderStatuses.Preparing ||
                                                DateTimeOffset.UtcNow - o.UpdatedUtc < TimeSpan.FromMinutes(15));
         var lines = order == null ? 0 : await db.BarOrderItems.AsNoTracking().Where(i => i.OrderId == order.Id).SumAsync(i => i.Quantity, ct);
+        // The session of a player of an event: the lock screen shows the event and the common end
+        var ev = await db.EventPlayers.AsNoTracking().Where(p => p.SessionId == s.Id)
+            .Join(db.Events.AsNoTracking(), p => p.EventId, e => e.Id, (p, e) => new { e.Id, e.Name, e.EndUtc }).FirstOrDefaultAsync(ct);
         return new ClientSessionInfo
         {
             Id = s.Id, StartUtc = s.StartUtc, EndUtc = s.EndUtc ?? s.BalanceEndUtc, Paused = s.PausedUtc.HasValue, Prepaid = s.IsPrepaid,
             FromBalance = s.LimitToBalance, Tariff = tariff, Package = package,
             Username = user?.Username, DisplayName = user?.DisplayName, Balance = user?.Balance, Bonus = user?.BonusPoints,
-            Order = order == null ? null : new ClientOrderInfo { Id = order.Id, Status = order.Status, Payment = order.Payment, Total = order.Total, Items = lines }
+            Order = order == null ? null : new ClientOrderInfo { Id = order.Id, Status = order.Status, Payment = order.Payment, Total = order.Total, Items = lines },
+            Event = ev == null ? null : new ClientEventInfo { Id = ev.Id, Name = ev.Name, EndUtc = ev.EndUtc }
         };
     }
 }

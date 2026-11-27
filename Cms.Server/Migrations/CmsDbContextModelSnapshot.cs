@@ -317,6 +317,257 @@ namespace Cms.Server.Migrations
                     b.ToTable("Devices");
                 });
 
+            modelBuilder.Entity("Cms.Server.Data.EventDeviceEntity", b =>
+                {
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("EventId", "DeviceId");
+
+                    b.HasIndex("DeviceId");
+
+                    b.ToTable("EventDevices", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.EventEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreatedByUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DurationMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("EndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EndedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("EntryFee")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("PriceMode")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<int>("StartDay")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("StartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("StartedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("TeamSize")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("WinnerTeamId")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("ZoneId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ZoneId");
+
+                    b.HasIndex("Status", "StartDay");
+
+                    b.ToTable("Events", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.EventMatchEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("DecidedByUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("DecidedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Round")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ScoreA")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ScoreB")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Slot")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("TeamAId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("TeamBId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("WinnerTeamId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId", "Round", "Slot")
+                        .IsUnique()
+                        .HasDatabaseName("IX_EventMatches_EventId_Round_Slot");
+
+                    b.ToTable("EventMatches", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.EventPlayerEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Fee")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("FeeStatus")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("StartError")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<long>("TeamId")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("SessionId");
+
+                    b.HasIndex("TeamId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("EventId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_EventPlayers_EventId_UserId_Active")
+                        .HasFilter("\"Status\" = 'active'");
+
+                    b.ToTable("EventPlayers", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.EventTeamEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid?>("CaptainUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreatedByUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("EventId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int>("Seed")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId");
+
+                    b.ToTable("EventTeams", (string)null);
+                });
+
             modelBuilder.Entity("Cms.Server.Data.GameEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -527,6 +778,9 @@ namespace Cms.Server.Migrations
                     b.Property<Guid?>("DeviceId")
                         .HasColumnType("uuid");
 
+                    b.Property<long?>("EventId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Method")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -564,6 +818,8 @@ namespace Cms.Server.Migrations
                     b.HasIndex("BarOrderId");
 
                     b.HasIndex("CreatedUtc");
+
+                    b.HasIndex("EventId");
 
                     b.HasIndex("ReservationId");
 
@@ -1360,6 +1616,73 @@ namespace Cms.Server.Migrations
                         .WithMany()
                         .HasForeignKey("ZoneId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.EventDeviceEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.DeviceEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cms.Server.Data.EventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.EventEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.ZoneEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ZoneId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.EventMatchEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.EventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.EventPlayerEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.DeviceEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Cms.Server.Data.EventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cms.Server.Data.EventTeamEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TeamId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cms.Server.Data.UserEntity", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.EventTeamEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.EventEntity", null)
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Cms.Server.Data.GamePlayEntity", b =>

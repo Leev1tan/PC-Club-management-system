@@ -46,6 +46,12 @@ public static class LedgerTypes
     public const string OrderHold = "order_hold";
     /// <summary>The held money of an order back on the balance: at the delivery (then the bar sale takes it) or a cancel (+balance).</summary>
     public const string OrderRelease = "order_release";
+    /// <summary>Entry fee of an event, taken off the real balance at the registration and held (-balance; not revenue).</summary>
+    public const string EventFeeHold = "event_fee_hold";
+    /// <summary>A held entry fee back on the real balance: the team withdrew before the start or the event was cancelled (+balance).</summary>
+    public const string EventFeeRelease = "event_fee_release";
+    /// <summary>A held entry fee kept by the club when the event is over (no balance change; revenue like PC time from the balance).</summary>
+    public const string EventFeeKept = "event_fee_kept";
 }
 
 public static class PaymentMethods

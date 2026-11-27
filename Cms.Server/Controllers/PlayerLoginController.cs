@@ -146,6 +146,16 @@ public class PlayerLoginController : ControllerBase
             return BillingErrors.PlayerBusy.With(host).ToActionResult();
         }
 
+        // A PC booked for an event: the event starts the sessions of its players; a login is refused
+        var booked = await Cms.Server.Events.EventHolds.ActiveAsync(_db, deviceId, _clock);
+        if (booked != null)
+        {
+            await _audit.WriteAsync(AuditActions.PlayerLogin, "player", user!.Id,
+                $"@{user.Username} logged in on {device.Hostname}, no session: pc_event (event #{booked.Id} at {booked.StartLocal})",
+                new { device.Hostname, offer, error = "pc_event", eventId = booked.Id });
+            return Cms.Server.Events.EventErrors.PcEvent.With(booked.Name, booked.StartLocal, booked.Id).ToActionResult();
+        }
+
         // A PC held for a reservation: the reserved player checks in with the login; everybody else is refused
         var hold = await ReservationHolds.ActiveAsync(_db, deviceId, _clock);
         if (hold != null && hold.UserId != user!.Id)
