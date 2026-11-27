@@ -10,8 +10,9 @@ namespace Cms.Server.Demo;
 /// <summary>
 /// Demo reservations (spec area 7). The seed books, through the real service as the demo cashier, PCs for today
 /// (soon held, later today) and for tomorrow: players with and without a deposit from the balance, walk-in names
-/// (invented), and "any PC of VIP". The simulator checks most of them in around their start and lets some become
-/// no-shows (the background job cancels them after the grace period), and books new ones now and then.
+/// (invented), and "any PC of VIP", and two requests of the public booking page (which the demo turns on). The
+/// simulator checks most of them in around their start and lets some become no-shows (the background job cancels
+/// them after the grace period), and books new ones now and then.
 /// </summary>
 public static class DemoReservations
 {
@@ -28,6 +29,8 @@ public static class DemoReservations
         var clock = new ClubClock(new FixedTimeProvider(now), zone);
         var cashier = await db.StaffUsers.AsNoTracking().FirstOrDefaultAsync(s => s.Username == "demo-cashier", ct);
         if (cashier == null) return;
+        // The demo shows the public booking page (off by default in a club)
+        await ReservationSettings.SaveAsync(db, ReservationSettings.Default with { PublicBooking = true }, "demo", now, ct);
         var local = clock.ToLocal(now);
         var next = local.AddMinutes(15 - local.Minute % 15).AddSeconds(-local.Second).AddMilliseconds(-local.Millisecond);
         var tomorrow = local.Date.AddDays(1);
@@ -70,6 +73,17 @@ public static class DemoReservations
                 player == null ? "Дзвінок на рецепцію" : null));
             db.ChangeTracker.Clear();
             if (!result.Ok && player != null) used.Remove(player.Id);
+        }
+
+        // Two requests from the booking page that wait for the staff (invented names, phone numbers of the
+        // UK range reserved for drama, +44 7700 900000-900999: no real person)
+        var requests = new[] { ("Остап Вишняк", "+447700900123", "Standard", At(16, 0), 120), ("Леся Гордієнко", "+447700900456", "VIP", At(19, 0), 180) };
+        foreach (var (name, phone, zoneName, fromNow, minutes) in requests)
+        {
+            var zoneId = zones.FirstOrDefault(z => z.Name == zoneName)?.Id;
+            if (zoneId == null) continue;
+            await service.RequestAsync(zoneId.Value, now + fromNow, minutes, name, phone, ReservationSettings.Default.MaxOpenPerPhone);
+            db.ChangeTracker.Clear();
         }
     }
 

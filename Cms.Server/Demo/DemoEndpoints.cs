@@ -7,7 +7,8 @@ public static class DemoEndpoints
     /// <summary>
     /// In the public demo, block actions that would break the demo for other visitors until the
     /// next reset: every DELETE under /api, agent registration (demo PCs are simulated), and
-    /// changes of staff accounts, passwords and club settings (visitors could lock others out).
+    /// changes of staff accounts, passwords and club settings, also the reservation settings (visitors could
+    /// lock others out or switch the booking page off).
     /// The club currency and the lock screen language are allowed: they change only the display, any
     /// visitor can set them back, and the next reset sets UAH and Ukrainian again.
     /// </summary>
@@ -25,6 +26,7 @@ public static class DemoEndpoints
                 (write && request.Path.StartsWithSegments("/api/staff")) ||
                 (write && request.Path.StartsWithSegments("/api/settings") && !request.Path.StartsWithSegments("/api/settings/currency")
                     && !request.Path.StartsWithSegments("/api/settings/language")) ||
+                (write && request.Path.StartsWithSegments("/api/reservations/settings")) ||
                 (write && request.Path.StartsWithSegments("/api/auth/password")) ||
                 (write && request.Path.StartsWithSegments("/api/auth/setup"));
             if (blocked)

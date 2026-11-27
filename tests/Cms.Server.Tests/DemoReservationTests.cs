@@ -34,7 +34,9 @@ public sealed class DemoReservationTests
             var today = ReservationService.DayOf(now, clock);
             Assert.True(all.Count(r => r.StartDay == today + 1) >= 6, $"{all.Count(r => r.StartDay == today + 1)} for tomorrow");
             Assert.True(all.Count(r => r.StartUtc < now.AddHours(5)) >= 4, $"{all.Count(r => r.StartUtc < now.AddHours(5))} in the next hours");
-            Assert.All(all, r => Assert.Equal(ReservationStatuses.Confirmed, r.Status));
+            Assert.All(all, r => Assert.Contains(r.Status, new[] { ReservationStatuses.Confirmed, ReservationStatuses.Requested }));
+            Assert.Equal(2, all.Count(r => r.Status == ReservationStatuses.Requested && r.Source == "public" && r.Phone!.StartsWith("+447700900")));
+            Assert.True((await ReservationSettings.LoadAsync(db)).PublicBooking);
             Assert.Contains(all, r => r.DepositStatus == DepositStatuses.Held && r.UserId != null);
             Assert.Contains(all, r => r.DeviceId == null && r.ZoneId != null);
             Assert.Contains(all, r => r.UserId == null && r.GuestName != null);
