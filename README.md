@@ -7,9 +7,9 @@ PC Club Management System is an on-prem management platform for gaming clubs and
 
 Project authorship: created and maintained by Volodymyr Shabat.
 
-**English.** An open-source, self-hosted system to run a computer club: a live map of the PCs, sessions with time-of-day tariffs, packages and night packs, player balances with bonuses and an append-only money ledger, a bar checkout with stock, cashier shifts with blind cash counts and Z-reports, owner analytics (revenue, payment methods, occupancy per zone and hour), a tamper-evident audit log, a Windows lock-screen shell (kiosk) and remote commands. Ukrainian or English, money in UAH, EUR, USD or PLN. The server runs inside the club (on a Windows PC or in Docker), so the club keeps working when the internet is down. The gaming PCs are Windows 10/11.
+**English.** An open-source, self-hosted system to run a computer club: a live map of the PCs, sessions with time-of-day tariffs, packages and night packs, player balances with bonuses and an append-only money ledger, a bar checkout with stock, cashier shifts with blind cash counts and Z-reports, owner analytics (revenue, payment methods, occupancy per zone and hour), a tamper-evident audit log, a Windows lock-screen shell (kiosk) and remote commands. Ukrainian or English, money in UAH, EUR, USD or PLN, four club themes to choose from. The server runs inside the club (on a Windows PC or in Docker), so the club keeps working when the internet is down. The gaming PCs are Windows 10/11.
 
-**Українською.** Відкрита система керування комп'ютерним клубом, яка працює локально у вашому клубі: карта ПК, сесії з тарифами за часом доби, пакети й нічні пакети, баланси гравців із бонусами та журналом грошових операцій, каса бару зі складом, зміни касирів зі сліпим перерахунком готівки та Z-звітами, аналітика власника (виручка, способи оплати, завантаженість за зонами й годинами), журнал дій, який неможливо непомітно змінити, захищена оболонка блокування для Windows (kiosk) і віддалені команди на ПК. Сервер стоїть у клубі (на Windows-ПК або в Docker), тому клуб працює навіть без інтернету. Ігрові ПК — Windows 10/11.
+**Українською.** Відкрита система керування комп'ютерним клубом, яка працює локально у вашому клубі: карта ПК, сесії з тарифами за часом доби, пакети й нічні пакети, баланси гравців із бонусами та журналом грошових операцій, каса бару зі складом, зміни касирів зі сліпим перерахунком готівки та Z-звітами, аналітика власника (виручка, способи оплати, завантаженість за зонами й годинами), журнал дій, який неможливо непомітно змінити, захищена оболонка блокування для Windows (kiosk) і віддалені команди на ПК. Чотири теми оформлення на вибір. Сервер стоїть у клубі (на Windows-ПК або в Docker), тому клуб працює навіть без інтернету. Ігрові ПК — Windows 10/11.
 
 ## Contents
 
@@ -32,6 +32,16 @@ Project authorship: created and maintained by Volodymyr Shabat.
 You can also run the same [demo mode](#demo-mode) locally: it needs only Docker.
 
 The images below come from demo mode (30 days of simulated history; Ukrainian interface unless marked EN).
+
+**Club themes.** The Owner picks one theme for the admin UI, the booking page and the lock screens; each staff member
+can switch the own panel between dark and light ([docs/Themes.md](docs/Themes.md)).
+
+| | |
+| --- | --- |
+| ![Cyber theme](docs/screenshots/theme-cyber.png) | ![Pro Dark theme](docs/screenshots/theme-pro-dark.png) |
+| **Cyber** (default): neon cyan and magenta, cut corners, glow | **Pro Dark**: graphite, one blue accent, no neon |
+| ![Light theme](docs/screenshots/theme-light.png) | ![Arcade theme](docs/screenshots/theme-arcade.png) |
+| **Light**: warm paper, IBM Plex, clear borders | **Arcade**: bright retro, pixel headings, hard shadows |
 
 | | |
 | --- | --- |
@@ -111,7 +121,7 @@ Status of each product area. "Partial" means a basic version works and more is p
 | 9 | Tournaments and events | Done (v1) | Events on a zone or chosen PCs with a start and a duration (the PCs are booked against reservations and other events); players or teams of 1 to 10 with a captain register before the start, with an optional entry fee from the real balance (held in the ledger, kept when the event is over, returned on a withdrawal or a cancel); at the start the PCs of the players unlock together with a common end, free or a fixed price per player; at the end they lock; the lock screen shows the event and the time left; a single-elimination bracket with results entered by staff; everything audited ([docs/Events.md](docs/Events.md)) | A public page with the bracket, prizes paid out to balances |
 | 10 | Analytics and reports | Done (MVP) | Owner analytics (today / 7 / 30 days): revenue split PC time vs bar and by payment method, refunds, bonus issued and spent, average ticket, occupancy per zone, heatmap weekday × hour, cash variance of the shifts, checked against the ledger and the Z-reports; CSV of the period; Z-report per shift; ledger export of a date range as CSV (UTF-8 with BOM) | Excel (.xlsx) files, multi-club totals |
 | 11 | Deployment | Partial | Windows installers, Docker compose, demo mode, CI; GitHub releases with ready Windows packages (server, agent, launcher) and SHA-256 sums | Signed installers, multi-club (public live demo: done) |
-| 12 | Languages and currency | Done (MVP) | Every admin UI screen in Ukrainian and English (switch in the top bar and on the login page; dictionaries in `admin-ui/app/i18n.ts`); the lock screen (launcher) in Ukrainian and English, the language and the currency from the club settings (Owner, Settings), a UA / EN switch on the lock screen; club currency UAH / EUR / USD / PLN (display only); club time zone setting | More languages |
+| 12 | Languages, currency and themes | Done (MVP) | Every admin UI screen in Ukrainian and English (switch in the top bar and on the login page; dictionaries in `admin-ui/app/i18n.ts`); the lock screen (launcher) in Ukrainian and English, the language and the currency from the club settings (Owner, Settings), a UA / EN switch on the lock screen; club currency UAH / EUR / USD / PLN (display only); club time zone setting; four club themes (Cyber, Pro Dark, Light, Arcade) with a dark and a light mode, chosen by the Owner for the admin UI, `/book` and the lock screens (changed within about 10 s, no restart), an own accent colour (checked for contrast) and a club logo (PNG or JPEG, checked by its bytes); each staff member switches the own panel between dark and light; self-hosted fonts with Cyrillic ([docs/Themes.md](docs/Themes.md)) | More languages |
 
 Every admin page and API call needs a staff login with a role; club PCs authenticate with their own device key. Read [Security](#security) before you install the system in a club.
 
@@ -360,6 +370,7 @@ CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) builds and tests the s
 - [Events and Tournaments](docs/Events.md)
 - [Loyalty Tiers](docs/Loyalty.md)
 - [Club Game-Account Pool](docs/AccountPool.md)
+- [Club Themes](docs/Themes.md)
 
 ## License
 

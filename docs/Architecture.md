@@ -89,6 +89,11 @@ GET/POST/PUT /api/staff                     → staff accounts                  
 GET/PUT/DELETE /api/settings[/staff-pin]    → lock-screen staff PIN; GET lists the currencies  [Owner]
 PUT  /api/settings/currency                 → club currency UAH | EUR | USD | PLN, display only, audited  [Owner; allowed in the demo]
 PUT  /api/settings/language                 → lock screen language uk | en, audited; sent to the PCs with the heartbeat  [Owner; allowed in the demo]
+PUT  /api/settings/theme                    → club theme cyber | pro-dark | light | arcade and an accent #RRGGBB (3:1 on the
+                                              surfaces of both modes, else 400 accent_low_contrast), audited; sent to the PCs
+                                              with the heartbeat  [Owner; allowed in the demo]
+PUT/DELETE /api/settings/logo               → club logo: the raw PNG or JPEG body, <= 512 KB, <= 1024 x 1024 px, judged by its
+                                              bytes; audited without the bytes  [Owner; closed in the demo] (docs/Themes.md)
 GET  /api/analytics?period=today|7d|30d (or from=&to=)  → owner analytics of club days  [Owner, Manager]
 GET  /api/analytics/export.csv?period=&lang=&sep=       → the same period as CSV (UTF-8 BOM)  [Owner, Manager]
 GET  /api/audit                             → audit log, read-only, with the hash of each row  [Owner, Manager]
@@ -96,7 +101,7 @@ GET  /api/audit/verify                      → recompute the hash chain, first 
 
 POST /api/devices/register       → Register a PC: enrollment token, current key, or "pending"   [agent]
 POST /api/devices/heartbeat      → Agent heartbeat; returns status, staff PIN hash, the club settings of the lock
-                                   screen (client: language, currency) and the active session (player, tariff,
+                                   screen (client: language, currency, theme, accent, logo hash) and the active session (player, tariff,
                                    package, planned end, balances) for display                  [X-Device-Key]
 GET  /api/devices/{id}/commands  → Poll pending commands                          [X-Device-Key, approved]
 POST /api/devices/{id}/commands/{cmdId}/ack → Acknowledge command                 [X-Device-Key, approved]
@@ -163,6 +168,8 @@ GET  /api/orders                 → the queue: open orders, the last closed one
 POST /api/orders/{id}/preparing | deliver {paymentMethod for desk orders} | cancel {reason}         [front desk]
 GET/PUT /api/orders/settings     → on/off, the most per order (PUT: Owner, Manager; audited)
 GET  /api/public/booking         → booking page: on/off, zones (PCs, price now), days, durations   [public, 120/min per IP]
+GET  /api/public/theme           → club theme, accent, SHA-256 of the logo (admin UI and /book ask every 10 s)  [public]
+GET  /api/public/theme/logo      → the logo bytes with the detected type, nosniff, 5-minute cache; 404 without a logo  [public]
 GET  /api/public/booking/availability?date=&duration= → free capacity per zone and start, nothing else  [public]
 POST /api/public/booking         → request (zone, date, time, duration, name, phone; honeypot "website")  [public, 5 per
                                    10 min per IP, 3 a day and 2 open per phone, body <= 2 KB]
@@ -225,7 +232,8 @@ The server also sends `lock` when a PC registers with the enrollment token or st
 ├── state.json           # Lock state and reason, why unlocked (unlock: session, staff, none), remaining seconds, time of the last lock change, agent PID, active session, log off request
 ├── agent_heartbeat.txt  # Agent liveness marker (the launcher locks when it is older than 15 s)
 ├── staff-pin.json       # PBKDF2 hash of the staff PIN (from the server)
-├── client-settings.json # club settings for the lock screen: language (uk, en), currency (from the heartbeat)
+├── client-settings.json # club settings for the lock screen: language, currency, theme, accent, logo hash (from the heartbeat)
+├── club-logo.img        # the club logo (PNG or JPEG), only trusted when its SHA-256 is the hash in client-settings.json
 ├── games.json           # game catalog of this PC's zone with its ETag (fetched every 30 s with If-None-Match)
 ├── teardown.json        # session teardown settings from the agent's appsettings.json (never from the server)
 ├── inbox\               # players: create files only (no read, change, delete)
@@ -257,6 +265,12 @@ The server also sends `lock` when a PC registers with the enrollment token or st
 member, so a text missing in one language does not compile). The language and the currency come from
 `client-settings.json`; without it the lock screen is Ukrainian with ₴. The UA / EN button on the lock screen
 switches the language until the PC locks again.
+
+**Themes** (`Themes/*.xaml`, `ThemeManager.cs`, `MainWindow.Theme.cs`; logic in `Cms.Client.LockScreenTheme`): the window
+uses `{DynamicResource}` keys only. When `client-settings.json` has another theme or accent, `ThemeManager` puts the
+dictionary of the theme at `Application.Resources.MergedDictionaries[0]`, so the lock screen changes without a restart.
+The fonts are embedded (SIL OFL). The logo replaces the "PC CLUB" text when `Cms.Shared.LogoLoader` accepts
+`club-logo.img` and Windows decodes it ([Themes.md](Themes.md)).
 
 **Game grid** (`MainWindow.Games.cs`, logic in `Cms.Client`): during a session the session screen shows the
 catalog of the PC's zone from `games.json` with search and category chips; a tile is the initials on the entry

@@ -397,6 +397,27 @@ the arguments of your client); restart the agent; a game of the catalog with "Cl
 - [ ] Remove the account: the database row has no login or secret any more (only the masked login)
 - [ ] UA / EN: the lock screen messages and the tab are in one language
 
+### Test 24: Club Theme and Logo on the Lock Screen (themes phase)
+Prepare: one PC with the agent and the lock screen in kiosk mode; the Owner account; a PNG logo (for example 300 × 120
+px, below 512 KB); a GIF file; screens of 1366 × 768 and 1920 × 1080 if the club has both.
+- [ ] Fresh install or upgrade: `C:\ProgramData\ClubAgent\client-settings.json` has `"theme": "cyber"`; the lock screen
+      looks like Cyber; the admin UI Settings shows "Кібер" selected
+- [ ] Owner → Налаштування → Тема клубу → "Професійна темна" → "Зберегти тему": within 10 s the lock screen (locked and
+      in a session) changes to Pro Dark without a restart of the launcher; an admin UI open on another PC changes too
+- [ ] Repeat with "Світла" and "Аркада": the title, the buttons and the countdown are readable; the Ukrainian letters
+      ґ є і ї show in the theme font; nothing is cut off at 1366 × 768 and 1920 × 1080
+- [ ] Accent `#E0457B` → buttons, borders and the countdown use it; accent `#00F0FF` with "Світла" is refused
+      ("Колір має замалий контраст ...")
+- [ ] Upload the PNG: within 10 s `club-logo.img` exists, the login panel and the session top bar show the logo instead
+      of "PC CLUB"; the agent log says "Club logo Downloaded"; the audit row `settings.logo_changed` has only 12 hex
+      characters of the hash
+- [ ] Upload the GIF: refused ("PNG або JPEG"); the PC keeps the old logo
+- [ ] As an administrator, replace `club-logo.img` with other bytes: the lock screen shows "PC CLUB" (no error window);
+      within about 60 s the agent downloads the logo again and the logo comes back
+- [ ] Remove the logo in Settings: the file is deleted and the lock screen shows "PC CLUB"
+- [ ] Stop the server, restart the PC: the lock screen shows the last theme and logo
+- [ ] UA / EN on the lock screen: the texts stay in one language in every theme
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`
