@@ -1,9 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════
    CLUB THEMES — the only file with literal colours (scripts/check-tokens.mjs)
-   One block per theme and mode: <html data-theme="cyber|pro-dark|light|arcade" data-mode="dark|light">.
-   Every block defines the same tokens (tests/Cms.Client.Tests/ThemeTokensParityTests.cs);
-   --bg-panel of each block equals Cms.Shared.ClubThemes.SurfaceHex(theme, mode).
-   An owner accent replaces --accent (and --accent-contrast) inline on <html>; the shades follow by color-mix().
+   One block per theme and mode. <html data-theme="cyber|pro-dark|light|arcade" data-mode="dark|light"> selects
+   the look of the page; the same attributes on any element (the preview tiles in Settings) scope it there.
+   Every block defines the same tokens (tests/Cms.Client.Tests/ThemeTokensParityTests.cs), and --bg-panel of each
+   block equals Cms.Shared.ClubThemes.SurfaceHex(theme, mode). Text colours pass WCAG AA (4.5:1) on every surface.
+   An owner accent replaces --accent, --accent-contrast and --accent-text inline on <html> (app/theme.tsx);
+   the soft fills and glows follow through color-mix().
+   Fonts (next/font, self-hosted, SIL OFL, Latin + Cyrillic): Cyber Exo 2 + JetBrains Mono (Orbitron only for the
+   Latin wordmark), Pro Dark Inter + JetBrains Mono, Light IBM Plex Sans + IBM Plex Mono, Arcade Press Start 2P
+   (headings) + Rubik (+ JetBrains Mono for figures).
    ═══════════════════════════════════════════════════════════════ */
 
 /* Values that do not depend on the theme */
@@ -20,9 +25,10 @@
   --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
 }
 
-/* ── Cyber, dark: the original look (neon cyan and magenta, cut corners, glow, scan lines) ── */
-:root,
-:root[data-theme="cyber"][data-mode="dark"] {
+/* ── Cyber, dark: neon cyan and magenta, cut corners, glow, faint scan lines (the default) ── */
+:root:not([data-theme]),
+[data-theme="cyber"][data-mode="dark"] {
+  color-scheme: dark;
   --bg-abyss: #050508;
   --bg-dark: #0a0a10;
   --bg-panel: #0d0d15;
@@ -30,34 +36,37 @@
   --bg-elevated: #16161f;
   --bg-hover: #1c1c28;
   --bg-glass: #1a1a28;
-  /* Faint lines of the reservation timeline */
   --grid-faint: rgba(255, 255, 255, 0.03);
   --border: #222235;
   --border-strong: #5e5e80;
   --text-primary: #e8e8f0;
-  --text-secondary: #8888a8;
-  --text-muted: #555570;
+  --text-secondary: #9d9dbd;
+  --text-muted: #8a8aaa;
   --accent: #00f0ff;
   --accent-2: #ff2d78;
   --accent-contrast: #050508;
+  --accent-text: var(--accent);
   --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
   --ok: #39ff14;
   --warn: #ffe019;
-  --danger: #ff2d78;
+  --danger: #fe5693;
   --info: #00f0ff;
-  --event: #bf5af2;
+  --event: #c77dff;
   --on-status: #050508;
   --on-data: #ffffff;
   --glow-strength: 1;
-  --scanlines: 1;
+  --scanlines: 0.5;
+  --decor: 1;
+  --card-shadow: none;
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-pill: 999px;
   --label-case: uppercase;
   --tracking: 1;
-  --font-display: var(--font-orbitron), 'Orbitron', monospace;
-  --font-body: var(--font-rajdhani), 'Rajdhani', sans-serif;
+  --font-display: var(--font-exo2), 'Exo 2', sans-serif;
+  --font-body: var(--font-exo2), 'Exo 2', sans-serif;
   --font-mono: var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --font-wordmark: var(--font-orbitron), var(--font-exo2), sans-serif;
   --shape-chip: polygon(0 0, calc(100% - 3px) 0, 100% 3px, 100% 100%, 3px 100%, 0 calc(100% - 3px));
   --shape-control: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 4px 100%, 0 calc(100% - 4px));
   --shape-tile: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 5px 100%, 0 calc(100% - 5px));
@@ -65,7 +74,6 @@
   --shape-card: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
   --shape-dialog: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
   --shape-dot: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
-  /* Charts (owner analytics): categorical slots and the occupancy ramp, checked on --bg-card */
   --chart-time: #3987e5;
   --chart-bar: #d95926;
   --chart-cash: #3987e5;
@@ -73,16 +81,522 @@
   --chart-balance: #199e70;
   --chart-bonus: #c98500;
   --chart-debt: #d55181;
-  --ramp-0: #0d366b;
-  --ramp-1: #104281;
-  --ramp-2: #184f95;
-  --ramp-3: #1c5cab;
-  --ramp-4: #256abf;
-  --ramp-5: #2a78d6;
-  --ramp-6: #3987e5;
+  --ramp-0: #0b2447;
+  --ramp-1: #0d2e5a;
+  --ramp-2: #10386d;
+  --ramp-3: #134381;
+  --ramp-4: #164e94;
+  --ramp-5: #1a59a6;
+  --ramp-6: #1f63b5;
   --ramp-7: #5598e7;
   --ramp-8: #86b6ef;
   --ramp-9: #cde2fb;
   --ramp-ink-low: #e8e8f0;
   --ramp-ink-high: #0a0a10;
 }
+
+/* ── Cyber, light: the same neon idea on cool white; deep cyan and magenta for reading ── */
+[data-theme="cyber"][data-mode="light"] {
+  color-scheme: light;
+  --bg-abyss: #e9ecf5;
+  --bg-dark: #f1f3f9;
+  --bg-panel: #f7f8fc;
+  --bg-card: #ffffff;
+  --bg-elevated: #eef0f7;
+  --bg-hover: #e3e6f1;
+  --bg-glass: #e3e6f1;
+  --grid-faint: rgba(18, 18, 28, 0.05);
+  --border: #cfd3e3;
+  --border-strong: #8a8fab;
+  --text-primary: #12121c;
+  --text-secondary: #3d3f58;
+  --text-muted: #5b5e78;
+  --accent: #03606c;
+  --accent-2: #c2185b;
+  --accent-contrast: #ffffff;
+  --accent-text: var(--accent);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ok: #16651a;
+  --warn: #725106;
+  --danger: #a21750;
+  --info: #035f6b;
+  --event: #772eb8;
+  --on-status: #ffffff;
+  --on-data: #ffffff;
+  --glow-strength: 0.35;
+  --scanlines: 0;
+  --decor: 1;
+  --card-shadow: none;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+  --label-case: uppercase;
+  --tracking: 1;
+  --font-display: var(--font-exo2), 'Exo 2', sans-serif;
+  --font-body: var(--font-exo2), 'Exo 2', sans-serif;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --font-wordmark: var(--font-orbitron), var(--font-exo2), sans-serif;
+  --shape-chip: polygon(0 0, calc(100% - 3px) 0, 100% 3px, 100% 100%, 3px 100%, 0 calc(100% - 3px));
+  --shape-control: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 4px 100%, 0 calc(100% - 4px));
+  --shape-tile: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 5px 100%, 0 calc(100% - 5px));
+  --shape-card-sm: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px));
+  --shape-card: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+  --shape-dialog: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  --shape-dot: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  --chart-time: #2b6cc4;
+  --chart-bar: #c44e1c;
+  --chart-cash: #2b6cc4;
+  --chart-card: #c44e1c;
+  --chart-balance: #12805a;
+  --chart-bonus: #9a6400;
+  --chart-debt: #c03d6e;
+  --ramp-0: #eef4fd;
+  --ramp-1: #dbe8fb;
+  --ramp-2: #c3d8f7;
+  --ramp-3: #a8c6f2;
+  --ramp-4: #8db3ec;
+  --ramp-5: #73a0e5;
+  --ramp-6: #5b8edd;
+  --ramp-7: #2f5fb0;
+  --ramp-8: #244c92;
+  --ramp-9: #183772;
+  --ramp-ink-low: #0b1526;
+  --ramp-ink-high: #ffffff;
+}
+
+/* ── Pro Dark, dark: graphite surfaces, one blue accent, 1 px borders, no glow, sentence case ── */
+[data-theme="pro-dark"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg-abyss: #0e1014;
+  --bg-dark: #13161b;
+  --bg-panel: #171a20;
+  --bg-card: #1b1f26;
+  --bg-elevated: #222731;
+  --bg-hover: #2a303b;
+  --bg-glass: #2a303b;
+  --grid-faint: rgba(255, 255, 255, 0.04);
+  --border: #2c323d;
+  --border-strong: #68727f;
+  --text-primary: #e6e9ef;
+  --text-secondary: #b0b8c4;
+  --text-muted: #929bab;
+  --accent: #7fb0fb;
+  --accent-2: #5b9cff;
+  --accent-contrast: #0e1014;
+  --accent-text: var(--accent);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ok: #4cc26a;
+  --warn: #e0a530;
+  --danger: #f88c87;
+  --info: #7fb0fb;
+  --event: #bd9dfc;
+  --on-status: #0e1014;
+  --on-data: #ffffff;
+  --glow-strength: 0;
+  --scanlines: 0;
+  --decor: 0;
+  --card-shadow: none;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+  --label-case: none;
+  --tracking: 0;
+  --font-display: var(--font-inter), 'Inter', sans-serif;
+  --font-body: var(--font-inter), 'Inter', sans-serif;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --font-wordmark: var(--font-inter), 'Inter', sans-serif;
+  --shape-chip: none;
+  --shape-control: none;
+  --shape-tile: none;
+  --shape-card-sm: none;
+  --shape-card: none;
+  --shape-dialog: none;
+  --shape-dot: circle(50%);
+  --chart-time: #3987e5;
+  --chart-bar: #d95926;
+  --chart-cash: #3987e5;
+  --chart-card: #d95926;
+  --chart-balance: #199e70;
+  --chart-bonus: #c98500;
+  --chart-debt: #d55181;
+  --ramp-0: #0b2447;
+  --ramp-1: #0d2e5a;
+  --ramp-2: #10386d;
+  --ramp-3: #134381;
+  --ramp-4: #164e94;
+  --ramp-5: #1a59a6;
+  --ramp-6: #1f63b5;
+  --ramp-7: #5598e7;
+  --ramp-8: #86b6ef;
+  --ramp-9: #cde2fb;
+  --ramp-ink-low: #e8e8f0;
+  --ramp-ink-high: #0a0a10;
+}
+
+/* ── Pro Dark, light: the same layout on white ── */
+[data-theme="pro-dark"][data-mode="light"] {
+  color-scheme: light;
+  --bg-abyss: #f3f4f6;
+  --bg-dark: #f8f9fa;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-elevated: #f4f5f7;
+  --bg-hover: #eceef2;
+  --bg-glass: #eceef2;
+  --grid-faint: rgba(22, 25, 31, 0.05);
+  --border: #d9dde3;
+  --border-strong: #8a94a3;
+  --text-primary: #16191f;
+  --text-secondary: #434a56;
+  --text-muted: #5c6370;
+  --accent: #1e55bc;
+  --accent-2: #1f5fd6;
+  --accent-contrast: #ffffff;
+  --accent-text: var(--accent);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ok: #176a2d;
+  --warn: #7e5403;
+  --danger: #ac212a;
+  --info: #1e55bc;
+  --event: #6b43b8;
+  --on-status: #ffffff;
+  --on-data: #ffffff;
+  --glow-strength: 0;
+  --scanlines: 0;
+  --decor: 0;
+  --card-shadow: none;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+  --label-case: none;
+  --tracking: 0;
+  --font-display: var(--font-inter), 'Inter', sans-serif;
+  --font-body: var(--font-inter), 'Inter', sans-serif;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --font-wordmark: var(--font-inter), 'Inter', sans-serif;
+  --shape-chip: none;
+  --shape-control: none;
+  --shape-tile: none;
+  --shape-card-sm: none;
+  --shape-card: none;
+  --shape-dialog: none;
+  --shape-dot: circle(50%);
+  --chart-time: #2b6cc4;
+  --chart-bar: #c44e1c;
+  --chart-cash: #2b6cc4;
+  --chart-card: #c44e1c;
+  --chart-balance: #12805a;
+  --chart-bonus: #9a6400;
+  --chart-debt: #c03d6e;
+  --ramp-0: #eef4fd;
+  --ramp-1: #dbe8fb;
+  --ramp-2: #c3d8f7;
+  --ramp-3: #a8c6f2;
+  --ramp-4: #8db3ec;
+  --ramp-5: #73a0e5;
+  --ramp-6: #5b8edd;
+  --ramp-7: #2f5fb0;
+  --ramp-8: #244c92;
+  --ramp-9: #183772;
+  --ramp-ink-low: #0b1526;
+  --ramp-ink-high: #ffffff;
+}
+
+/* ── Light, light: warm paper, deep teal accent, IBM Plex, rounder corners (a business office look) ── */
+[data-theme="light"][data-mode="light"] {
+  color-scheme: light;
+  --bg-abyss: #f4f2ee;
+  --bg-dark: #faf9f6;
+  --bg-panel: #fffefb;
+  --bg-card: #ffffff;
+  --bg-elevated: #f6f4ef;
+  --bg-hover: #efece5;
+  --bg-glass: #efece5;
+  --grid-faint: rgba(29, 27, 23, 0.05);
+  --border: #e0dbd1;
+  --border-strong: #8f887a;
+  --text-primary: #1d1b17;
+  --text-secondary: #4a463e;
+  --text-muted: #625d53;
+  --accent: #10665e;
+  --accent-2: #0f6e66;
+  --accent-contrast: #ffffff;
+  --accent-text: var(--accent);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ok: #286729;
+  --warn: #7f5202;
+  --danger: #aa251e;
+  --info: #1d5b9f;
+  --event: #6a3fb5;
+  --on-status: #ffffff;
+  --on-data: #ffffff;
+  --glow-strength: 0;
+  --scanlines: 0;
+  --decor: 0;
+  --card-shadow: none;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-pill: 999px;
+  --label-case: none;
+  --tracking: 0;
+  --font-display: var(--font-plex-sans), 'IBM Plex Sans', sans-serif;
+  --font-body: var(--font-plex-sans), 'IBM Plex Sans', sans-serif;
+  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', monospace;
+  --font-wordmark: var(--font-plex-sans), 'IBM Plex Sans', sans-serif;
+  --shape-chip: none;
+  --shape-control: none;
+  --shape-tile: none;
+  --shape-card-sm: none;
+  --shape-card: none;
+  --shape-dialog: none;
+  --shape-dot: circle(50%);
+  --chart-time: #2b6cc4;
+  --chart-bar: #c44e1c;
+  --chart-cash: #2b6cc4;
+  --chart-card: #c44e1c;
+  --chart-balance: #12805a;
+  --chart-bonus: #9a6400;
+  --chart-debt: #c03d6e;
+  --ramp-0: #eef4fd;
+  --ramp-1: #dbe8fb;
+  --ramp-2: #c3d8f7;
+  --ramp-3: #a8c6f2;
+  --ramp-4: #8db3ec;
+  --ramp-5: #73a0e5;
+  --ramp-6: #5b8edd;
+  --ramp-7: #2f5fb0;
+  --ramp-8: #244c92;
+  --ramp-9: #183772;
+  --ramp-ink-low: #0b1526;
+  --ramp-ink-high: #ffffff;
+}
+
+/* ── Light, dark: the same office look on warm charcoal (for evening shifts) ── */
+[data-theme="light"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg-abyss: #151412;
+  --bg-dark: #1a1916;
+  --bg-panel: #1e1d1a;
+  --bg-card: #23221e;
+  --bg-elevated: #2a2924;
+  --bg-hover: #33312b;
+  --bg-glass: #33312b;
+  --grid-faint: rgba(255, 255, 255, 0.04);
+  --border: #36342e;
+  --border-strong: #7d776b;
+  --text-primary: #ece9e2;
+  --text-secondary: #bdb7ab;
+  --text-muted: #a19b8e;
+  --accent: #52c0b3;
+  --accent-2: #4fbfb2;
+  --accent-contrast: #151412;
+  --accent-text: var(--accent);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ok: #6fc172;
+  --warn: #e0a94a;
+  --danger: #f09890;
+  --info: #83b4ef;
+  --event: #bca4ef;
+  --on-status: #151412;
+  --on-data: #ffffff;
+  --glow-strength: 0;
+  --scanlines: 0;
+  --decor: 0;
+  --card-shadow: none;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-pill: 999px;
+  --label-case: none;
+  --tracking: 0;
+  --font-display: var(--font-plex-sans), 'IBM Plex Sans', sans-serif;
+  --font-body: var(--font-plex-sans), 'IBM Plex Sans', sans-serif;
+  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', monospace;
+  --font-wordmark: var(--font-plex-sans), 'IBM Plex Sans', sans-serif;
+  --shape-chip: none;
+  --shape-control: none;
+  --shape-tile: none;
+  --shape-card-sm: none;
+  --shape-card: none;
+  --shape-dialog: none;
+  --shape-dot: circle(50%);
+  --chart-time: #3987e5;
+  --chart-bar: #d95926;
+  --chart-cash: #3987e5;
+  --chart-card: #d95926;
+  --chart-balance: #199e70;
+  --chart-bonus: #c98500;
+  --chart-debt: #d55181;
+  --ramp-0: #0b2447;
+  --ramp-1: #0d2e5a;
+  --ramp-2: #10386d;
+  --ramp-3: #134381;
+  --ramp-4: #164e94;
+  --ramp-5: #1a59a6;
+  --ramp-6: #1f63b5;
+  --ramp-7: #5598e7;
+  --ramp-8: #86b6ef;
+  --ramp-9: #cde2fb;
+  --ramp-ink-low: #e8e8f0;
+  --ramp-ink-high: #0a0a10;
+}
+
+/* ── Arcade, dark: night-sky purple, coin yellow and hot pink, pixel headings, square corners, hard shadows ── */
+[data-theme="arcade"][data-mode="dark"] {
+  color-scheme: dark;
+  --bg-abyss: #120a26;
+  --bg-dark: #170d30;
+  --bg-panel: #1d1240;
+  --bg-card: #24174d;
+  --bg-elevated: #2d1d5c;
+  --bg-hover: #38246e;
+  --bg-glass: #38246e;
+  --grid-faint: rgba(255, 255, 255, 0.05);
+  --border: #4a3388;
+  --border-strong: #7d68c4;
+  --text-primary: #fff8e7;
+  --text-secondary: #d9cff5;
+  --text-muted: #b8acdf;
+  --accent: #ffd23f;
+  --accent-2: #ff4fa3;
+  --accent-contrast: #120a26;
+  --accent-text: var(--accent);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ok: #3dff9a;
+  --warn: #ffb13d;
+  --danger: #ff8ba6;
+  --info: #4fd8ff;
+  --event: #ff8cf0;
+  --on-status: #120a26;
+  --on-data: #ffffff;
+  --glow-strength: 0;
+  --scanlines: 1;
+  --decor: 1;
+  --card-shadow: 4px 4px 0 #0a0518;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-pill: 0px;
+  --label-case: uppercase;
+  --tracking: 0.5;
+  --font-display: var(--font-press-start), 'Press Start 2P', monospace;
+  --font-body: var(--font-rubik), 'Rubik', sans-serif;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --font-wordmark: var(--font-press-start), 'Press Start 2P', monospace;
+  --shape-chip: none;
+  --shape-control: none;
+  --shape-tile: none;
+  --shape-card-sm: none;
+  --shape-card: none;
+  --shape-dialog: none;
+  --shape-dot: none;
+  --chart-time: #3987e5;
+  --chart-bar: #d95926;
+  --chart-cash: #3987e5;
+  --chart-card: #d95926;
+  --chart-balance: #199e70;
+  --chart-bonus: #c98500;
+  --chart-debt: #d55181;
+  --ramp-0: #0b2447;
+  --ramp-1: #0d2e5a;
+  --ramp-2: #10386d;
+  --ramp-3: #134381;
+  --ramp-4: #164e94;
+  --ramp-5: #1a59a6;
+  --ramp-6: #1f63b5;
+  --ramp-7: #5598e7;
+  --ramp-8: #86b6ef;
+  --ramp-9: #cde2fb;
+  --ramp-ink-low: #e8e8f0;
+  --ramp-ink-high: #0a0a10;
+}
+
+/* ── Arcade, light: cream paper, ink-purple outlines, magenta accent ── */
+[data-theme="arcade"][data-mode="light"] {
+  color-scheme: light;
+  --bg-abyss: #fff3d6;
+  --bg-dark: #fff8e6;
+  --bg-panel: #fffbef;
+  --bg-card: #ffffff;
+  --bg-elevated: #fff1cc;
+  --bg-hover: #ffe7a8;
+  --bg-glass: #ffe7a8;
+  --grid-faint: rgba(28, 18, 56, 0.06);
+  --border: #d9c48f;
+  --border-strong: #2b1d52;
+  --text-primary: #1c1238;
+  --text-secondary: #3d2f66;
+  --text-muted: #55497a;
+  --accent: #a4176e;
+  --accent-2: #5a2fd6;
+  --accent-contrast: #ffffff;
+  --accent-text: var(--accent);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ok: #14673e;
+  --warn: #884a03;
+  --danger: #ac1030;
+  --info: #0c5aa1;
+  --event: #7b1fa2;
+  --on-status: #ffffff;
+  --on-data: #ffffff;
+  --glow-strength: 0;
+  --scanlines: 0;
+  --decor: 1;
+  --card-shadow: 4px 4px 0 #2b1d52;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-pill: 0px;
+  --label-case: uppercase;
+  --tracking: 0.5;
+  --font-display: var(--font-press-start), 'Press Start 2P', monospace;
+  --font-body: var(--font-rubik), 'Rubik', sans-serif;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --font-wordmark: var(--font-press-start), 'Press Start 2P', monospace;
+  --shape-chip: none;
+  --shape-control: none;
+  --shape-tile: none;
+  --shape-card-sm: none;
+  --shape-card: none;
+  --shape-dialog: none;
+  --shape-dot: none;
+  --chart-time: #2b6cc4;
+  --chart-bar: #c44e1c;
+  --chart-cash: #2b6cc4;
+  --chart-card: #c44e1c;
+  --chart-balance: #12805a;
+  --chart-bonus: #9a6400;
+  --chart-debt: #c03d6e;
+  --ramp-0: #eef4fd;
+  --ramp-1: #dbe8fb;
+  --ramp-2: #c3d8f7;
+  --ramp-3: #a8c6f2;
+  --ramp-4: #8db3ec;
+  --ramp-5: #73a0e5;
+  --ramp-6: #5b8edd;
+  --ramp-7: #2f5fb0;
+  --ramp-8: #244c92;
+  --ramp-9: #183772;
+  --ramp-ink-low: #0b1526;
+  --ramp-ink-high: #ffffff;
+}
+
+/* ── Arcade: the pixel font is wide and has one weight; it is used for headings only, a size smaller ── */
+[data-theme="arcade"] .page-title,
+[data-theme="arcade"] .top-bar-title,
+[data-theme="arcade"] .section-card-title,
+[data-theme="arcade"] .modal-title,
+[data-theme="arcade"] .empty-state-title,
+[data-theme="arcade"] .book-title,
+[data-theme="arcade"] .sidebar-logo-text {
+  font-synthesis: none;
+  font-weight: 400;
+  line-height: 1.6;
+}
+[data-theme="arcade"] .page-title { font-size: 14px; }
+[data-theme="arcade"] .top-bar-title { font-size: 11px; }
+[data-theme="arcade"] .section-card-title,
+[data-theme="arcade"] .modal-title,
+[data-theme="arcade"] .empty-state-title { font-size: 10px; }
+[data-theme="arcade"] .book-title { font-size: 14px; }
+[data-theme="arcade"] .sidebar-logo-text { font-size: 11px; }
+[data-theme="arcade"] .stat-card-value,
+[data-theme="arcade"] .data-table thead th,
+[data-theme="arcade"] .zreport h1 { font-family: var(--font-body); }
