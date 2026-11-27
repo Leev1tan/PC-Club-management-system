@@ -187,6 +187,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="52"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="32"/>
             </Grid.RowDefinitions>
@@ -225,8 +226,17 @@
                 </Grid>
             </Border>
 
+            <!-- Low-time warning: its own row below the top bar, so it never covers the time label -->
+            <Border x:Name="WarningBanner" Grid.Row="1" Visibility="Collapsed"
+                    Padding="16,8" HorizontalAlignment="Stretch" BorderBrush="{DynamicResource Brush.Danger}" BorderThickness="0,0,0,2"
+                    Background="{DynamicResource Brush.BgPanel}">
+                <TextBlock x:Name="WarningText"
+                           Foreground="{DynamicResource Brush.Danger}" FontSize="12" FontWeight="Bold" TextWrapping="Wrap" TextAlignment="Center"
+                           HorizontalAlignment="Center" FontFamily="{DynamicResource Font.Body}"/>
+            </Border>
+
             <!-- Countdown, tariff, extend -->
-            <StackPanel Grid.Row="1" HorizontalAlignment="Center" Margin="0,24,0,8">
+            <StackPanel Grid.Row="2" HorizontalAlignment="Center" Margin="0,24,0,8">
                 <TextBlock x:Name="SessionTimeLabel" Foreground="{DynamicResource Brush.TextMuted}"
                            FontSize="12" HorizontalAlignment="Center" FontFamily="{DynamicResource Font.Body}"/>
                 <TextBlock x:Name="SessionCountdown" Text="00:00:00" Foreground="{DynamicResource Brush.AccentText}"
@@ -250,7 +260,7 @@
             </StackPanel>
 
             <!-- Game grid: the catalog of this PC's zone; a tile starts the game -->
-            <Grid Grid.Row="2" Margin="48,8,48,8">
+            <Grid Grid.Row="3" Margin="48,8,48,8">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -275,7 +285,7 @@
             </Grid>
 
             <!-- Bottom bar -->
-            <Border Grid.Row="3" Padding="24,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0"
+            <Border Grid.Row="4" Padding="24,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0"
                     Background="{DynamicResource Brush.BgDark}">
                 <Grid>
                     <TextBlock x:Name="SessionHostname" Foreground="{DynamicResource Brush.TextMuted}" FontSize="10"
@@ -288,13 +298,5 @@
             </Border>
         </Grid>
 
-        <!-- ========== LOW-TIME WARNING BANNER ========== -->
-        <Border x:Name="WarningBanner" VerticalAlignment="Top" Margin="0,52,0,0" Visibility="Collapsed"
-                Padding="16,8" HorizontalAlignment="Stretch" BorderBrush="{DynamicResource Brush.Danger}" BorderThickness="0,0,0,2"
-                Background="{DynamicResource Brush.BgPanel}">
-            <TextBlock x:Name="WarningText"
-                       Foreground="{DynamicResource Brush.Danger}" FontSize="12" FontWeight="Bold"
-                       HorizontalAlignment="Center" FontFamily="{DynamicResource Font.Body}"/>
-        </Border>
     </Grid>
 </Window>

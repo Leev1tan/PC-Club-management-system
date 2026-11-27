@@ -65,7 +65,7 @@ public partial class MainWindow
         };
         _orderPanel.SetResourceReference(Border.BackgroundProperty, "Brush.BgPanel");
         _orderPanel.SetResourceReference(Border.BorderBrushProperty, "Brush.Accent");
-        Grid.SetRowSpan(_orderPanel, 4);
+        Grid.SetRowSpan(_orderPanel, 5);
         Panel.SetZIndex(_orderPanel, 500);
         SessionPanel.Children.Add(_orderPanel);
         ApplyOrderTexts();

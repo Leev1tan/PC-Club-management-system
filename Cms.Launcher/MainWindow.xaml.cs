@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private TextBlock? _lockTitle;
     private TextBlock? _lockHint;
     private TextBlock? _lockStaffHint;
+    private TextBlock? _lockIcon;
     private Button? _languageButton;
 
     // Club settings from the agent (client-settings.json): language and currency; Ukrainian without the file.
@@ -281,7 +282,7 @@ public partial class MainWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         // The lock overlay, in the colours and fonts of the club theme (resource keys of Themes/*.xaml)
-        var lockIcon = new TextBlock
+        var lockIcon = _lockIcon = new TextBlock
         {
             Text = "⛔",
             FontSize = 56,
@@ -329,40 +330,55 @@ public partial class MainWindow : Window
             Visibility = Visibility.Collapsed
         }.Text("Brush.Danger");
 
+        // The lock screen fits 1024 x 768, 1280 x 800 and larger (Windows test 2026-11-27, defect 9): the stack scales down
+        // only when it does not fit (Viewbox, DownOnly; MaxWidth so long texts wrap), a compact layout below 900 px height,
+        // and the UA / EN button in the top right corner, where it is always visible.
+        var lockStack = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MaxWidth = 900,
+            Children =
+            {
+                lockIcon,
+                lockTitle,
+                _lockCountdown,
+                _lockReservedText,
+                _lockReasonText,
+                (_lockHint = new TextBlock
+                {
+                    FontSize = 13,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextAlignment = TextAlignment.Center,
+                    Margin = new Thickness(0, 24, 0, 0)
+                }.Text("Brush.TextMuted")),
+                // Staff hint: hardly visible on purpose
+                (_lockStaffHint = new TextBlock
+                {
+                    FontSize = 10,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 20, 0, 0)
+                }.Text("Brush.Border", "Font.Mono"))
+            }
+        };
+        _languageButton = new Button
+        {
+            Style = (Style)FindResource("CyberButton"),
+            Padding = new Thickness(14, 6, 14, 6),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 20, 24, 0)
+        };
         _lockOverlay = new Border
         {
             BorderThickness = new Thickness(0),
-            Child = new StackPanel
+            Child = new Grid
             {
-                VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Center,
                 Children =
                 {
-                    lockIcon,
-                    lockTitle,
-                    _lockCountdown,
-                    _lockReservedText,
-                    _lockReasonText,
-                    (_lockHint = new TextBlock
-                    {
-                        FontSize = 13,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        Margin = new Thickness(0, 24, 0, 0)
-                    }.Text("Brush.TextMuted")),
-                    // Staff hint: hardly visible on purpose
-                    (_lockStaffHint = new TextBlock
-                    {
-                        FontSize = 10,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        Margin = new Thickness(0, 20, 0, 0)
-                    }.Text("Brush.Border", "Font.Mono")),
-                    (_languageButton = new Button
-                    {
-                        Style = (Style)FindResource("CyberButton"),
-                        Padding = new Thickness(14, 6, 14, 6),
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        Margin = new Thickness(0, 24, 0, 0)
-                    })
+                    new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Margin = new Thickness(16, 12, 16, 12), Child = lockStack },
+                    _languageButton
                 }
             },
             Visibility = Visibility.Visible, // locked until the first state read says otherwise
@@ -380,11 +396,13 @@ public partial class MainWindow : Window
         _languageButton.Click += OnLanguageClick;
 
         // The login form is part of the lock screen: a locked PC without a session asks for the player login
-        if (Content is Grid main && main.Children.Contains(LoginPanel) && _lockOverlay.Child is StackPanel lockStack)
+        if (Content is Grid main && main.Children.Contains(LoginPanel))
         {
             main.Children.Remove(LoginPanel);
             lockStack.Children.Insert(lockStack.Children.IndexOf(_lockStaffHint!), LoginPanel);
         }
+        _lockOverlay.SizeChanged += (_, e) => ApplyLockLayout(e.NewSize.Height);
+        ApplyLockLayout(SystemParameters.PrimaryScreenHeight);
         try { SessionHostname.Text = Environment.MachineName; } catch { SessionHostname.Text = string.Empty; }
 
         RefreshClientSettings();
@@ -396,6 +414,15 @@ public partial class MainWindow : Window
         _timer.Start();
         RefreshLockState();
         StartLockGuard(); // while locked: on top and in the foreground every second, foreign top-most windows pushed down
+    }
+
+    /// <summary>Below 900 px height (1024 x 768, 1280 x 800): no big icon, a smaller title and logo, so less scaling is needed.</summary>
+    private void ApplyLockLayout(double height)
+    {
+        var compact = height > 0 && height < 900;
+        if (_lockIcon != null) _lockIcon.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        if (_lockTitle != null) _lockTitle.FontSize = compact ? 32 : 42;
+        LoginLogo.MaxHeight = compact ? 64 : 96;
     }
 
     // ──── LOCK STATE POLLING ────
