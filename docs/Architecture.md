@@ -156,6 +156,10 @@ POST /api/reservations/{id}/confirm | decline | cancel | check-in  → requests;
                                    check-in starts the session (mode minutes | package | open | balance)  [front desk]
 GET/PUT /api/reservations/settings → hold, grace period, deposit of a no-show (PUT: Owner, Manager; audited)
 GET  /api/ledger/holds           → reservation deposits against their ledger rows                [Owner, Manager]
+GET  /api/public/booking         → booking page: on/off, zones (PCs, price now), days, durations   [public, 120/min per IP]
+GET  /api/public/booking/availability?date=&duration= → free capacity per zone and start, nothing else  [public]
+POST /api/public/booking         → request (zone, date, time, duration, name, phone; honeypot "website")  [public, 5 per
+                                   10 min per IP, 3 a day and 2 open per phone, body <= 2 KB]
 POST /api/users/login            → Check a player password or PIN (older launchers; starts nothing)   [public, rate limited]
 GET  /api/devices/{id}/login-offers → Zone tariff now, 1 / 2 / 3 h prices, packages on sale    [X-Device-Key, approved, own PC]
 POST /api/devices/{id}/player-login → Player login on the lock screen + session start, paid from the balance:
@@ -473,6 +477,19 @@ erDiagram
   `deposit_kept` (no balance change; PC time revenue paid from the balance). `LedgerTotals` has the three sums (the
   Z-report, the analytics and both CSVs show them); the average session leaves kept deposits out. `Billing/Holds`
   checks every reservation: hold − release − kept = the deposit while held, else 0.
+
+### Public booking page (phase 7)
+
+- `admin-ui/app/book/page.tsx` → static `book.html` (nginx: `/book`; the Windows server rewrites `/book` itself).
+  No text before the first render (the static HTML is Ukrainian; an English browser would else get a hydration error).
+- `PublicBookingController` ([AllowAnonymous]): availability from `ReservationService.FreeCapacityAsync` (per slot the
+  zone plan of the confirmed and checked-in reservations that overlap it, plus the running sessions until their
+  planned end or one hour); requests through `ReservationService.RequestAsync` under the reservation lock (the open
+  requests of the phone, the free capacity again). Limits: rate limiter policies `booking-write` and `booking-read`
+  (per IP), `BookingPhoneLimiter` (per phone, in memory), a middleware that refuses a body over 2 KB (also chunked).
+- Personal data: `GuestName` and `Phone` only; staff see them in `GET /api/reservations`. The audit row of a request is
+  written without the HTTP context (no IP) and without the data. `ReservationService.ErasePersonalDataAsync` (in the
+  15-second job) clears them `EraseAfterDays` after the end of the slot and writes the ids to the audit log.
 
 ## Communication Flow
 

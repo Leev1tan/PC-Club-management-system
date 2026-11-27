@@ -308,6 +308,32 @@ server sends three Wake-on-LAN "magic packets" (UDP) to `Power:WakeBroadcast`, p
   agent); a command for a PC that is off runs when it comes back within an hour, else it expires.
 - A shutdown or reboot does not end a running session: it goes on and is billed. The confirmation dialog says so.
 
+## Public booking page
+
+The booking page `/book` lets guests send reservation requests from their phones. It is off until the Owner or a
+Manager turns it on (admin UI → Бронювання / Reservations → settings). Inside the club LAN it works at once
+(`http://<server>:5081/book`). To offer it on the internet, never forward port 5081; put an HTTPS reverse proxy in
+front and publish **only** these paths:
+
+- `/book` (the page), `/_next/` (its scripts, styles and fonts), `/favicon.ico`
+- `/api/public/booking` (the three requests of the page)
+
+Everything else (the admin UI, `/api/...` of the staff and of the PCs, `/swagger`) stays inside the club. The server
+limits requests per client IP; behind a proxy set `ReverseProxy__TrustForwardedHeaders=true` and the right
+`ReverseProxy__ForwardLimit`, so it sees the guests' addresses and not the proxy's. Example (nginx in front of the
+club server):
+
+```nginx
+location = /book                 { proxy_pass http://club-server:5081; }
+location /_next/                 { proxy_pass http://club-server:5081; }
+location = /api/public/booking   { proxy_pass http://club-server:5081; proxy_set_header X-Forwarded-For $remote_addr; }
+location /api/public/booking/    { proxy_pass http://club-server:5081; proxy_set_header X-Forwarded-For $remote_addr; }
+location /                       { return 404; }
+```
+
+Requests wait in the Reservations tab ("Запити з сайту") with the name and the phone; staff call the guest and confirm
+or decline. Names and phone numbers are erased automatically 30 days (setting) after the slot.
+
 ## Features That Need Extra Network Design
 
 - UDP auto-discovery may fail because isolated switch ports block broadcast-style discovery.
