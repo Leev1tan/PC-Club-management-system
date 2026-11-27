@@ -83,6 +83,11 @@ public static class AgentFiles
     public const string StaffPinFile = "staff-pin.json";
     public const string DeviceFile = "device.json";
     public const string EnrollmentTokenFile = "enrollment-token.txt";
+    /// <summary>
+    /// Drop box of the launcher (it runs as the player): players may create files here, but cannot
+    /// read, change or delete them; the agent reads them and sends them to the server (audit log).
+    /// </summary>
+    public const string InboxDirectoryName = "inbox";
 
     /// <summary>The launcher locks the PC when the agent heartbeat file is older than this.</summary>
     public static readonly TimeSpan AgentSilentAfter = TimeSpan.FromSeconds(15);
@@ -96,4 +101,21 @@ public sealed class StaffPinFile
 {
     public string Hash { get; set; } = string.Empty;
     public DateTimeOffset UpdatedUtc { get; set; }
+}
+
+/// <summary>Event that the lock screen drops into the agent inbox (AgentFiles.InboxDirectoryName).</summary>
+public sealed class LauncherEvent
+{
+    public const string StaffUnlock = "staff_unlock";
+    public const int MaxFileBytes = 4096;
+
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Type { get; set; } = StaffUnlock;
+    public DateTimeOffset OccurredUtc { get; set; } = DateTimeOffset.UtcNow;
+    /// <summary>Why the PC was locked: LockedByAgent, AgentSilent, NoAgentState (Cms.Shared.LockReason).</summary>
+    public string? LockReason { get; set; }
+    /// <summary>Windows account that ran the lock screen.</summary>
+    public string? WindowsUser { get; set; }
+
+    public static string FileName(Guid id) => $"event-{id:N}.json";
 }

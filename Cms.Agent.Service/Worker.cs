@@ -17,6 +17,7 @@ namespace Cms.Agent.Service;
 /// Files in %ProgramData%\ClubAgent:
 ///    state.json, agent_heartbeat.txt, config.json, staff-pin.json  - readable by the launcher
 ///    private\device.json, private\enrollment-token.txt            - SYSTEM, Administrators, agent only
+///    inbox\event-*.json - written by the launcher (emergency PIN unlock), sent to the server, then deleted
 /// </summary>
 public class Worker : BackgroundService
 {
@@ -28,6 +29,9 @@ public class Worker : BackgroundService
 
     private static readonly string AgentDir = AgentFiles.Directory;
     private static readonly string PrivateDir = Path.Combine(AgentDir, AgentFiles.PrivateDirectoryName);
+    private static readonly string InboxDir = Path.Combine(AgentDir, AgentFiles.InboxDirectoryName);
+    private const int MaxInboxFiles = 500;
+    private const int EventsPerHeartbeat = 20;
 
     // Lock state, shared by the server loop (commands) and the local loop (state.json)
     private readonly object _gate = new();
@@ -59,6 +63,7 @@ public class Worker : BackgroundService
     {
         Directory.CreateDirectory(AgentDir);
         EnsurePrivateDirectory();
+        EnsureInboxDirectory();
         MigrateLegacyCredentials();
         InitializeCounters();
         LoadRuntimeState();
@@ -211,6 +216,8 @@ public class Worker : BackgroundService
                     {
                         _nextHeartbeatUtc = DateTimeOffset.UtcNow + HeartbeatInterval;
                         var hb = await SendHeartbeatAsync(http, stoppingToken);
+                        if (hb == HeartbeatResult.Ok && _enrollmentStatus == "approved")
+                            await SendLauncherEventsAsync(http, stoppingToken);
                         if (hb == HeartbeatResult.Unauthorized)
                         {
                             _logger.LogWarning("The server does not know this device key any more; registering again");
@@ -531,6 +538,100 @@ public class Worker : BackgroundService
             _logger.LogWarning(ex, "Could not create {Dir} with a restricted ACL", PrivateDir);
             Directory.CreateDirectory(PrivateDir);
         }
+    }
+
+    /// <summary>
+    /// The inbox of the launcher: players (Users) may only create files in it; they cannot list,
+    /// read, change or delete them (OWNER RIGHTS gets only read-permissions on the new files), so a
+    /// player cannot remove the note of an emergency unlock. The installer sets the same ACL.
+    /// </summary>
+    private void EnsureInboxDirectory()
+    {
+        if (Directory.Exists(InboxDir)) return;
+        try
+        {
+            var security = new DirectorySecurity();
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            var inherit = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+                FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
+            var self = WindowsIdentity.GetCurrent().User;
+            if (self != null)
+                security.AddAccessRule(new FileSystemAccessRule(self, FileSystemRights.Modify, inherit, PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
+                FileSystemRights.CreateFiles | FileSystemRights.Synchronize, InheritanceFlags.None, PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier("S-1-3-4"), // OWNER RIGHTS
+                FileSystemRights.ReadPermissions, InheritanceFlags.ObjectInherit, PropagationFlags.InheritOnly, AccessControlType.Allow));
+            new DirectoryInfo(InboxDir).Create(security);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not create {Dir} with the inbox ACL; emergency unlocks are not reported", InboxDir);
+        }
+    }
+
+    /// <summary>
+    /// Sends the launcher's notes (emergency PIN unlock) to the server's audit log. A file is deleted
+    /// when the server accepted it (or refused it as invalid); otherwise it is sent again later, also
+    /// after the server or the agent was down.
+    /// </summary>
+    private async Task SendLauncherEventsAsync(HttpClient http, CancellationToken ct)
+    {
+        List<FileInfo> files;
+        try
+        {
+            if (!Directory.Exists(InboxDir)) return;
+            files = new DirectoryInfo(InboxDir).GetFiles("event-*.json").OrderBy(f => f.CreationTimeUtc).ToList();
+            foreach (var old in files.Take(Math.Max(0, files.Count - MaxInboxFiles))) TryDelete(old);
+            files = files.Skip(Math.Max(0, files.Count - MaxInboxFiles)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Cannot read the launcher inbox");
+            return;
+        }
+
+        foreach (var file in files.Take(EventsPerHeartbeat))
+        {
+            LauncherEvent? e = null;
+            try
+            {
+                if (file.Length <= LauncherEvent.MaxFileBytes)
+                    e = JsonSerializer.Deserialize<LauncherEvent>(File.ReadAllText(file.FullName), JsonOptions);
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+            {
+                // half-written or garbage: dropped below (a JsonException), or tried again next time
+                if (ex is not JsonException) continue;
+            }
+            if (e == null || e.Id == Guid.Empty)
+            {
+                TryDelete(file);
+                continue;
+            }
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"api/devices/{_deviceId}/events");
+            req.Headers.Add("X-Device-Key", _deviceKey);
+            req.Content = JsonContent.Create(e);
+            using var resp = await http.SendAsync(req, ct);
+            if (resp.IsSuccessStatusCode || resp.StatusCode == HttpStatusCode.BadRequest)
+            {
+                if (resp.IsSuccessStatusCode) _logger.LogInformation("Reported the emergency unlock of {Time:O} to the server", e.OccurredUtc);
+                TryDelete(file);
+            }
+            else
+            {
+                break; // 429 (too many) or server trouble: keep the files for the next heartbeat
+            }
+        }
+    }
+
+    private void TryDelete(FileInfo file)
+    {
+        try { file.Delete(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Could not delete {File}", file.FullName); }
     }
 
     /// <summary>Earlier versions kept device.json (with the key) in the launcher-readable folder.</summary>

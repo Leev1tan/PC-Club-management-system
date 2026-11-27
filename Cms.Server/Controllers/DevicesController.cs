@@ -17,13 +17,16 @@ public class DevicesController : ControllerBase
     private readonly CmsDbContext _db;
     private readonly DeviceRuntimeState? _runtime;
     private readonly AuditLogger? _audit;
+    private readonly Cms.Server.Billing.ClubClock? _clock;
 
-    public DevicesController(IDeviceRepository devices, CmsDbContext db, DeviceRuntimeState? runtime = null, AuditLogger? audit = null)
+    public DevicesController(IDeviceRepository devices, CmsDbContext db, DeviceRuntimeState? runtime = null, AuditLogger? audit = null,
+        Cms.Server.Billing.ClubClock? clock = null)
     {
         _devices = devices;
         _db = db;
         _runtime = runtime;
         _audit = audit;
+        _clock = clock;
     }
 
     private Task AuditAsync(string action, Guid deviceId, string summary, object? details = null) =>
@@ -202,6 +205,27 @@ public class DevicesController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// Agent: reports what happened on the PC while the server could not see it. Today only
+    /// "staff_unlock" (the staff PIN on the lock screen, checked offline), written to the audit log
+    /// as device.emergency_unlock. The same event id is recorded once; at most 30 per PC and hour.
+    /// </summary>
+    [HttpPost("{deviceId:guid}/events")]
+    [Authorize(Policy = Policies.ApprovedDevice)]
+    public async Task<IActionResult> Event(Guid deviceId, [FromBody] DeviceEventRequest request)
+    {
+        if (User.DeviceId() != deviceId) return Forbid();
+        var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId);
+        if (device == null) return NotFound();
+        var result = await DeviceEvents.RecordAsync(_db, _audit, device, request, _clock?.UtcNow ?? DateTimeOffset.UtcNow, _clock);
+        return result switch
+        {
+            DeviceEvents.Result.Recorded or DeviceEvents.Result.Duplicate => Ok(new { recorded = result == DeviceEvents.Result.Recorded }),
+            DeviceEvents.Result.TooMany => StatusCode(StatusCodes.Status429TooManyRequests, new { error = "Too many events from this PC; try again later." }),
+            _ => BadRequest(new { error = "Unknown event type or time." })
+        };
+    }
+
     private static string? MessageText(object? payload) => payload switch
     {
         System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Object } o when o.TryGetProperty("text", out var t) => t.ToString(),
@@ -292,6 +316,8 @@ public record DeviceDetailView(
     public bool SessionIsPackage { get; init; }
 }
 public record EnqueueCommandRequest(string Type, object? Payload);
+/// <summary>Event of the PC (Cms.Shared.LauncherEvent): Id (for de-duplication), Type staff_unlock, when, why the PC was locked.</summary>
+public record DeviceEventRequest(Guid Id, string? Type, DateTimeOffset OccurredUtc, string? LockReason = null, string? WindowsUser = null);
 public record CommandView(Guid Id, string Type, object? Payload);
 public record AckCommandRequest(string Status, string? Result);
 public record AssignZoneRequest(Guid? ZoneId);

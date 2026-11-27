@@ -29,6 +29,8 @@ public static class AuditActions
     public const string DeviceCommand = "device.command";
     /// <summary>Unlock of a PC that has no active session: time without payment.</summary>
     public const string UnlockWithoutSession = "device.unlock_without_session";
+    /// <summary>Staff PIN typed on the lock screen (Ctrl+Shift+U), reported by the agent afterwards.</summary>
+    public const string EmergencyUnlock = "device.emergency_unlock";
 
     public const string SessionStarted = "session.started";
     public const string SessionExtended = "session.extended";

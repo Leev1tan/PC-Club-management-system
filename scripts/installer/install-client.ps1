@@ -94,6 +94,14 @@ icacls $programDataConfigDir /setowner "*S-1-5-32-544" /T /C | Out-Null
 icacls $programDataConfigDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
 icacls $privateDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the permissions of $programDataConfigDir" }
+#   ClubAgent\inbox   the lock screen drops a note of each emergency PIN unlock here; the agent sends it
+#                     to the server audit log. Users: create files only (WD = add file, this folder only);
+#                     OWNER RIGHTS (S-1-3-4): read permissions only, so a player cannot read, change or
+#                     delete the note afterwards.
+$inboxDir = Join-Path $programDataConfigDir "inbox"
+if (!(Test-Path $inboxDir)) { New-Item -ItemType Directory -Path $inboxDir -Force | Out-Null }
+icacls $inboxDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" "*S-1-5-32-545:(WD,S)" "*S-1-3-4:(OI)(IO)(RC)" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the permissions of $inboxDir" }
 
 # Earlier versions kept the device key in the readable folder; the agent moves it, remove a stale copy
 $legacyDeviceFile = Join-Path $programDataConfigDir "device.json"

@@ -136,6 +136,7 @@ public partial class MainWindow : Window
             if (ok)
             {
                 _pinLimiter.RecordSuccess();
+                ReportStaffUnlock();
                 _lock.BeginStaffOverride(_lastState == null ? null : new AgentLockSnapshot(_lastState.IsLocked, _lastState.LockChangedUtc));
                 MessageBox.Show(this, "Розблоковано персоналом.\n\nРозблокування діє до наступного блокування від сервера.",
                     "Успіх", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -150,6 +151,26 @@ public partial class MainWindow : Window
         {
             _pinPromptOpen = false;
             RefreshLockState();
+        }
+    }
+
+    /// <summary>
+    /// Leaves a note of the emergency unlock in the agent inbox; the agent sends it to the server's
+    /// audit log (also later, when the agent or the server was down). Best effort: never blocks the unlock.
+    /// </summary>
+    private void ReportStaffUnlock()
+    {
+        try
+        {
+            var reason = _lock.Evaluate(_lastState == null ? null : new AgentLockSnapshot(_lastState.IsLocked, _lastState.LockChangedUtc),
+                ReadAgentHeartbeat(), DateTimeOffset.UtcNow).Reason;
+            var e = new LauncherEvent { LockReason = reason.ToString(), WindowsUser = Environment.UserName };
+            var path = Path.Combine(AgentFiles.Directory, AgentFiles.InboxDirectoryName, LauncherEvent.FileName(e.Id));
+            File.WriteAllText(path, JsonSerializer.Serialize(e));
+        }
+        catch
+        {
+            // no inbox (older install) or no access: the unlock still works
         }
     }
 
