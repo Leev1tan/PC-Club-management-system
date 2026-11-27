@@ -73,6 +73,8 @@ public static class AuditActions
     public const string PackageUpdated = "package.updated";
     public const string PackageDeleted = "package.deleted";
     public const string BillingSettingsChanged = "billing.settings_changed";
+    /// <summary>The loyalty tiers changed (Owner).</summary>
+    public const string LoyaltySettingsChanged = "loyalty.settings_changed";
     public const string ZoneCreated = "zone.created";
     public const string ZoneUpdated = "zone.updated";
     public const string ZoneDeleted = "zone.deleted";

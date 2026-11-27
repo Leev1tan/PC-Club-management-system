@@ -176,7 +176,7 @@ public class SessionsController : ControllerBase
             var tariff = s.TariffId.HasValue && tariffs.TryGetValue(s.TariffId.Value, out var t) ? t : null;
             decimal? currentCost = null;
             if (s.Status == "active" && !s.IsPrepaid)
-                currentCost = (await service.QuotePlayedAsync(s, null, s.PausedUtc ?? now))?.Total;
+                currentCost = (await service.QuotePlayedAsync(s, null, s.PausedUtc ?? now))?.Total is { } total ? Loyalty.Apply(total, s.DiscountPercent) : null;
             views.Add(new SessionDetailView(
                 s.Id, s.DeviceId, devices.TryGetValue(s.DeviceId, out var d) ? d.Hostname : null,
                 s.TariffId, tariff?.Name, tariff?.PricePerHour,

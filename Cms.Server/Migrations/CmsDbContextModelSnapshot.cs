@@ -1145,6 +1145,11 @@ namespace Cms.Server.Migrations
                     b.Property<Guid>("DeviceId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal>("DiscountPercent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(5,2)")
+                        .HasDefaultValue(0m);
+
                     b.Property<DateTimeOffset?>("EndUtc")
                         .HasColumnType("timestamp with time zone");
 

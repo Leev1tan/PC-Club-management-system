@@ -188,6 +188,14 @@ public sealed class SessionService
         var prepaid = package != null || minutes.HasValue;
         // A player who owes money plays prepaid until the debt is paid (an open-ended session could add to it)
         if (!prepaid && user is { Debt: > 0 }) return BillingErrors.PlayerHasDebt.With(user.Debt);
+        // Loyalty: the tier of a registered player gives a discount on PC time (not on free time or the price of an event)
+        LoyaltyTier? tier = null;
+        if (user != null && Event == null && !IsFree(req.PaymentMethod))
+            tier = (await Loyalty.OfPlayerAsync(_db, user.Id, now))?.Tier is { PcDiscountPercent: > 0 } t ? t : null;
+        var discountPercent = tier?.PcDiscountPercent ?? 0m;
+        var listPrice = price;
+        var discount = Loyalty.Discount(price, discountPercent);
+        price -= discount;
         // "From the balance": open-ended, paid from the balances, ends when they are used up
         DateTimeOffset? balanceEnd = null;
         if (req.LimitToBalance)
@@ -201,9 +209,10 @@ public sealed class SessionService
                 return BillingErrors.PlayerBusy.With(await _db.Devices.AsNoTracking().Where(d => d.Id == other).Select(d => d.Hostname).FirstOrDefaultAsync() ?? "?");
             var pricing = await PricingAsync(tariff!);
             var available = user.Balance + (req.UseBonus ? user.BonusPoints : 0m);
-            balanceEnd = ProjectEnd(until => TariffCalculator.QuotePlayed(new[] { (pricing, now, until) }, pricing, _clock.Zone).Total, available, now);
+            balanceEnd = ProjectEnd(until => Loyalty.Apply(TariffCalculator.QuotePlayed(new[] { (pricing, now, until) }, pricing, _clock.Zone).Total, discountPercent), available, now);
             if (balanceEnd < now.AddMinutes(MinBalanceMinutes))
-                return BillingErrors.InsufficientBalance.With(TariffCalculator.QuotePlayed(new[] { (pricing, now, now.AddMinutes(MinBalanceMinutes)) }, pricing, _clock.Zone).Total,
+                return BillingErrors.InsufficientBalance.With(
+                    Loyalty.Apply(TariffCalculator.QuotePlayed(new[] { (pricing, now, now.AddMinutes(MinBalanceMinutes)) }, pricing, _clock.Zone).Total, discountPercent),
                     user.Balance, user.BonusPoints);
         }
         string? method = null;
@@ -249,8 +258,10 @@ public sealed class SessionService
             PaymentMethod = method,
             PaidMinutes = minutes,
             LimitToBalance = balanceEnd.HasValue,
-            BalanceEndUtc = balanceEnd
+            BalanceEndUtc = balanceEnd,
+            DiscountPercent = discountPercent
         };
+        var discountText = discount > 0 ? $" (знижка {tier!.Name} {discountPercent:0.##}%: -{discount} {cur})" : "";
 
         // A check-in runs inside the transaction of the reservation (it commits both)
         await using (var tx = await JoinedTransaction.BeginAsync(_db))
@@ -272,11 +283,11 @@ public sealed class SessionService
                 {
                     var paid = await PayAsync(user, method!, price, req.UseBonus,
                         package != null ? LedgerTypes.PackagePurchase : LedgerTypes.SessionCharge, session, now,
-                        package != null
+                        (package != null
                             ? $"Пакет «{package.Name}» на {device.Hostname} — {price} {cur}"
                             : Event != null
                                 ? $"Подія №{Event.EventId} на {device.Hostname} (до {_clock.ToLocal(Event.EndUtc):HH:mm}) — {price} {cur}"
-                                : $"Сесія на {device.Hostname} ({minutes} хв, {tariff!.Name}) — {price} {cur}");
+                                : $"Сесія на {device.Hostname} ({minutes} хв, {tariff!.Name}) — {price} {cur}") + discountText);
                     if (!paid.Ok) return paid.Error!;
                 }
 
@@ -296,12 +307,14 @@ public sealed class SessionService
                 : balanceEnd.HasValue ? $"from the balance, until about {_clock.ToLocal(balanceEnd.Value):HH:mm}" : "open-ended";
             await AuditAsync(AuditActions.SessionStarted, session.Id,
                 $"Session on {device.Hostname} for {(user != null ? "@" + user.Username : "a guest")}: {what}" +
-                (price > 0 ? $", {price} {cur} " + PaidText(method) : ""),
+                (price > 0 ? $", {price} {cur} " + PaidText(method) : "") +
+                (discountPercent > 0 ? $", tier {tier!.Name} -{discountPercent:0.##}%" + (discount > 0 ? $" ({discount} {cur} off {listPrice} {cur})" : "") : ""),
                 new
                 {
                     device.Hostname, deviceId = device.Id, tariff = tariff?.Name, package = package?.Name, minutes, cost = price,
                     prepaid, player = user?.Username, paymentMethod = method, endUtc = session.EndUtc, cutoffUtc = session.CutoffUtc,
-                    limitToBalance = session.LimitToBalance, balanceEndUtc = session.BalanceEndUtc, eventId = Event?.EventId
+                    limitToBalance = session.LimitToBalance, balanceEndUtc = session.BalanceEndUtc, eventId = Event?.EventId,
+                    tier = tier?.Name, discountPercent, discount
                 });
             if (prepaid && price == 0)
             {
@@ -360,7 +373,8 @@ public sealed class SessionService
             if (!session.IsPrepaid)
             {
                 quote = await QuotePlayedAsync(session, segments, playedUntil);
-                if (quote != null) session.TotalCost = quote.Total;
+                // The loyalty discount of the start applies to the post-paid time too
+                if (quote != null) session.TotalCost = Loyalty.Apply(quote.Total, session.DiscountPercent);
             }
             session.EndUtc = now;
             session.Status = "ended";
@@ -377,7 +391,7 @@ public sealed class SessionService
 
             if (!session.IsPrepaid && session.TotalCost > 0)
             {
-                var minutesText = $"{quote?.BilledMinutes ?? 0} хв";
+                var minutesText = $"{quote?.BilledMinutes ?? 0} хв" + (session.DiscountPercent > 0 ? $", знижка {session.DiscountPercent:0.##}%" : "");
                 if (method == PaymentMethods.Balance)
                 {
                     charge = await Wallet.ChargeUpToAsync(_db, session.UserId!.Value, session.TotalCost, SpendPurpose.PcTime, req?.UseBonus ?? true);
@@ -480,10 +494,12 @@ public sealed class SessionService
             return BillingErrors.PastCutoff.With($"{_clock.ToLocal(session.CutoffUtc.Value):HH:mm}");
 
         var tariff = session.TariffId.HasValue ? await _db.Tariffs.AsNoTracking().FirstOrDefaultAsync(t => t.Id == session.TariffId.Value) : null;
-        var extraCost = tariff != null
+        var listCost = tariff != null
             ? TariffCalculator.QuoteFixed(await PricingAsync(tariff), baseEnd, req.Minutes, _clock.Zone, applyMinimum: false).Total
             : 0m;
-        var value = extraCost;
+        var value = listCost;
+        // The loyalty discount of the start applies to extensions too
+        var extraCost = Loyalty.Apply(listCost, session.DiscountPercent);
         var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == session.DeviceId);
         var user = session.UserId.HasValue ? await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == session.UserId.Value) : null;
         string? freeReason = null;
@@ -507,7 +523,8 @@ public sealed class SessionService
             if (extraCost > 0)
             {
                 var paid = await PayAsync(user, resolved.Value!, extraCost, req.UseBonus, LedgerTypes.SessionCharge, session, now,
-                    $"Продовження сесії на {device?.Hostname ?? "?"} (+{req.Minutes} хв) — {extraCost} {cur}");
+                    $"Продовження сесії на {device?.Hostname ?? "?"} (+{req.Minutes} хв) — {extraCost} {cur}" +
+                    (extraCost < listCost ? $" (знижка {session.DiscountPercent:0.##}%: -{listCost - extraCost} {cur})" : ""));
                 if (!paid.Ok) return paid.Error!;
             }
 
@@ -763,6 +780,8 @@ public sealed class SessionService
             }
         }
 
+        // The loyalty discount of the start applies to the price difference too
+        surcharge = Loyalty.Apply(surcharge, session.DiscountPercent);
         return BillingResult<TransferPlan>.Success(new TransferPlan(new TransferQuote(
             session.Id, target.Id, target.Hostname, target.ZoneId,
             targetTariff?.Id, targetTariff?.Name, targetPackage?.Id, targetPackage?.Name,
@@ -863,9 +882,9 @@ public sealed class SessionService
         var ids = segments.Where(s => s.TariffId.HasValue).Select(s => s.TariffId!.Value).Append(session.TariffId ?? Guid.Empty).Distinct().ToList();
         var pricing = await PricingAsync(ids);
         if (!session.TariffId.HasValue || !pricing.TryGetValue(session.TariffId.Value, out var billing)) return null;
-        decimal Cost(DateTimeOffset until) => TariffCalculator.QuotePlayed(
+        decimal Cost(DateTimeOffset until) => Loyalty.Apply(TariffCalculator.QuotePlayed(
             segments.Select(s => (s.TariffId.HasValue && pricing.TryGetValue(s.TariffId.Value, out var p) ? p : billing, s.StartUtc, s.EndUtc ?? until)),
-            billing, _clock.Zone).Total;
+            billing, _clock.Zone).Total, session.DiscountPercent);
         return ProjectEnd(Cost, accounts.Balance + accounts.Bonus, now);
     }
 

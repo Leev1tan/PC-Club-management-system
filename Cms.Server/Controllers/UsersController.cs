@@ -31,7 +31,23 @@ public class UsersController : ControllerBase
     {
         // SQLite cannot ORDER BY DateTimeOffset — sort in memory
         var users = (await _db.Users.AsNoTracking().ToListAsync()).OrderByDescending(u => u.CreatedUtc).ToList();
-        return Ok(users.Select(u => new UserView(u.Id, u.Username, u.DisplayName, u.Balance, u.BonusPoints, u.CreatedUtc, u.Debt)));
+        // The loyalty tier of every player (spend of the period from one query)
+        var loyalty = await Loyalty.LoadAsync(_db);
+        var spend = loyalty.Enabled ? await Loyalty.SpendByPlayerAsync(_db, Now, loyalty.PeriodDays) : new Dictionary<Guid, decimal>();
+        return Ok(users.Select(u => new UserView(u.Id, u.Username, u.DisplayName, u.Balance, u.BonusPoints, u.CreatedUtc, u.Debt)
+        {
+            Tier = loyalty.Enabled ? Loyalty.TierFor(loyalty, spend.GetValueOrDefault(u.Id)).Tier?.Name : null
+        }));
+    }
+
+    /// <summary>The loyalty tier of a player now: spend of the period, the tier, the next tier and how much is missing.</summary>
+    [HttpGet("{id:guid}/loyalty")]
+    public async Task<ActionResult<PlayerLoyaltyView>> LoyaltyOf(Guid id)
+    {
+        if (!await _db.Users.AnyAsync(u => u.Id == id)) return NotFound();
+        var settings = await Loyalty.LoadAsync(_db);
+        var tier = await Loyalty.OfPlayerAsync(_db, id, Now, settings);
+        return Ok(new PlayerLoyaltyView(settings.Enabled, settings.PeriodDays, tier?.Spend ?? 0m, tier?.Tier, tier?.Next, tier?.ToNext ?? 0m));
     }
 
     [HttpGet("{id:guid}")]
@@ -147,6 +163,9 @@ public class UsersController : ControllerBase
         var tiers = await BonusRules.LoadAsync(_db);
         var bonus = BonusRules.CashbackFor(tiers, req.Amount);
         var now = Now;
+        // Loyalty: the tier of the player adds its bonus percent of the top-up (a row of its own)
+        var tier = (await Loyalty.OfPlayerAsync(_db, id, now))?.Tier;
+        var tierBonus = Loyalty.BonusFor(req.Amount, tier?.TopUpBonusPercent ?? 0m);
 
         await using (var tx = await _db.Database.BeginTransactionAsync())
         {
@@ -160,16 +179,26 @@ public class UsersController : ControllerBase
             if (bonus > 0)
             {
                 await Wallet.CreditAsync(_db, id, 0m, bonus);
-                var tier = BonusRules.TierFor(tiers, req.Amount)!;
+                var cashback = BonusRules.TierFor(tiers, req.Amount)!;
                 await Ledger.AppendAsync(_db, new LedgerEntryEntity
                 {
                     UserId = id, Type = LedgerTypes.BonusAccrual, Method = PaymentMethods.None, Amount = bonus, BonusDelta = bonus,
-                    Description = $"Кешбек {tier.Percent:0.##}% за поповнення {req.Amount} {cur}"
+                    Description = $"Кешбек {cashback.Percent:0.##}% за поповнення {req.Amount} {cur}"
+                }, Actor, now);
+            }
+            if (tierBonus > 0)
+            {
+                await Wallet.CreditAsync(_db, id, 0m, tierBonus);
+                await Ledger.AppendAsync(_db, new LedgerEntryEntity
+                {
+                    UserId = id, Type = LedgerTypes.BonusAccrual, Method = PaymentMethods.None, Amount = tierBonus, BonusDelta = tierBonus,
+                    Description = $"Бонус рівня {tier!.Name} {tier.TopUpBonusPercent:0.##}% за поповнення {req.Amount} {cur}"
                 }, Actor, now);
             }
             await _audit.WriteAsync(AuditActions.PlayerTopUp, "player", id,
-                $"Balance top-up +{req.Amount} {cur} ({method})" + (bonus > 0 ? $", cashback +{bonus} {cur} bonus" : ""),
-                new { amount = req.Amount, method, bonus, req.Description });
+                $"Balance top-up +{req.Amount} {cur} ({method})" + (bonus > 0 ? $", cashback +{bonus} {cur} bonus" : "") +
+                (tierBonus > 0 ? $", tier {tier!.Name} +{tierBonus} {cur} bonus" : ""),
+                new { amount = req.Amount, method, bonus, tier = tier?.Name, tierBonus, req.Description });
             await tx.CommitAsync();
         }
         return Ok(await ViewAsync(id));
@@ -190,8 +219,10 @@ public class UsersController : ControllerBase
         if (reason == null) return BillingErrors.ReasonRequired.ToActionResult();
         var method = PaymentMethods.Normalize(req.Method) ?? PaymentMethods.Cash;
         if (!PaymentMethods.IsDesk(method)) return BillingErrors.BadPaymentMethod.ToActionResult();
-        var reversal = BonusRules.CashbackFor(await BonusRules.LoadAsync(_db), req.Amount);
         var now = Now;
+        // The cashback and the tier bonus of the refunded amount are taken back (at most the bonus left)
+        var refundTier = (await Loyalty.OfPlayerAsync(_db, id, now))?.Tier;
+        var reversal = BonusRules.CashbackFor(await BonusRules.LoadAsync(_db), req.Amount) + Loyalty.BonusFor(req.Amount, refundTier?.TopUpBonusPercent ?? 0m);
 
         await using (var tx = await _db.Database.BeginTransactionAsync())
         {
@@ -426,5 +457,11 @@ public record LedgerEntryView(
     };
 }
 /// <summary>Debt: unpaid post-paid time on the player account (0 = none).</summary>
-public record UserView(Guid Id, string Username, string DisplayName, decimal Balance, decimal BonusPoints, DateTimeOffset CreatedUtc, decimal Debt = 0);
+public record UserView(Guid Id, string Username, string DisplayName, decimal Balance, decimal BonusPoints, DateTimeOffset CreatedUtc, decimal Debt = 0)
+{
+    /// <summary>Name of the loyalty tier now (list only; null when loyalty is off or the player is below the lowest tier).</summary>
+    public string? Tier { get; init; }
+}
+/// <summary>Enabled: the club uses tiers; Spend: real money spent in the last PeriodDays; ToNext: still to spend for Next.</summary>
+public record PlayerLoyaltyView(bool Enabled, int PeriodDays, decimal Spend, LoyaltyTier? Tier, LoyaltyTier? Next, decimal ToNext);
 public record TransactionView(Guid Id, Guid UserId, decimal Amount, string Type, string? Description, DateTimeOffset CreatedUtc);

@@ -440,6 +440,7 @@ public partial class CmsDbContext : DbContext
             entity.Property(e => e.PaymentMethod).HasMaxLength(16);
             // A default, so rows written without the column (older code, raw SQL) stay valid
             entity.Property(e => e.LimitToBalance).HasDefaultValue(false);
+            entity.Property(e => e.DiscountPercent).HasColumnType("decimal(5,2)").HasDefaultValue(0m);
             entity.HasIndex(e => new { e.DeviceId, e.Status });
             // At most ONE active session per PC, enforced by the database (partial unique index)
             entity.HasIndex(e => e.DeviceId)
@@ -648,6 +649,8 @@ public class SessionEntity
     public bool LimitToBalance { get; set; }
     /// <summary>LimitToBalance: when the balances run out at the tariff prices (re-computed every 5 s; kept while paused).</summary>
     public DateTimeOffset? BalanceEndUtc { get; set; }
+    /// <summary>Loyalty discount on the PC time of this session, in percent, from the player's tier at the start (0 = none).</summary>
+    public decimal DiscountPercent { get; set; }
 }
 
 /// <summary>
@@ -1124,6 +1127,8 @@ public static class ClubSettingKeys
     public const string Reservations = "reservations.settings";
     /// <summary>Bar orders from the lock screens: JSON (Pos/BarOrderSettings).</summary>
     public const string BarOrders = "bar.orders";
+    /// <summary>Loyalty tiers by spend over a rolling period: JSON (Billing/Loyalty).</summary>
+    public const string Loyalty = "loyalty.tiers";
 }
 
 /// <summary>Shifts:RequireOpenShift (default true): cash and card payments need an open shift.</summary>
