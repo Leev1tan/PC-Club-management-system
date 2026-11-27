@@ -1,4 +1,5 @@
 using Cms.Server.Auth;
+using Cms.Server.Billing;
 using Cms.Server.Controllers;
 using Cms.Server.Data;
 using Microsoft.EntityFrameworkCore;
@@ -70,6 +71,7 @@ public static class DemoSeeder
         // Children first (foreign key order)
         await db.Commands.ExecuteDeleteAsync(ct);
         await db.Heartbeats.ExecuteDeleteAsync(ct);
+        await LedgerGuard.ClearForDemoResetAsync(db, ct); // append-only; players with ledger rows cannot be deleted
         await db.Transactions.ExecuteDeleteAsync(ct);
         await db.Sessions.ExecuteDeleteAsync(ct);
         await db.Devices.ExecuteDeleteAsync(ct);

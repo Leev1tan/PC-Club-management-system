@@ -10,6 +10,7 @@ namespace Cms.Server.Data;
 /// PostgreSQL: applies EF Core migrations (Cms.Server/Migrations).
 /// SQLite (single-PC installs, tests): EnsureCreated() for a new database; an existing
 /// database gets missing tables, columns and indexes from <see cref="SqliteSchemaUpgrader"/>.
+/// Both: append-only triggers (audit log, ledger) and the one-time ledger backfill.
 /// </summary>
 public static class DatabaseInitializer
 {
@@ -44,7 +45,13 @@ public static class DatabaseInitializer
                             logger.LogWarning("Upgraded the SQLite database schema: added {Changes}", string.Join(", ", changes));
                     }
                     await Cms.Server.Auth.AuditLogGuard.EnsureSqliteTriggersAsync(db, ct);
+                    await Cms.Server.Billing.LedgerGuard.EnsureSqliteTriggersAsync(db, ct);
                 }
+
+                // Balances of a version before the ledger become ledger rows (once)
+                var copied = await Cms.Server.Billing.LedgerBackfill.RunAsync(db, DateTimeOffset.UtcNow, ct);
+                if (copied > 0)
+                    logger.LogWarning("Copied the balances and history of an earlier version into the ledger: {Count} row(s)", copied);
 
                 var hashed = await Cms.Server.Auth.DeviceKeys.HashLegacyKeysAsync(db, ct);
                 if (hashed > 0)

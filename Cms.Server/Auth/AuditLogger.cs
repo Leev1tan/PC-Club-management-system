@@ -33,15 +33,24 @@ public static class AuditActions
     public const string SessionStarted = "session.started";
     public const string SessionExtended = "session.extended";
     public const string SessionEnded = "session.ended";
+    public const string SessionPaused = "session.paused";
+    public const string SessionResumed = "session.resumed";
+    public const string SessionTransferred = "session.transferred";
 
     public const string PlayerRegistered = "player.registered";
     public const string PlayerTopUp = "player.topup";
     public const string PlayerBalanceAdjusted = "player.balance_adjusted";
+    public const string PlayerBonusAdjusted = "player.bonus_adjusted";
+    public const string PlayerRefund = "player.refund";
     public const string PlayerPasswordSet = "player.password_set";
 
     public const string TariffCreated = "tariff.created";
     public const string TariffUpdated = "tariff.updated";
     public const string TariffDeleted = "tariff.deleted";
+    public const string PackageCreated = "package.created";
+    public const string PackageUpdated = "package.updated";
+    public const string PackageDeleted = "package.deleted";
+    public const string BillingSettingsChanged = "billing.settings_changed";
     public const string ZoneCreated = "zone.created";
     public const string ZoneUpdated = "zone.updated";
     public const string ZoneDeleted = "zone.deleted";
