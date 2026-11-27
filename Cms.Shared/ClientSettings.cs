@@ -43,7 +43,7 @@ public static class ClientCurrencies
 /// Club settings for the PCs. The server sends them with every heartbeat response of an approved PC;
 /// the agent writes them to %ProgramData%\ClubAgent\client-settings.json (AgentFiles.ClientSettingsFile),
 /// and the lock screen reads that file. Without the file (the server was never reached) the lock screen
-/// uses Ukrainian and UAH.
+/// uses Ukrainian, UAH and the Cyber theme without an accent or a logo.
 /// </summary>
 public sealed class ClientSettings
 {
@@ -53,22 +53,38 @@ public sealed class ClientSettings
     public string Language { get; init; } = ClientLanguages.Ukrainian;
     /// <summary>ISO code of the club currency: UAH, EUR, USD or PLN (club setting club.currency).</summary>
     public string Currency { get; init; } = ClientCurrencies.Default;
+    /// <summary>Club theme of the lock screen: cyber (default), pro-dark, light or arcade (club setting club.theme).</summary>
+    public string Theme { get; init; } = ClubThemes.Cyber;
+    /// <summary>Owner accent colour "#RRGGBB" (club setting club.accent); null: the accent of the theme.</summary>
+    public string? Accent { get; init; }
+    /// <summary>SHA-256 (64 lower-case hex) of the club logo; null: no logo, the lock screen shows the club name text.</summary>
+    public string? LogoSha256 { get; init; }
     /// <summary>When the agent received the settings from the server (null in the server response).</summary>
     public DateTimeOffset? ReceivedUtc { get; init; }
 
     [JsonIgnore]
     public string CurrencySymbol => ClientCurrencies.Symbol(Currency);
 
-    /// <summary>The same settings with known values only (unknown language: uk, unknown currency: UAH).</summary>
+    /// <summary>
+    /// The same settings with known values only (unknown language: uk, unknown currency: UAH, unknown theme: cyber);
+    /// an accent that is not #RRGGBB and a logo hash that is not 64 hex characters are dropped.
+    /// </summary>
     public ClientSettings Normalized() => new()
     {
         Language = ClientLanguages.Normalize(Language),
         Currency = ClientCurrencies.Normalize(Currency),
+        Theme = ClubThemes.Normalize(Theme),
+        Accent = ColorContrast.TryParseHex(Accent, out var accent) ? accent : null,
+        LogoSha256 = IsSha256Hex(LogoSha256) ? LogoSha256!.ToLowerInvariant() : null,
         ReceivedUtc = ReceivedUtc
     };
 
     public bool SameAs(ClientSettings? other) =>
-        other != null && Language == other.Language && Currency == other.Currency;
+        other != null && Language == other.Language && Currency == other.Currency &&
+        Theme == other.Theme && Accent == other.Accent && LogoSha256 == other.LogoSha256;
+
+    /// <summary>True for exactly 64 hex characters (a SHA-256 in hex).</summary>
+    public static bool IsSha256Hex(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
     private static readonly JsonSerializerOptions Json = new()
     {
