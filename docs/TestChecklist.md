@@ -74,11 +74,13 @@ From admin UI, click "Unlock":
 - [ ] Windows key works again
 
 ### Test 3: Staff Unlock (Ctrl+Shift+U)
-Lock the VM via admin UI, then on VM:
+First set the staff PIN in the admin UI (Owner: Settings), wait 5 s for the next heartbeat, and check
+that `C:\ProgramData\ClubAgent\staff-pin.json` exists. Lock the VM via admin UI, then on VM:
 - [ ] Press Ctrl+Shift+U
-- [ ] PIN prompt appears
-- [ ] Enter "1234"
-- [ ] Overlay drops immediately
+- [ ] A masked PIN prompt appears; the lock screen stays visible behind it
+- [ ] A wrong PIN is refused; after 3 wrong PINs the prompt waits 30 s
+- [ ] The correct PIN drops the overlay
+- [ ] A new lock from the admin UI locks the VM again
 
 ### Test 4: Session Start & Countdown
 From admin UI, click "Start Session" on the device:
@@ -99,14 +101,15 @@ From admin UI, click "Restart" on device:
 - [ ] After reboot, service auto-starts
 - [ ] Device re-registers and appears online in admin UI
 
-### Test 7: Fail-Safe (Service Down)
-On VM, stop the service:
+### Test 7: Fail-Closed (Service Down)
+Start a session so that the VM is unlocked. On VM (as admin), stop the service:
 ```powershell
 sc.exe stop ClubAgent
 ```
 Wait 15+ seconds:
-- [ ] Launcher overlay drops (fail-open due to stale heartbeat)
-- [ ] Keys unblocked
+- [ ] Launcher overlay appears with "AGENT NOT RESPONDING" (fail closed)
+- [ ] Keys stay blocked
+- [ ] Ctrl+Shift+U + the staff PIN unlocks the VM (offline check)
 
 Restart service:
 ```powershell

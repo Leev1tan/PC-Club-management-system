@@ -62,23 +62,31 @@ graph TB
 | [IDeviceRepository.cs](../Cms.Server/Repositories/IDeviceRepository.cs) | Device operations interface |
 | [ISessionRepository.cs](../Cms.Server/Repositories/ISessionRepository.cs) | Session operations interface |
 
-**REST API Endpoints**:
+**REST API Endpoints** (who may call them in brackets; see the README security section):
 
 ```
-POST /api/devices/register       → Register new device
-POST /api/devices/heartbeat      → Agent heartbeat (X-Device-Key header)
-GET  /api/devices                → List all devices
-POST /api/devices/{id}/commands  → Enqueue command for device
-GET  /api/devices/{id}/commands  → Poll pending commands
-POST /api/devices/{id}/commands/{cmdId}/ack → Acknowledge command
+POST /api/auth/login | logout | setup | password, GET /api/auth/me | status   → staff login (cookie)
+GET/POST/PUT /api/staff                     → staff accounts                  [Owner]
+GET/PUT/DELETE /api/settings[/staff-pin]    → lock-screen staff PIN           [Owner]
+GET  /api/audit                             → audit log, read-only            [Owner, Manager]
 
-POST /api/sessions               → Start new session
+POST /api/devices/register       → Register a PC: enrollment token, current key, or "pending"   [agent]
+POST /api/devices/heartbeat      → Agent heartbeat; returns status + staff PIN hash             [X-Device-Key]
+GET  /api/devices/{id}/commands  → Poll pending commands                          [X-Device-Key, approved]
+POST /api/devices/{id}/commands/{cmdId}/ack → Acknowledge command                 [X-Device-Key, approved]
+GET  /api/devices                → List all devices                               [all staff]
+POST /api/devices/{id}/commands  → Enqueue lock/unlock/restart/logoff/message     [all staff]
+POST /api/devices/{id}/approve | reject | revoke, PUT .../zone                    [Owner, Manager, Tech]
+
+POST /api/sessions               → Start new session                              [Owner, Manager, Cashier]
 POST /api/sessions/{id}/end      → End session early
 POST /api/sessions/{id}/extend   → Add minutes to a prepaid session
 GET  /api/sessions               → List all sessions
+GET  /api/sessions/revenue       → Revenue                                        [Owner, Manager]
+POST /api/users/login            → Player login on the lock screen (password or PIN required)   [public, rate limited]
 
-GET  /health, /api/health        → Health check
-GET  /api/demo                   → Demo mode status (banner in the admin UI)
+GET  /health, /api/health        → Health check                                   [public]
+GET  /api/demo                   → Demo mode status (banner in the admin UI)      [public]
 ```
 
 ---
@@ -90,8 +98,9 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)
 **Entry Point**: [Worker.cs](../Cms.Agent.Service/Worker.cs)
 
 **Responsibilities**:
-1. **Self-Registration**: Registers with server on first start, stores `deviceId` and `deviceKey`
-2. **Heartbeat Loop**: Sends heartbeat every 1 second with system metrics
+1. **Registration**: with the enrollment token from the installer (approved at once) or without it
+   (the PC waits for staff approval); stores `deviceId` and `deviceKey` in `ClubAgent\private`
+2. **Heartbeat Loop**: Sends a heartbeat every 5 seconds; receives its status and the staff PIN hash
 3. **Command Polling**: Fetches and executes pending commands from server
 4. **Session Enforcement**: Tracks session end time, manages lock state
 5. **State File Management**: Writes `state.json` for Launcher to read
@@ -106,11 +115,15 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)
 | `message` | Log message (UI popup planned) |
 | `session_set` | Set session end time |
 
-**Local State Communication**:
+**Local State Communication** (written every second, also while the server is unreachable):
 ```
-%ProgramData%\ClubAgent\
-├── state.json           # Lock state + remaining seconds
-└── agent_heartbeat.txt  # Agent liveness marker
+%ProgramData%\ClubAgent\          # players: read only (installer ACL)
+├── state.json           # Lock state, remaining seconds, time of the last lock change
+├── agent_heartbeat.txt  # Agent liveness marker (the launcher locks when it is older than 15 s)
+├── staff-pin.json       # PBKDF2 hash of the staff PIN (from the server)
+└── private\             # SYSTEM, Administrators, agent only
+    ├── device.json            # device id + key
+    └── enrollment-token.txt   # from the installer; deleted after the first registration
 ```
 
 ---
@@ -125,8 +138,9 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)
 - Full-screen overlay when PC is locked
 - Session countdown timer display
 - Keyboard blocking when locked (via [KeyboardBlocker.cs](../Cms.Launcher/KeyboardBlocker.cs))
-- Staff unlock with PIN (`Ctrl+Shift+U`, PIN: `1234`)
-- Fail-open mechanism: unlocks if agent heartbeat is stale (>15s)
+- Staff unlock with the staff PIN (`Ctrl+Shift+U`); the owner sets the PIN in the admin UI, the
+  launcher verifies it locally against `staff-pin.json`, so it also works offline. No default PIN.
+- Fail closed: stays locked when the agent heartbeat is older than 15 s or `state.json` is missing
 
 **State Polling**:
 - Reads `state.json` every 2 seconds
@@ -294,11 +308,14 @@ commands and [ClubDeployment.md](ClubDeployment.md) for the club network.
 
 | Aspect | Implementation |
 |--------|----------------|
-| **Agent Authentication** | `X-Device-Key` header on all agent requests |
-| **Device Key Storage** | Unique key per device, stored in memory (per session) |
-| **Admin API** | Open CORS in dev; intended to restrict in production |
-| **Staff Unlock** | Local PIN bypass (`1234`) for emergency access |
-| **Fail-Open** | Launcher unlocks if agent heartbeat stale >15s |
+| **Staff login** | Cookie (HTTP-only, SameSite=Strict), roles Owner / Manager / Cashier / Tech, CSRF header + Origin check |
+| **Passwords** | ASP.NET Core Identity PasswordHasher (salted PBKDF2) for staff and players |
+| **Agent Authentication** | `X-Device-Key` header; the server stores only its SHA-256 hash |
+| **PC enrollment** | Enrollment token from the installer, or staff approval of a pending PC |
+| **CORS** | Same origin only; `Cors:AllowedOrigins` for exceptions |
+| **Staff Unlock** | Staff PIN set by the owner, PBKDF2 hash verified locally by the launcher |
+| **Fail-Closed** | Launcher stays locked when the agent is silent (>15 s) |
+| **Audit log** | Append-only table (database trigger), read-only page for Owner and Manager |
 
 ---
 
