@@ -16,15 +16,24 @@ internal static class KeyboardBlocker
     private static bool _enabled;
     private static Action? _onStaffChord;
     private static readonly Cms.Client.StaffChord Chord = new();
+    private static DateTime _installedUtc;
+
+    /// <summary>
+    /// Windows removes a low-level hook without a message when one call takes too long (LowLevelHooksTimeout). The lock
+    /// screen calls Enable every 2 s while locked; after this time the hook is installed again.
+    /// </summary>
+    private static readonly TimeSpan Reinstall = TimeSpan.FromSeconds(60);
 
     /// <summary>onStaffChord: called in the hook on Ctrl+Shift+U; it must only queue the prompt (a hook call must return at once).</summary>
     public static void Enable(Action onStaffChord)
     {
         _onStaffChord = onStaffChord;
-        if (_enabled) return;
+        if (_enabled && DateTime.UtcNow - _installedUtc < Reinstall) return;
+        if (_enabled) Disable();
         Chord.Reset();
         _proc = HookCallback;
         _hookId = SetHook(_proc);
+        _installedUtc = DateTime.UtcNow;
         _enabled = true;
     }
 

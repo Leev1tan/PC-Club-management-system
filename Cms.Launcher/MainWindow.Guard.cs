@@ -29,7 +29,7 @@ public partial class MainWindow
 
     private static readonly nint HwndTopMost = -1;
     private static readonly nint HwndNoTopMost = -2;
-    private const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010;
+    private const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010, SwpAsyncWindowPos = 0x4000;
     private const int GwlExStyle = -20;
     private const long WsExTopMost = 0x00000008;
     private const int SwMinimize = 6;
@@ -155,16 +155,33 @@ public partial class MainWindow
         if (hwnd != 0) BringToFront(hwnd);
     }
 
+    private static int _bringBusy;
+
     /// <summary>
     /// Gives the foreground to a window of this process, also when another program has it. Windows refuses
     /// SetForegroundWindow to a program that is not in the foreground (the foreground lock: the guard of 3aa3619 could not
-    /// take it back from the "Open with" dialog). For the moment of the call this thread attaches its input to the input
-    /// thread of the foreground window (AttachThreadInput), so Windows treats the call as one of the foreground program.
-    /// Chosen over a synthetic Alt key press (keybd_event): no key reaches the other program (Alt opens menus and is a key
-    /// of many games) and the own keyboard hooks see nothing. Never attached to a hung window: the lock screen would hang
-    /// too; a hung program is ended by the guard instead. Called only while the PC is locked.
+    /// take it back from the "Open with" dialog). For the moment of the call a helper thread attaches its input to the
+    /// input thread of the foreground window (AttachThreadInput), so Windows treats the call as one of the foreground
+    /// program. Chosen over a synthetic Alt key press (keybd_event): no key reaches the other program (Alt opens menus and
+    /// is a key of many games) and the own keyboard hooks see nothing. The helper thread, not the window thread, waits when
+    /// the other program is slow to give up the activation: the lock screen and its keyboard hook never stop. One helper
+    /// at a time; never attached to a hung window (the guard ends a hung program instead). Called only while locked.
     /// </summary>
     private static void BringToFront(nint target)
+    {
+        if (GetForegroundWindow() == target) return;
+        if (Interlocked.Exchange(ref _bringBusy, 1) == 1) return; // the last helper still waits for a slow program
+        var helper = new Thread(() =>
+        {
+            try { BringToFrontNow(target); }
+            catch (Exception) { /* best effort: the next guard tick tries again */ }
+            finally { Volatile.Write(ref _bringBusy, 0); }
+        })
+        { IsBackground = true, Name = "Lock screen foreground" };
+        helper.Start();
+    }
+
+    private static void BringToFrontNow(nint target)
     {
         var foreground = GetForegroundWindow();
         if (foreground == target) return;
@@ -189,10 +206,13 @@ public partial class MainWindow
         SetForegroundWindow(target); // nobody has the foreground, or the attach was refused (another desktop or integrity level)
     }
 
-    /// <summary>No longer top-most, then minimized: the window cannot cover the lock screen or take a click.</summary>
+    /// <summary>
+    /// No longer top-most, then minimized: the window cannot cover the lock screen or take a click. Both calls are posted to
+    /// the thread of the window (SWP_ASYNCWINDOWPOS, ShowWindowAsync): a program that does not answer cannot stop the lock screen.
+    /// </summary>
     private static void PushDown(nint hwnd)
     {
-        SetWindowPos(hwnd, HwndNoTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
+        SetWindowPos(hwnd, HwndNoTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpAsyncWindowPos);
         ShowWindowAsync(hwnd, SwMinimize);
     }
 

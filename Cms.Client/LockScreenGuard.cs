@@ -155,22 +155,26 @@ public sealed record GuardPlan(IReadOnlyList<nint> PushDown, IReadOnlyList<nint>
 /// The windows of other programs while the PC is locked (Windows test 2026-11-27, defect 8, and the night re-test, defect 2:
 /// the Windows "Open with" dialog stayed above the locked screen and kept the keyboard for more than 3 minutes).
 ///  - PushDown mode: a foreign top-most window is pushed down every tick.
-///  - KeepPrograms: a foreign top-most window is pushed down once; when it is above the lock screen again 1 s or more later
-///    (the push-down did not work, or it makes itself top-most again), it gets WM_CLOSE. Normal windows (a paused game)
-///    stay.
-///  - ClosePrograms: every foreign window gets WM_CLOSE.
-///  - A window that is still there 2 s after WM_CLOSE: its process is ended, once.
+///  - KeepPrograms (a paused session): a foreign top-most window is pushed down. It gets WM_CLOSE when it is still above
+///    the lock screen 1 s or more after the push-down (the push-down did not work), or when it comes back above the lock
+///    screen for the 3rd time. Normal windows (a paused game) stay. 2 s after WM_CLOSE its process is ended only when the
+///    window is still ABOVE the lock screen; a window that went below stays (a game with an overlay window keeps running).
+///  - ClosePrograms: every foreign window gets WM_CLOSE; a window that is still there 2 s later ends its process.
+///  - A process is ended once; a process id is forgotten when it has no window any more (Windows uses ids again).
 /// Off (unlocked) forgets everything: nothing is closed or ended after the PC is unlocked.
 /// </summary>
 public sealed class ForeignWindowCloser
 {
     public static readonly TimeSpan CloseAfterPushDown = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan TerminateAfter = TimeSpan.FromSeconds(2);
+    /// <summary>KeepPrograms: a window that comes back above the lock screen this many times is closed at once.</summary>
+    public const int MaxPushDowns = 3;
 
     private sealed class Seen
     {
         public required int ProcessId { get; init; }
         public DateTimeOffset? PushedDownUtc { get; set; }
+        public int PushDowns { get; set; }
         public DateTimeOffset? CloseSentUtc { get; set; }
     }
 
@@ -190,17 +194,28 @@ public sealed class ForeignWindowCloser
         var close = new List<nint>();
         var end = new List<int>();
         var present = new HashSet<nint>();
+        var presentProcesses = new HashSet<int>();
         foreach (var w in windows)
         {
             if (!LockScreenGuard.IsForeign(w, context)) continue;
             present.Add(w.Handle);
+            presentProcesses.Add(w.ProcessId);
             if (!_windows.TryGetValue(w.Handle, out var seen) || seen.ProcessId != w.ProcessId)
                 _windows[w.Handle] = seen = new Seen { ProcessId = w.ProcessId };
             var above = w.TopMost && !w.Minimized;
+            if (!above) seen.PushedDownUtc = null; // the push-down holds; when it comes back it is pushed down again (counted)
 
             if (seen.CloseSentUtc is { } sent)
             {
-                if (now - sent >= TerminateAfter && _ended.Add(w.ProcessId)) end.Add(w.ProcessId);
+                var mustEnd = mode == GuardMode.ClosePrograms || above;
+                if (mustEnd && now - sent >= TerminateAfter)
+                {
+                    if (_ended.Add(w.ProcessId)) end.Add(w.ProcessId);
+                }
+                else if (above && mode != GuardMode.ClosePrograms)
+                {
+                    push.Add(w.Handle);
+                }
                 continue;
             }
             switch (mode)
@@ -210,16 +225,18 @@ public sealed class ForeignWindowCloser
                     break;
                 case GuardMode.KeepPrograms:
                     if (!above) break;
-                    if (seen.PushedDownUtc is { } pushed && now - pushed >= CloseAfterPushDown)
+                    if (seen.PushDowns >= MaxPushDowns || (seen.PushedDownUtc is { } pushed && now - pushed >= CloseAfterPushDown))
                     {
                         seen.CloseSentUtc = now;
                         close.Add(w.Handle);
+                        break;
                     }
-                    else
+                    if (seen.PushedDownUtc == null)
                     {
-                        seen.PushedDownUtc ??= now;
-                        push.Add(w.Handle);
+                        seen.PushedDownUtc = now;
+                        seen.PushDowns++;
                     }
+                    push.Add(w.Handle);
                     break;
                 case GuardMode.ClosePrograms:
                     seen.CloseSentUtc = now;
@@ -228,6 +245,7 @@ public sealed class ForeignWindowCloser
             }
         }
         foreach (var gone in _windows.Keys.Where(h => !present.Contains(h)).ToList()) _windows.Remove(gone);
+        _ended.RemoveWhere(pid => !presentProcesses.Contains(pid));
         return new GuardPlan(push, close, end);
     }
 }

@@ -126,16 +126,58 @@ public sealed class LockScreenGuardTests
     }
 
     [Fact]
-    public void A_window_that_closes_after_the_push_down_is_not_closed_again()
+    public void A_window_that_stays_down_after_the_push_down_is_not_closed_but_a_third_return_is()
     {
         var closer = new ForeignWindowCloser();
         var dialog = Window(77, @"C:\Windows\System32\OpenWith.exe");
-        closer.Plan(new[] { dialog }, Context, GuardMode.KeepPrograms, T0);
-        var plan = closer.Plan(new[] { dialog with { TopMost = false, Minimized = true } }, Context, GuardMode.KeepPrograms, T0.AddSeconds(1));
-        Assert.Equal(GuardPlan.Nothing.Close, plan.Close);
+        var below = dialog with { TopMost = false, Minimized = true };
+        Assert.Equal(new[] { dialog.Handle }, closer.Plan(new[] { dialog }, Context, GuardMode.KeepPrograms, T0).PushDown);
+        var plan = closer.Plan(new[] { below }, Context, GuardMode.KeepPrograms, T0.AddSeconds(1));
+        Assert.Empty(plan.Close);
         Assert.Empty(plan.PushDown);
-        // It makes itself top-most again later: closed at once (the push-down does not hold it)
-        Assert.Equal(new[] { dialog.Handle }, closer.Plan(new[] { dialog }, Context, GuardMode.KeepPrograms, T0.AddSeconds(30)).Close);
+        // A game that comes back above the lock screen an hour later is pushed down again, not closed
+        Assert.Equal(new[] { dialog.Handle }, closer.Plan(new[] { dialog }, Context, GuardMode.KeepPrograms, T0.AddHours(1)).PushDown);
+        closer.Plan(new[] { below }, Context, GuardMode.KeepPrograms, T0.AddHours(1).AddSeconds(1));
+        Assert.Equal(new[] { dialog.Handle }, closer.Plan(new[] { dialog }, Context, GuardMode.KeepPrograms, T0.AddHours(2)).PushDown);
+        closer.Plan(new[] { below }, Context, GuardMode.KeepPrograms, T0.AddHours(2).AddSeconds(1));
+        // The third return: it makes itself top-most again and again, so it is closed at once
+        plan = closer.Plan(new[] { dialog }, Context, GuardMode.KeepPrograms, T0.AddHours(3));
+        Assert.Equal(new[] { dialog.Handle }, plan.Close);
+        Assert.Empty(plan.PushDown);
+    }
+
+    [Fact]
+    public void Paused_session_a_process_is_ended_only_while_its_window_is_still_above_the_lock_screen()
+    {
+        var closer = new ForeignWindowCloser();
+        var overlay = Window(78, @"C:\Games\game.exe", handle: 5);            // a top-most overlay of a game
+        var main = Window(78, @"C:\Games\game.exe", topMost: false, handle: 6); // the game itself
+        closer.Plan(new[] { overlay, main }, Context, GuardMode.KeepPrograms, T0);
+        Assert.Equal(new nint[] { 5 }, closer.Plan(new[] { overlay, main }, Context, GuardMode.KeepPrograms, T0.AddSeconds(1)).Close);
+        // WM_CLOSE did not close the overlay, but it went below the lock screen: the game keeps running
+        var down = overlay with { TopMost = false, Minimized = true };
+        Assert.Empty(closer.Plan(new[] { down, main }, Context, GuardMode.KeepPrograms, T0.AddSeconds(4)).Terminate);
+        // Still above the lock screen 2 s after WM_CLOSE: pushed down while waiting, then the process is ended
+        var other = new ForeignWindowCloser();
+        other.Plan(new[] { overlay }, Context, GuardMode.KeepPrograms, T0);
+        other.Plan(new[] { overlay }, Context, GuardMode.KeepPrograms, T0.AddSeconds(1));
+        Assert.Equal(new nint[] { 5 }, other.Plan(new[] { overlay }, Context, GuardMode.KeepPrograms, T0.AddSeconds(2)).PushDown);
+        Assert.Equal(new[] { 78 }, other.Plan(new[] { overlay }, Context, GuardMode.KeepPrograms, T0.AddSeconds(3)).Terminate);
+    }
+
+    [Fact]
+    public void A_process_id_that_windows_uses_again_is_ended_again()
+    {
+        var closer = new ForeignWindowCloser();
+        var first = Window(70, @"C:\Apps\x.exe", topMost: false, handle: 1);
+        closer.Plan(new[] { first }, Context, GuardMode.ClosePrograms, T0);
+        Assert.Equal(new[] { 70 }, closer.Plan(new[] { first }, Context, GuardMode.ClosePrograms, T0.AddSeconds(2)).Terminate);
+        closer.Plan(Array.Empty<GuardWindow>(), Context, GuardMode.ClosePrograms, T0.AddSeconds(3));          // ended: no window
+        var reused = Window(70, @"C:\Apps\y.exe", topMost: false, handle: 9);                              // a new program, same id
+        Assert.Equal(new nint[] { 9 }, closer.Plan(new[] { reused }, Context, GuardMode.ClosePrograms, T0.AddSeconds(4)).Close);
+        Assert.Equal(new[] { 70 }, closer.Plan(new[] { reused }, Context, GuardMode.ClosePrograms, T0.AddSeconds(6)).Terminate);
+        // A process that could not be ended (its window stays) is not tried every second
+        Assert.Empty(closer.Plan(new[] { reused }, Context, GuardMode.ClosePrograms, T0.AddSeconds(7)).Terminate);
     }
 
     [Fact]
