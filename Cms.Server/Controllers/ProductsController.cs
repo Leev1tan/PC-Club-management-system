@@ -56,6 +56,7 @@ public class ProductsController : ControllerBase
     [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<ProductView>> Create([FromBody] ProductRequest req)
     {
+        var cur = await _db.CurrencySymbolAsync();
         if (!Valid(req) || req.InitialStock is < 0 or > MaxStock) return PosErrors.BadProduct.ToActionResult();
         var now = _clock.UtcNow;
         var product = new ProductEntity { Id = Guid.NewGuid(), CreatedUtc = now };
@@ -69,7 +70,7 @@ public class ProductsController : ControllerBase
             await Stock.RecordAsync(_db, product.Id, StockMovementTypes.Restock, req.InitialStock.Value, Actor, now,
                 shiftId: await ShiftService.LockOpenShiftIdAsync(_db), reason: "Початковий залишок");
         }
-        await AuditAsync(AuditActions.ProductCreated, product.Id, $"Product '{product.Name}' created: {product.Price} ₴ ({product.Category})", Details(product));
+        await AuditAsync(AuditActions.ProductCreated, product.Id, $"Product '{product.Name}' created: {product.Price} {cur} ({product.Category})", Details(product));
         await tx.CommitAsync();
         return Ok(await ViewAsync(product.Id));
     }
@@ -79,6 +80,7 @@ public class ProductsController : ControllerBase
     [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<ProductView>> Update(Guid id, [FromBody] ProductRequest req)
     {
+        var cur = await _db.CurrencySymbolAsync();
         if (!Valid(req)) return PosErrors.BadProduct.ToActionResult();
         var product = await _db.Products.FindAsync(id);
         if (product == null) return PosErrors.ProductNotFound.ToActionResult();
@@ -87,7 +89,7 @@ public class ProductsController : ControllerBase
         Apply(product, req);
         await _db.SaveChangesAsync();
         if (oldPrice != product.Price)
-            await AuditAsync(AuditActions.ProductPriceChanged, id, $"Price of '{product.Name}' changed: {oldPrice} -> {product.Price} ₴", new { before, after = Details(product) });
+            await AuditAsync(AuditActions.ProductPriceChanged, id, $"Price of '{product.Name}' changed: {oldPrice} -> {product.Price} {cur}", new { before, after = Details(product) });
         else
             await AuditAsync(AuditActions.ProductUpdated, id, $"Product '{product.Name}' changed", new { before, after = Details(product) });
         return Ok(await ViewAsync(id));
@@ -98,13 +100,14 @@ public class ProductsController : ControllerBase
     [Authorize(Policy = Policies.Management)]
     public async Task<IActionResult> Delete(Guid id)
     {
+        var cur = await _db.CurrencySymbolAsync();
         var product = await _db.Products.FindAsync(id);
         if (product == null) return PosErrors.ProductNotFound.ToActionResult();
         if (await _db.SaleItems.AnyAsync(i => i.ProductId == id) || await _db.StockMovements.AnyAsync(m => m.ProductId == id))
             return PosErrors.ProductInUse.ToActionResult();
         _db.Products.Remove(product);
         await _db.SaveChangesAsync();
-        await AuditAsync(AuditActions.ProductDeleted, id, $"Product '{product.Name}' deleted ({product.Price} ₴)", Details(product));
+        await AuditAsync(AuditActions.ProductDeleted, id, $"Product '{product.Name}' deleted ({product.Price} {cur})", Details(product));
         return NoContent();
     }
 

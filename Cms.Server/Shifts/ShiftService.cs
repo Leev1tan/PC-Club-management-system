@@ -65,6 +65,7 @@ public sealed class ShiftService
 
     public async Task<BillingResult<ShiftEntity>> OpenAsync(decimal openingFloat, string? note)
     {
+        var cur = await _db.CurrencySymbolAsync();
         if (openingFloat < 0 || openingFloat > MaxAmount || openingFloat != TariffCalculator.Round(openingFloat))
             return ShiftErrors.BadFloat;
         if (await OpenShiftAsync(_db) != null) return ShiftErrors.AlreadyOpen;
@@ -89,8 +90,8 @@ public sealed class ShiftService
             return ShiftErrors.AlreadyOpen; // opened by someone else at the same moment
         }
         await AuditAsync(AuditActions.ShiftOpened, shift.Id,
-            $"Shift #{shift.Id} opened with a float of {openingFloat} ₴" +
-            (previous?.CountedCash is { } left && left != openingFloat ? $" (shift #{previous.Id} closed with {left} ₴ counted)" : ""),
+            $"Shift #{shift.Id} opened with a float of {openingFloat} {cur}" +
+            (previous?.CountedCash is { } left && left != openingFloat ? $" (shift #{previous.Id} closed with {left} {cur} counted)" : ""),
             new { shift.OpeningFloat, note = shift.OpenNote, previousShift = previous?.Id, previousCountedCash = previous?.CountedCash });
         await tx.CommitAsync();
         return BillingResult<ShiftEntity>.Success(shift);
@@ -99,6 +100,7 @@ public sealed class ShiftService
     /// <summary>Closes the open shift with the counted cash (the opener, Owner or Manager).</summary>
     public async Task<BillingResult<ShiftEntity>> CloseAsync(long id, decimal countedCash, string? note, bool isManager)
     {
+        var cur = await _db.CurrencySymbolAsync();
         if (countedCash < 0 || countedCash > MaxAmount || countedCash != TariffCalculator.Round(countedCash))
             return ShiftErrors.BadCounted;
 
@@ -127,7 +129,7 @@ public sealed class ShiftService
         await _db.SaveChangesAsync();
 
         await AuditAsync(AuditActions.ShiftClosed, shift.Id,
-            $"Shift #{shift.Id} closed: counted {countedCash} ₴, expected {expected} ₴, variance {shift.Variance:+0.00;-0.00;0.00} ₴",
+            $"Shift #{shift.Id} closed: counted {countedCash} {cur}, expected {expected} {cur}, variance {shift.Variance:+0.00;-0.00;0.00} {cur}",
             new { shift.OpeningFloat, countedCash, expectedCash = expected, variance = shift.Variance, note = shift.CloseNote, openedBy = shift.OpenedByUsername });
         await tx.CommitAsync();
         return BillingResult<ShiftEntity>.Success(shift);
@@ -136,6 +138,7 @@ public sealed class ShiftService
     /// <summary>Cash out of the drawer during the open shift (Owner, Manager), with a reason.</summary>
     public async Task<BillingResult<LedgerEntryEntity>> PayoutAsync(long id, decimal amount, string? reason)
     {
+        var cur = await _db.CurrencySymbolAsync();
         if (amount <= 0 || amount > MaxAmount || amount != TariffCalculator.Round(amount)) return BillingErrors.BadAmount;
         var why = Clean(reason);
         if (why is not { Length: >= 3 }) return BillingErrors.ReasonRequired;
@@ -151,9 +154,9 @@ public sealed class ShiftService
         var row = await Ledger.AppendAsync(_db, new LedgerEntryEntity
         {
             Type = LedgerTypes.CashPayout, Method = PaymentMethods.Cash, Amount = amount, DeskAmount = -amount,
-            ShiftId = id, Reason = why, Description = $"Виплата з каси {amount} ₴: {why}"
+            ShiftId = id, Reason = why, Description = $"Виплата з каси {amount} {cur}: {why}"
         }, _actor, _clock.UtcNow);
-        await AuditAsync(AuditActions.ShiftCashPayout, id, $"Cash payout {amount} ₴ from shift #{id}: {why}", new { amount, reason = why, ledgerRow = row.Id });
+        await AuditAsync(AuditActions.ShiftCashPayout, id, $"Cash payout {amount} {cur} from shift #{id}: {why}", new { amount, reason = why, ledgerRow = row.Id });
         await tx.CommitAsync();
         return BillingResult<LedgerEntryEntity>.Success(row);
     }
@@ -175,6 +178,6 @@ public static class ShiftErrors
     public static readonly BillingError NotYours = new("shift_not_yours", "Only the cashier who opened the shift, a manager or the owner can close it.", StatusCodes.Status403Forbidden);
     public static readonly BillingError BadFloat = new("bad_float", "The opening float must be between 0 and 1000000.");
     public static readonly BillingError BadCounted = new("bad_counted", "The counted cash must be between 0 and 1000000.");
-    public static readonly BillingError CashTooLow = new("cash_too_low", "The drawer should hold only {0} ₴.", StatusCodes.Status409Conflict);
+    public static readonly BillingError CashTooLow = new("cash_too_low", "The drawer should hold only {0}.", StatusCodes.Status409Conflict);
     public static readonly BillingError ReportAfterClose = new("shift_report_after_close", "A cashier sees the Z-report of an own shift after the close (blind close).", StatusCodes.Status403Forbidden);
 }

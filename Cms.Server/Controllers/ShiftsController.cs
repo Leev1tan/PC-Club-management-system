@@ -111,7 +111,7 @@ public class ShiftsController : ControllerBase
         var (shift, error) = await ReportShiftAsync(id);
         if (shift == null) return error!;
         var report = await ZReport.BuildAsync(_db, shift, _clock);
-        return File(CsvExport.ZReport(report, _clock, lang, sep), CsvExport.ContentType, $"z-report-shift-{id}.csv");
+        return File(CsvExport.ZReport(report, _clock, await _db.CurrencyAsync(), lang, sep), CsvExport.ContentType, $"z-report-shift-{id}.csv");
     }
 
     private async Task<(ShiftEntity? Shift, ActionResult? Error)> ReportShiftAsync(long id)

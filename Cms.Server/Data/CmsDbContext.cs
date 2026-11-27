@@ -41,6 +41,17 @@ public class CmsDbContext : DbContext
         RequireOpenShift = shiftOptions.RequireOpenShift;
     }
 
+    private Cms.Server.Billing.ClubCurrency? _currency;
+
+    /// <summary>Club currency (setting club.currency, default UAH), read once per context (one request).</summary>
+    public async Task<Cms.Server.Billing.ClubCurrency> CurrencyAsync(CancellationToken ct = default) =>
+        _currency ??= await Cms.Server.Billing.ClubCurrency.LoadAsync(this, ct);
+
+    /// <summary>Symbol of the club currency for texts the server writes (ledger descriptions, audit summaries).</summary>
+    public async Task<string> CurrencySymbolAsync(CancellationToken ct = default) => (await CurrencyAsync(ct)).Symbol;
+
+    internal void SetCurrency(Cms.Server.Billing.ClubCurrency currency) => _currency = currency;
+
     public const string ActiveSessionIndex = "IX_Sessions_DeviceId_Active";
     public const string OpenShiftIndex = "IX_Shifts_Open";
     public const string RefundOfSaleIndex = "IX_Sales_RefundOfSaleId";
@@ -764,6 +775,8 @@ public static class ClubSettingKeys
     public const string LedgerBackfilled = "ledger.backfilled";
     /// <summary>Written once the audit rows of an older version got their hashes (Auth/AuditChain).</summary>
     public const string AuditChainSealed = "audit.chain_sealed";
+    /// <summary>Club currency, ISO code UAH (default), EUR, USD or PLN (Billing/ClubCurrency). Display only.</summary>
+    public const string Currency = "club.currency";
 }
 
 /// <summary>Shifts:RequireOpenShift (default true): cash and card payments need an open shift.</summary>

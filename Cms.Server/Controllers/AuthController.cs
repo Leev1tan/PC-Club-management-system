@@ -81,7 +81,7 @@ public class AuthController : ControllerBase
         await _audit.WriteAsync(AuditActions.Login, "staff", staff.Id, $"{staff.Username} signed in ({staff.Role})", actor: staff);
 
         await HttpContext.SignInStaffAsync(staff);
-        return Ok(StaffMeView.From(staff));
+        return Ok(StaffMeView.From(staff) with { Currency = (await _db.CurrencyAsync()).Code });
     }
 
     [HttpPost("logout")]
@@ -93,15 +93,16 @@ public class AuthController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>The signed-in staff member and the club currency (ISO code) for the money display.</summary>
     [HttpGet("me")]
     [Authorize(Policy = Policies.AnyStaff)]
-    public ActionResult<StaffMeView> Me()
+    public async Task<ActionResult<StaffMeView>> Me()
     {
         return Ok(new StaffMeView(
             Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!),
             User.Identity!.Name!,
             User.FindFirstValue(AuthConstants.DisplayNameClaim) ?? User.Identity.Name!,
-            User.FindFirstValue(ClaimTypes.Role)!));
+            User.FindFirstValue(ClaimTypes.Role)!) { Currency = (await _db.CurrencyAsync()).Code });
     }
 
     /// <summary>
@@ -146,7 +147,7 @@ public class AuthController : ControllerBase
         await _audit.WriteAsync(AuditActions.OwnerCreated, "staff", owner.Id, $"Owner '{owner.Username}' created with the setup screen", actor: owner);
 
         await HttpContext.SignInStaffAsync(owner);
-        return Ok(StaffMeView.From(owner));
+        return Ok(StaffMeView.From(owner) with { Currency = (await _db.CurrencyAsync()).Code });
     }
 
     /// <summary>Change the own password. Ends the other logins of this account.</summary>
@@ -179,5 +180,8 @@ public record AuthStatusView(bool SetupRequired, bool DemoMode, IReadOnlyList<De
 
 public record StaffMeView(Guid Id, string Username, string DisplayName, string Role)
 {
+    /// <summary>Club currency: UAH, EUR, USD or PLN.</summary>
+    public string Currency { get; init; } = Cms.Server.Billing.ClubCurrency.Default.Code;
+
     public static StaffMeView From(StaffUserEntity s) => new(s.Id, s.Username, s.DisplayName, s.Role);
 }

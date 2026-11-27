@@ -37,6 +37,7 @@ public sealed class SaleService
 
     public async Task<BillingResult<SaleEntity>> SellAsync(IReadOnlyList<SaleLine>? lines, string? paymentMethod, Guid? userId)
     {
+        var cur = await _db.CurrencySymbolAsync();
         if (lines == null || lines.Count == 0) return PosErrors.EmptySale;
         if (lines.Count > MaxLines || lines.Any(l => l.Quantity is < 1 or > MaxQuantity)) return PosErrors.BadQuantity;
         var merged = lines.GroupBy(l => l.ProductId).Select(g => new SaleLine(g.Key, g.Sum(l => l.Quantity))).ToList();
@@ -107,7 +108,7 @@ public sealed class SaleService
             BalanceDelta = method == PaymentMethods.Balance ? -total : 0m,
             DeskAmount = PaymentMethods.IsDesk(method) ? total : 0m,
             SaleId = sale.Id, ShiftId = shiftId,
-            Description = $"Бар, чек №{sale.Id}: {ItemsText(items)} — {total} ₴"
+            Description = $"Бар, чек №{sale.Id}: {ItemsText(items)} — {total} {cur}"
         }, _actor, now);
         await tx.CommitAsync();
         return BillingResult<SaleEntity>.Success(sale);
@@ -115,6 +116,7 @@ public sealed class SaleService
 
     public async Task<BillingResult<SaleEntity>> RefundAsync(long saleId, string? reason, bool returnToStock = true)
     {
+        var cur = await _db.CurrencySymbolAsync();
         var why = reason?.Trim();
         if (why is not { Length: >= 3 }) return BillingErrors.ReasonRequired;
         if (why.Length > 300) why = why[..300];
@@ -173,12 +175,12 @@ public sealed class SaleService
             BalanceDelta = sale.Method == PaymentMethods.Balance ? sale.Total : 0m,
             DeskAmount = desk ? -sale.Total : 0m,
             SaleId = refund.Id, ShiftId = shiftId, Reason = why,
-            Description = $"Повернення чека №{sale.Id} ({ItemsText(items)}) — {sale.Total} ₴: {why}"
+            Description = $"Повернення чека №{sale.Id} ({ItemsText(items)}) — {sale.Total} {cur}: {why}"
         }, _actor, now);
         if (_audit != null)
         {
             await _audit.WriteAsync(AuditActions.SaleRefunded, "sale", sale.Id,
-                $"Bar receipt #{sale.Id} refunded: {sale.Total} ₴ ({sale.Method}): {why}",
+                $"Bar receipt #{sale.Id} refunded: {sale.Total} {cur} ({sale.Method}): {why}",
                 new { sale = sale.Id, refund = refund.Id, total = sale.Total, method = sale.Method, soldBy = sale.ActorUsername, reason = why, returnToStock,
                       items = items.Select(i => $"{i.Name} x{i.Quantity}") });
         }
@@ -203,7 +205,7 @@ public static class PosErrors
     public static readonly BillingError ProductNotFound = new("product_not_found", "Product not found", NotFound);
     public static readonly BillingError ProductInactive = new("product_inactive", "{0} is not on sale.", Conflict);
     public static readonly BillingError OutOfStock = new("out_of_stock", "Not enough {0} in stock: {1} left.", Conflict);
-    public static readonly BillingError InsufficientBalance = new("insufficient_balance_bar", "Not enough real balance: need {0} ₴, have {1} ₴ (bonus pays only for PC time).", Conflict);
+    public static readonly BillingError InsufficientBalance = new("insufficient_balance_bar", "Not enough real balance: need {0}, have {1} (bonus pays only for PC time).", Conflict);
     public static readonly BillingError SaleNotFound = new("sale_not_found", "Receipt not found", NotFound);
     public static readonly BillingError NotASale = new("not_a_sale", "This receipt is a refund; it cannot be refunded.", Conflict);
     public static readonly BillingError AlreadyRefunded = new("sale_already_refunded", "This receipt is already refunded.", Conflict);

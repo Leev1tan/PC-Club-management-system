@@ -66,6 +66,9 @@ public sealed class CsvTexts
 
     public string T(string uk, string en) => _en ? en : uk;
 
+    /// <summary>Header of a money column: "Сума, ₴" (Ukrainian: the symbol) or "Amount, UAH" (English: the ISO code).</summary>
+    public string Money(string uk, string en, ClubCurrency currency) => _en ? $"{en}, {currency.Code}" : $"{uk}, {currency.Symbol}";
+
     public string Method(string? method) => method switch
     {
         PaymentMethods.Cash => T("Готівка", "Cash"),
@@ -103,13 +106,13 @@ public static class CsvExport
     private static string Local(ClubClock clock, DateTimeOffset utc) => clock.ToLocal(utc).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
     private static string? Local(ClubClock clock, DateTimeOffset? utc) => utc.HasValue ? Local(clock, utc.Value) : null;
 
-    /// <summary>The Z-report as "section; item; amount" rows (amounts in ₴, times in club time).</summary>
-    public static byte[] ZReport(ZReport z, ClubClock clock, string? lang, string? dialect)
+    /// <summary>The Z-report as "section; item; amount" rows (amounts in the club currency, times in club time).</summary>
+    public static byte[] ZReport(ZReport z, ClubClock clock, ClubCurrency currency, string? lang, string? dialect)
     {
         var t = new CsvTexts(lang);
         var csv = new CsvWriter(dialect);
         var s = z.Shift;
-        csv.Row(t.T("Розділ", "Section"), t.T("Показник", "Item"), t.T("Сума, ₴", "Amount, UAH"), t.T("Кількість", "Count"));
+        csv.Row(t.T("Розділ", "Section"), t.T("Показник", "Item"), t.Money("Сума", "Amount", currency), t.T("Кількість", "Count"));
         string Shift() => t.T("Зміна", "Shift");
         csv.Row(Shift(), t.T("Номер", "Number"), null, s.Id);
         csv.Row(Shift(), t.T("Стан", "Status"), s.Status == ShiftStatuses.Closed ? t.T("закрита", "closed") : t.T("відкрита", "open"));
@@ -188,10 +191,11 @@ public static class CsvExport
     {
         var t = new CsvTexts(lang);
         var csv = new CsvWriter(dialect);
+        var c = await db.CurrencyAsync(ct);
         csv.Row("Id", t.T("Час (клуб)", "Time (club)"), t.T("Тип", "Type"), t.T("Код типу", "Type code"), t.T("Спосіб оплати", "Method"),
-            t.T("Гравець", "Player"), t.T("Сума", "Amount"), t.T("Зміна балансу", "Balance change"), t.T("Зміна бонусів", "Bonus change"),
-            t.T("Зміна боргу", "Debt change"), t.T("Каса (готівка/картка)", "Desk (cash/card)"), t.T("Баланс після", "Balance after"),
-            t.T("Бонуси після", "Bonus after"), t.T("Борг після", "Debt after"), t.T("Зміна", "Shift"), t.T("Чек", "Receipt"),
+            t.T("Гравець", "Player"), t.Money("Сума", "Amount", c), t.Money("Зміна балансу", "Balance change", c), t.Money("Зміна бонусів", "Bonus change", c),
+            t.Money("Зміна боргу", "Debt change", c), t.Money("Каса (готівка/картка)", "Desk (cash/card)", c), t.Money("Баланс після", "Balance after", c),
+            t.Money("Бонуси після", "Bonus after", c), t.Money("Борг після", "Debt after", c), t.T("Зміна", "Shift"), t.T("Чек", "Receipt"),
             t.T("Сесія", "Session"), t.T("Персонал", "Staff"), t.T("Опис", "Description"), t.T("Причина", "Reason"));
         var players = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => u.Username, ct);
 

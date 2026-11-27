@@ -67,6 +67,7 @@ public sealed class SessionService
 
     public async Task<BillingResult<SessionEntity>> StartAsync(StartSessionRequest req)
     {
+        var cur = await _db.CurrencySymbolAsync();
         var device = await _db.Devices.FindAsync(req.DeviceId);
         if (device == null) return BillingErrors.DeviceNotFound;
         if (device.Status != DeviceStatuses.Approved) return BillingErrors.DeviceNotApproved;
@@ -177,8 +178,8 @@ public sealed class SessionService
                     var paid = await PayAsync(user, method!, price, req.UseBonus,
                         package != null ? LedgerTypes.PackagePurchase : LedgerTypes.SessionCharge, session, now,
                         package != null
-                            ? $"Пакет «{package.Name}» на {device.Hostname} — {price} ₴"
-                            : $"Сесія на {device.Hostname} ({minutes} хв, {tariff!.Name}) — {price} ₴");
+                            ? $"Пакет «{package.Name}» на {device.Hostname} — {price} {cur}"
+                            : $"Сесія на {device.Hostname} ({minutes} хв, {tariff!.Name}) — {price} {cur}");
                     if (!paid.Ok) return paid.Error!;
                 }
 
@@ -196,7 +197,7 @@ public sealed class SessionService
                 : prepaid ? $"{minutes} min" : "open-ended";
             await AuditAsync(AuditActions.SessionStarted, session.Id,
                 $"Session on {device.Hostname} for {(user != null ? "@" + user.Username : "a guest")}: {what}" +
-                (price > 0 ? $", {price} ₴ " + PaidText(method) : ""),
+                (price > 0 ? $", {price} {cur} " + PaidText(method) : ""),
                 new
                 {
                     device.Hostname, deviceId = device.Id, tariff = tariff?.Name, package = package?.Name, minutes, cost = price,
@@ -204,9 +205,9 @@ public sealed class SessionService
                 });
             if (prepaid && price == 0)
             {
-                // Time without payment: a free session with a reason, or a tariff / package that costs 0 ₴
+                // Time without payment: a free session with a reason, or a tariff / package that costs 0
                 await AuditAsync(AuditActions.SessionFreeTime, session.Id,
-                    $"Free time on {device.Hostname}: {what}, worth {value} ₴" + (freeReason != null ? $": {freeReason}" : " (price 0 ₴)"),
+                    $"Free time on {device.Hostname}: {what}, worth {value} {cur}" + (freeReason != null ? $": {freeReason}" : $" (price 0 {cur})"),
                     new { device.Hostname, minutes, package = package?.Name, value, reason = freeReason, player = user?.Username });
             }
             await tx.CommitAsync();
@@ -227,6 +228,7 @@ public sealed class SessionService
     /// </summary>
     public async Task<BillingResult<EndResult>> EndAsync(Guid id, EndSessionRequest? req = null)
     {
+        var cur = await _db.CurrencySymbolAsync();
         var session = await _db.Sessions.FindAsync(id);
         if (session == null) return BillingErrors.SessionNotFound;
         if (session.Status == "ended") return BillingErrors.SessionEnded;
@@ -285,7 +287,7 @@ public sealed class SessionService
                             UserId = session.UserId, Type = LedgerTypes.SessionCharge, Method = PaymentMethods.Balance,
                             Amount = charge.Total, BalanceDelta = -charge.FromBalance, BonusDelta = -charge.FromBonus,
                             SessionId = session.Id, DeviceId = session.DeviceId,
-                            Description = $"Сесія на {device?.Hostname ?? "?"} ({minutesText}) — {charge.Total} ₴"
+                            Description = $"Сесія на {device?.Hostname ?? "?"} ({minutesText}) — {charge.Total} {cur}"
                         }, _actor, now);
                     }
                 }
@@ -298,7 +300,7 @@ public sealed class SessionService
                     {
                         UserId = session.UserId, Type = LedgerTypes.SessionCharge, Method = PaymentMethods.Debt,
                         Amount = amountDue, DebtDelta = amountDue, SessionId = session.Id, DeviceId = session.DeviceId,
-                        Description = $"Сесія на {device?.Hostname ?? "?"} ({minutesText}) — {amountDue} ₴ у борг"
+                        Description = $"Сесія на {device?.Hostname ?? "?"} ({minutesText}) — {amountDue} {cur} у борг"
                     }, _actor, now);
                     debt = amountDue;
                     amountDue = 0;
@@ -310,7 +312,7 @@ public sealed class SessionService
                     {
                         UserId = session.UserId, Type = LedgerTypes.SessionCharge, Method = deskMethod,
                         Amount = amountDue, DeskAmount = amountDue, SessionId = session.Id, DeviceId = session.DeviceId,
-                        Description = $"Сесія на {device?.Hostname ?? "?"} ({minutesText}) — {amountDue} ₴ на касі"
+                        Description = $"Сесія на {device?.Hostname ?? "?"} ({minutesText}) — {amountDue} {cur} на касі"
                     }, _actor, now);
                 }
                 var rest = amountDue + debt;
@@ -320,15 +322,15 @@ public sealed class SessionService
             }
 
             await AuditAsync(AuditActions.SessionEnded, session.Id,
-                $"Session on {device?.Hostname ?? "?"} ended: {session.TotalCost} ₴" + (amountDue > 0 ? $", {amountDue} ₴ due at the desk" : "") +
-                (debt > 0 ? $", {debt} ₴ recorded as debt" : ""),
+                $"Session on {device?.Hostname ?? "?"} ended: {session.TotalCost} {cur}" + (amountDue > 0 ? $", {amountDue} {cur} due at the desk" : "") +
+                (debt > 0 ? $", {debt} {cur} recorded as debt" : ""),
                 new { session.DeviceId, cost = session.TotalCost, amountDue, debt, fromBalance = charge.FromBalance, fromBonus = charge.FromBonus,
                       prepaid = session.IsPrepaid, player = session.UserId, billedMinutes = quote?.BilledMinutes });
             if (debt > 0 && _audit != null)
             {
                 var owed = await Wallet.GetAccountsAsync(_db, session.UserId!.Value);
                 await _audit.WriteAsync(AuditActions.PlayerDebtRecorded, "player", session.UserId,
-                    $"Debt {debt} ₴ recorded: post-paid session on {device?.Hostname ?? "?"} not paid (debt now {owed?.Debt} ₴)",
+                    $"Debt {debt} {cur} recorded: post-paid session on {device?.Hostname ?? "?"} not paid (debt now {owed?.Debt} {cur})",
                     new { amount = debt, sessionId = session.Id, device = device?.Hostname, cost = session.TotalCost, paidFromBalances = charge.Total, debtNow = owed?.Debt });
             }
             await tx.CommitAsync();
@@ -362,6 +364,7 @@ public sealed class SessionService
     /// <summary>Adds minutes to a prepaid or package session, at the session tariff, never past a cut-off.</summary>
     public async Task<BillingResult<SessionEntity>> ExtendAsync(Guid id, ExtendSessionRequest req)
     {
+        var cur = await _db.CurrencySymbolAsync();
         if (req.Minutes <= 0 || req.Minutes > 24 * 60) return BillingErrors.BadMinutes;
         var session = await _db.Sessions.FindAsync(id);
         if (session == null) return BillingErrors.SessionNotFound;
@@ -403,7 +406,7 @@ public sealed class SessionService
             if (extraCost > 0)
             {
                 var paid = await PayAsync(user, resolved.Value!, extraCost, req.UseBonus, LedgerTypes.SessionCharge, session, now,
-                    $"Продовження сесії на {device?.Hostname ?? "?"} (+{req.Minutes} хв) — {extraCost} ₴");
+                    $"Продовження сесії на {device?.Hostname ?? "?"} (+{req.Minutes} хв) — {extraCost} {cur}");
                 if (!paid.Ok) return paid.Error!;
             }
 
@@ -419,13 +422,13 @@ public sealed class SessionService
                 return BillingErrors.SessionChanged;
             }
             await AuditAsync(AuditActions.SessionExtended, session.Id,
-                $"Session on {device?.Hostname ?? "?"} extended by {req.Minutes} min, {extraCost} ₴ " + PaidText(resolved.Value),
+                $"Session on {device?.Hostname ?? "?"} extended by {req.Minutes} min, {extraCost} {cur} " + PaidText(resolved.Value),
                 new { device?.Hostname, minutes = req.Minutes, cost = extraCost, player = user?.Username, paymentMethod = resolved.Value, newEndUtc = session.EndUtc });
             if (extraCost == 0)
             {
                 await AuditAsync(AuditActions.SessionFreeTime, session.Id,
-                    $"Free time on {device?.Hostname ?? "?"}: +{req.Minutes} min, worth {value} ₴" +
-                    (freeReason != null ? $": {freeReason}" : tariff == null ? " (no tariff)" : " (price 0 ₴)"),
+                    $"Free time on {device?.Hostname ?? "?"}: +{req.Minutes} min, worth {value} {cur}" +
+                    (freeReason != null ? $": {freeReason}" : tariff == null ? " (no tariff)" : $" (price 0 {cur})"),
                     new { device?.Hostname, minutes = req.Minutes, value, reason = freeReason, player = user?.Username });
             }
             await tx.CommitAsync();
@@ -523,6 +526,7 @@ public sealed class SessionService
     /// <summary>Moves an active (also paused) session to a free PC; see the class comment for the price rule.</summary>
     public async Task<BillingResult<(SessionEntity Session, TransferQuote Quote)>> TransferAsync(Guid id, TransferSessionRequest req)
     {
+        var cur = await _db.CurrencySymbolAsync();
         var session = await _db.Sessions.FindAsync(id);
         if (session == null) return BillingErrors.SessionNotFound;
         var now = _clock.UtcNow;
@@ -549,7 +553,7 @@ public sealed class SessionService
                 if (quote.Surcharge > 0)
                 {
                     var paid = await PayAsync(user, method!, quote.Surcharge, req.UseBonus, LedgerTypes.SessionCharge, session, now,
-                        $"Доплата за перехід {plan.FromHostname} → {quote.TargetHostname} — {quote.Surcharge} ₴");
+                        $"Доплата за перехід {plan.FromHostname} → {quote.TargetHostname} — {quote.Surcharge} {cur}");
                     if (!paid.Ok) return paid.Error!;
                 }
 
@@ -573,7 +577,7 @@ public sealed class SessionService
 
             await AuditAsync(AuditActions.SessionTransferred, session.Id,
                 $"Session moved from {plan.FromHostname} to {quote.TargetHostname}" +
-                (quote.Surcharge > 0 ? $", price difference {quote.Surcharge} ₴ " + PaidText(method) : ", no price difference"),
+                (quote.Surcharge > 0 ? $", price difference {quote.Surcharge} {cur} " + PaidText(method) : ", no price difference"),
                 new { from = plan.FromHostname, to = quote.TargetHostname, fromDeviceId, toDeviceId = req.TargetDeviceId,
                       surcharge = quote.Surcharge, basis = quote.Basis, remainingMinutes = quote.RemainingMinutes,
                       tariff = quote.TargetTariffName, package = quote.TargetPackageName, paymentMethod = method, paused });

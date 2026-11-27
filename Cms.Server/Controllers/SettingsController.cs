@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Cms.Server.Auth;
+using Cms.Server.Billing;
 using Cms.Server.Data;
 using Cms.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -10,6 +11,7 @@ namespace Cms.Server.Controllers;
 /// <summary>
 /// Club settings (Owner only). The staff / emergency PIN of the lock screen is stored only as a
 /// PBKDF2 hash; agents receive the hash with their heartbeat and the launcher verifies it offline.
+/// The club currency changes only the display of money (amounts are never converted).
 /// </summary>
 [ApiController]
 [Route("api/settings")]
@@ -20,11 +22,14 @@ public class SettingsController : ControllerBase
     private readonly DeviceEnrollmentOptions _enrollment;
     private readonly AuditLogger _audit;
 
-    public SettingsController(CmsDbContext db, DeviceEnrollmentOptions enrollment, AuditLogger audit)
+    private readonly ClubClock _clock;
+
+    public SettingsController(CmsDbContext db, DeviceEnrollmentOptions enrollment, AuditLogger audit, ClubClock? clock = null)
     {
         _db = db;
         _enrollment = enrollment;
         _audit = audit;
+        _clock = clock ?? ClubClock.System();
     }
 
     [HttpGet]
@@ -35,7 +40,29 @@ public class SettingsController : ControllerBase
             pin?.Value != null,
             pin?.Value != null ? pin.UpdatedUtc : null,
             _enrollment.TokenConfigured,
-            _enrollment.AllowPendingRegistration));
+            _enrollment.AllowPendingRegistration)
+        {
+            Currency = CurrencyView.From(await _db.CurrencyAsync()),
+            Currencies = ClubCurrency.All.Select(CurrencyView.From).ToList()
+        });
+    }
+
+    /// <summary>
+    /// Club currency: UAH, EUR, USD or PLN. Changes only how money is shown and the CSV headers; the
+    /// amounts in the database stay as they are (no conversion). Audited with the old and new currency.
+    /// </summary>
+    [HttpPut("currency")]
+    public async Task<ActionResult<CurrencyView>> SetCurrency([FromBody] SetCurrencyRequest req)
+    {
+        var currency = ClubCurrency.Find(req.Code);
+        if (currency == null)
+            return BadRequest(new { error = "Currency must be UAH, EUR, USD or PLN.", code = "bad_currency" });
+        var before = await ClubCurrency.SaveAsync(_db, currency, User.Identity?.Name, _clock.UtcNow);
+        if (before.Code != currency.Code)
+            await _audit.WriteAsync(AuditActions.CurrencyChanged, "setting", ClubSettingKeys.Currency,
+                $"Club currency changed: {before.Code} ({before.Symbol}) -> {currency.Code} ({currency.Symbol}); amounts are not converted",
+                new { before = before.Code, after = currency.Code });
+        return Ok(CurrencyView.From(currency));
     }
 
     [HttpPut("staff-pin")]
@@ -82,4 +109,9 @@ public static class KioskSettings
 }
 
 public record SetStaffPinRequest(string? Pin);
-public record SettingsView(bool StaffPinConfigured, DateTimeOffset? StaffPinUpdatedUtc, bool EnrollmentTokenConfigured, bool AllowPendingRegistration);
+public record SetCurrencyRequest(string? Code);
+public record SettingsView(bool StaffPinConfigured, DateTimeOffset? StaffPinUpdatedUtc, bool EnrollmentTokenConfigured, bool AllowPendingRegistration)
+{
+    public CurrencyView? Currency { get; init; }
+    public IReadOnlyList<CurrencyView> Currencies { get; init; } = Array.Empty<CurrencyView>();
+}

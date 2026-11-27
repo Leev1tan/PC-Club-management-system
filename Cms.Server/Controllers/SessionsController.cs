@@ -164,7 +164,7 @@ public class SessionsController : ControllerBase
         var week = sessions.Where(s => s.StartUtc >= weekStart).Sum(s => s.TotalCost);
         var month = sessions.Sum(s => s.TotalCost);
 
-        return Ok(new RevenueSummary(today, week, month, "₴"));
+        return Ok(new RevenueSummary(today, week, month, await _db.CurrencySymbolAsync()));
     }
 
     /// <summary>Views with names; active open-ended sessions get their cost so far.</summary>

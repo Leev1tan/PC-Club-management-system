@@ -54,6 +54,7 @@ public class PackagesController : ControllerBase
     [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<PackageView>> Create([FromBody] PackageRequest req)
     {
+        var cur = await _db.CurrencySymbolAsync();
         var error = await ValidateAsync(req);
         if (error != null) return BadRequest(new { error, code = "bad_package" });
         var package = new PackageEntity { Id = Guid.NewGuid() };
@@ -61,7 +62,7 @@ public class PackagesController : ControllerBase
         _db.Packages.Add(package);
         await _db.SaveChangesAsync();
         await _audit.WriteAsync(AuditActions.PackageCreated, "package", package.Id,
-            $"Package '{package.Name}' created: {package.Price} ₴, {Describe(package)}", Details(package));
+            $"Package '{package.Name}' created: {package.Price} {cur}, {Describe(package)}", Details(package));
         return Ok(await ViewAsync(package.Id));
     }
 
@@ -69,6 +70,7 @@ public class PackagesController : ControllerBase
     [Authorize(Policy = Policies.Management)]
     public async Task<ActionResult<PackageView>> Update(Guid id, [FromBody] PackageRequest req)
     {
+        var cur = await _db.CurrencySymbolAsync();
         var package = await _db.Packages.FindAsync(id);
         if (package == null) return NotFound();
         var error = await ValidateAsync(req);
@@ -78,7 +80,7 @@ public class PackagesController : ControllerBase
         Apply(package, req);
         await _db.SaveChangesAsync();
         await _audit.WriteAsync(AuditActions.PackageUpdated, "package", package.Id,
-            $"Package '{package.Name}' changed: {beforePrice} -> {package.Price} ₴, {Describe(package)}" + (package.IsActive ? "" : " (not on sale)"),
+            $"Package '{package.Name}' changed: {beforePrice} -> {package.Price} {cur}, {Describe(package)}" + (package.IsActive ? "" : " (not on sale)"),
             new { before, after = Details(package) });
         return Ok(await ViewAsync(id));
     }
@@ -88,13 +90,14 @@ public class PackagesController : ControllerBase
     [Authorize(Policy = Policies.Management)]
     public async Task<IActionResult> Delete(Guid id)
     {
+        var cur = await _db.CurrencySymbolAsync();
         var package = await _db.Packages.FindAsync(id);
         if (package == null) return NotFound();
         if (await _db.Sessions.AnyAsync(s => s.PackageId == id && s.Status == "active"))
             return Conflict(new { error = "The package is in use by an active session. Take it off sale instead.", code = "package_in_use" });
         _db.Packages.Remove(package);
         await _db.SaveChangesAsync();
-        await _audit.WriteAsync(AuditActions.PackageDeleted, "package", id, $"Package '{package.Name}' deleted ({package.Price} ₴)", Details(package));
+        await _audit.WriteAsync(AuditActions.PackageDeleted, "package", id, $"Package '{package.Name}' deleted ({package.Price} {cur})", Details(package));
         return NoContent();
     }
 

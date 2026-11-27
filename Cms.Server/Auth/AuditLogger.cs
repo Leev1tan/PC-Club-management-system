@@ -20,6 +20,7 @@ public static class AuditActions
 
     public const string StaffPinChanged = "settings.staff_pin_changed";
     public const string StaffPinRemoved = "settings.staff_pin_removed";
+    public const string CurrencyChanged = "settings.currency_changed";
 
     public const string DeviceRegistered = "device.registered";
     public const string DeviceApproved = "device.approved";
@@ -38,7 +39,7 @@ public static class AuditActions
     public const string SessionPaused = "session.paused";
     public const string SessionResumed = "session.resumed";
     public const string SessionTransferred = "session.transferred";
-    /// <summary>PC time without payment: a free session or extension (with a reason), or a 0 ₴ price.</summary>
+    /// <summary>PC time without payment: a free session or extension (with a reason), or a price of 0.</summary>
     public const string SessionFreeTime = "session.free_time";
 
     public const string PlayerRegistered = "player.registered";

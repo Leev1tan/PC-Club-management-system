@@ -60,7 +60,7 @@ public static class BillingErrors
     public static readonly BillingError TariffNotFound = new("tariff_not_found", "Tariff not found", NotFound);
     public static readonly BillingError TariffOtherZone = new("tariff_other_zone", "This tariff belongs to another zone.");
     public static readonly BillingError UserNotFound = new("user_not_found", "User not found", NotFound);
-    public static readonly BillingError InsufficientBalance = new("insufficient_balance", "Insufficient balance. Need {0} ₴, have {1} ₴ (bonus {2} ₴)");
+    public static readonly BillingError InsufficientBalance = new("insufficient_balance", "Insufficient balance. Need {0}, have {1} (bonus {2})");
     public static readonly BillingError BalanceTooLow = new("balance_too_low", "The balance is too low for this operation");
     public static readonly BillingError BadPaymentMethod = new("bad_payment_method", "Payment method must be balance, cash or card.");
     public static readonly BillingError GuestNeedsDesk = new("guest_needs_desk", "A guest pays at the desk: cash or card.");
@@ -77,6 +77,6 @@ public static class BillingErrors
     public static readonly BillingError FreeNeedsManager = new("free_needs_manager", "Only the owner or a manager can give free time.", StatusCodes.Status403Forbidden);
     public static readonly BillingError FreeNeedsPrepaid = new("free_needs_prepaid", "Free time needs a duration or a package.");
     public static readonly BillingError DebtNeedsPlayer = new("debt_needs_player", "Only a registered player can owe money; a guest pays at the desk.");
-    public static readonly BillingError PlayerHasDebt = new("player_has_debt", "The player owes {0} ₴. Take the debt first; open-ended sessions are blocked until then.", Conflict);
-    public static readonly BillingError DebtTooHigh = new("debt_too_high", "The player owes only {0} ₴.", Conflict);
+    public static readonly BillingError PlayerHasDebt = new("player_has_debt", "The player owes {0}. Take the debt first; open-ended sessions are blocked until then.", Conflict);
+    public static readonly BillingError DebtTooHigh = new("debt_too_high", "The player owes only {0}.", Conflict);
 }
