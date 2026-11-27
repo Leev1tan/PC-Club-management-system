@@ -42,8 +42,9 @@ public sealed record ZOther(int Rows, decimal Cash, decimal Card);
 public sealed record ZLedger(int Rows, long? FirstId, long? LastId, bool Reconciled);
 
 /// <summary>
-/// Z-report of a shift, computed from the ledger rows of the shift only (append-only), so it always
-/// reconciles with the ledger: time revenue (sessions and packages), bar (sales, refunds, items),
+/// Z-report of a shift, computed from the ledger rows of the shift only (append-only, sums in
+/// <see cref="LedgerTotals"/>, like the owner analytics), so it always reconciles with the ledger:
+/// time revenue (sessions and packages), bar (sales, refunds, items),
 /// top-ups, balance refunds, bonus issued / spent, debt, cash payouts, balance corrections, cash and
 /// card at the desk with the expected and counted cash and the variance, and the same per staff member.
 /// </summary>
@@ -55,96 +56,12 @@ public sealed record ZReport(
     public static async Task<ZReport> BuildAsync(CmsDbContext db, ShiftEntity shift, ClubClock clock, CancellationToken ct = default)
     {
         var rows = await db.Ledger.AsNoTracking().Where(l => l.ShiftId == shift.Id).OrderBy(l => l.Id).ToListAsync(ct);
+        var sums = LedgerTotals.Of(rows);
 
-        var time = MethodSums.Zero;
-        decimal timeTotal = 0;
-        int timeRows = 0;
-        var barSales = MethodSums.Zero;
-        var barRefunds = MethodSums.Zero;
-        int receipts = 0, refundReceipts = 0;
-        var topUps = MethodSums.Zero;
-        var refunds = MethodSums.Zero;
-        int topUpCount = 0, refundCount = 0;
-        decimal bonusIssued = 0, bonusSpent = 0, bonusReversed = 0, bonusAdjusted = 0;
-        decimal debtRecorded = 0, debtWrittenOff = 0;
-        var debtPaid = MethodSums.Zero;
-        var payouts = new List<ZPayout>();
-        decimal balancePlus = 0, balanceMinus = 0;
-        int otherRows = 0;
-        decimal otherCash = 0, otherCard = 0;
-
-        foreach (var r in rows)
-        {
-            var desk = PaymentMethods.IsDesk(r.Method);
-            switch (r.Type)
-            {
-                case LedgerTypes.SessionCharge or LedgerTypes.PackagePurchase:
-                    timeRows++;
-                    timeTotal += r.Amount;
-                    time = desk ? time.Add(r.Method, r.DeskAmount)
-                        : r.Method == PaymentMethods.Debt ? time.Add(PaymentMethods.Debt, r.DebtDelta)
-                        : time with { Balance = time.Balance - r.BalanceDelta, Bonus = time.Bonus - r.BonusDelta };
-                    bonusSpent -= r.BonusDelta;
-                    if (r.Method == PaymentMethods.Debt) debtRecorded += r.DebtDelta;
-                    break;
-                case LedgerTypes.BarSale:
-                    receipts++;
-                    barSales = barSales.Add(r.Method, desk ? r.DeskAmount : -r.BalanceDelta);
-                    break;
-                case LedgerTypes.BarRefund:
-                    refundReceipts++;
-                    barRefunds = barRefunds.Add(r.Method, desk ? -r.DeskAmount : r.BalanceDelta);
-                    break;
-                case LedgerTypes.TopUp:
-                    topUpCount++;
-                    topUps = topUps.Add(r.Method, r.DeskAmount);
-                    break;
-                case LedgerTypes.Refund:
-                    refundCount++;
-                    refunds = refunds.Add(r.Method, -r.DeskAmount);
-                    break;
-                case LedgerTypes.BonusAccrual:
-                    bonusIssued += r.BonusDelta;
-                    break;
-                case LedgerTypes.BonusReversal:
-                    bonusReversed -= r.BonusDelta;
-                    break;
-                case LedgerTypes.Adjustment:
-                    bonusAdjusted += r.BonusDelta;
-                    if (r.BalanceDelta > 0) balancePlus += r.BalanceDelta; else balanceMinus -= r.BalanceDelta;
-                    break;
-                case LedgerTypes.DebtPayment:
-                    debtPaid = debtPaid.Add(r.Method, desk ? r.DeskAmount : -r.BalanceDelta);
-                    break;
-                case LedgerTypes.DebtWriteOff:
-                    debtWrittenOff -= r.DebtDelta;
-                    break;
-                case LedgerTypes.CashPayout:
-                    payouts.Add(new ZPayout(r.Id, r.CreatedUtc, -r.DeskAmount, r.Reason, r.ActorUsername));
-                    break;
-                default:
-                    otherRows++;
-                    if (r.Method == PaymentMethods.Cash) otherCash += r.DeskAmount;
-                    if (r.Method == PaymentMethods.Card) otherCard += r.DeskAmount;
-                    break;
-            }
-        }
-
-        decimal Desk(string method, bool positive) => rows.Where(r => r.Method == method && (positive ? r.DeskAmount > 0 : r.DeskAmount < 0)).Sum(r => r.DeskAmount);
-        var cashIn = Desk(PaymentMethods.Cash, true);
-        var cashOut = -Desk(PaymentMethods.Cash, false);
-        var cardIn = Desk(PaymentMethods.Card, true);
-        var cardOut = -Desk(PaymentMethods.Card, false);
-        var payoutTotal = payouts.Sum(p => p.Amount);
-        var expected = shift.OpeningFloat + cashIn - cashOut;
-        var cash = new ZDesk(cashIn, cashOut, cashIn - cashOut, shift.OpeningFloat, expected, shift.CountedCash,
+        var expected = shift.OpeningFloat + sums.CashIn - sums.CashOut;
+        var cash = new ZDesk(sums.CashIn, sums.CashOut, sums.CashNet, shift.OpeningFloat, expected, shift.CountedCash,
             shift.CountedCash.HasValue ? shift.CountedCash.Value - expected : null);
-        var card = new ZDesk(cardIn, cardOut, cardIn - cardOut);
-
-        // Every desk amount belongs to exactly one section
-        var cashSections = time.Cash + barSales.Cash - barRefunds.Cash + topUps.Cash - refunds.Cash + debtPaid.Cash - payoutTotal + otherCash;
-        var cardSections = time.Card + barSales.Card - barRefunds.Card + topUps.Card - refunds.Card + debtPaid.Card + otherCard;
-        var reconciled = cashSections == cash.Net && cardSections == card.Net;
+        var card = new ZDesk(sums.CardIn, sums.CardOut, sums.CardNet);
 
         var saleIds = await db.Sales.AsNoTracking().Where(s => s.ShiftId == shift.Id).Select(s => new { s.Id, s.Kind }).ToListAsync(ct);
         var ids = saleIds.Select(s => s.Id).ToList();
@@ -172,14 +89,14 @@ public sealed record ZReport(
 
         return new ZReport(
             ShiftView.From(shift), clock.UtcNow, clock.Zone.Id,
-            new ZTime(timeTotal, time, timeRows),
-            new ZBar(barSales, barRefunds, barSales.Total - barRefunds.Total, receipts, refundReceipts, items),
-            new ZCount(topUps, topUpCount), new ZCount(refunds, refundCount),
-            new ZBonus(bonusIssued, bonusSpent, bonusReversed, bonusAdjusted),
-            new ZDebt(debtRecorded, debtPaid, debtWrittenOff),
-            new ZPayouts(payoutTotal, payouts),
-            new ZAdjustments(balancePlus, balanceMinus),
-            cash, card, new ZOther(otherRows, otherCash, otherCard), byStaff,
-            new ZLedger(rows.Count, rows.FirstOrDefault()?.Id, rows.LastOrDefault()?.Id, reconciled));
+            new ZTime(sums.TimeTotal, sums.Time, sums.TimeRows),
+            new ZBar(sums.BarSales, sums.BarRefunds, sums.BarNet, sums.Receipts, sums.RefundReceipts, items),
+            new ZCount(sums.TopUps, sums.TopUpCount), new ZCount(sums.Refunds, sums.RefundCount),
+            new ZBonus(sums.BonusIssued, sums.BonusSpent, sums.BonusReversed, sums.BonusAdjusted),
+            new ZDebt(sums.DebtRecorded, sums.DebtPaid, sums.DebtWrittenOff),
+            new ZPayouts(sums.Payouts, sums.PayoutRows.ToList()),
+            new ZAdjustments(sums.BalancePlus, sums.BalanceMinus),
+            cash, card, new ZOther(sums.OtherRows, sums.OtherCash, sums.OtherCard), byStaff,
+            new ZLedger(rows.Count, rows.FirstOrDefault()?.Id, rows.LastOrDefault()?.Id, sums.Reconciled));
     }
 }
