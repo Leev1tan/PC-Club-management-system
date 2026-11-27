@@ -93,8 +93,10 @@ public static class StaffBootstrapper
                 : Passwords.ValidateStaffPassword(password);
             if (error == null)
             {
-                await CreateOwnerAsync(db, name, name, password!, ct);
+                var owner = await CreateOwnerAsync(db, name, name, password!, ct);
                 setup.Close();
+                await scope.ServiceProvider.GetRequiredService<AuditLogger>().WriteAsync(AuditActions.OwnerCreated, "staff", owner.Id,
+                    $"Owner '{name}' created from {OwnerUsernameVariable}", actor: owner, ct: ct);
                 logger.LogWarning("Created the initial owner account '{Username}' from the environment. " +
                                   "Remove {Variable} from the server environment now.", name, OwnerPasswordVariable);
                 return;

@@ -16,20 +16,36 @@ public class DevicesController : ControllerBase
     private readonly IDeviceRepository _devices;
     private readonly CmsDbContext _db;
     private readonly DeviceRuntimeState? _runtime;
+    private readonly AuditLogger? _audit;
 
-    public DevicesController(IDeviceRepository devices, CmsDbContext db, DeviceRuntimeState? runtime = null)
+    public DevicesController(IDeviceRepository devices, CmsDbContext db, DeviceRuntimeState? runtime = null, AuditLogger? audit = null)
     {
         _devices = devices;
         _db = db;
         _runtime = runtime;
+        _audit = audit;
     }
+
+    private Task AuditAsync(string action, Guid deviceId, string summary, object? details = null) =>
+        _audit?.WriteAsync(action, "device", deviceId, summary, details) ?? Task.CompletedTask;
 
     [HttpPost("register")]
     [AllowAnonymous] // agent; authenticated by the enrollment token or its current device key
     [EnableRateLimiting(AuthConstants.AuthRateLimitPolicy)]
-    public ActionResult<DeviceRegistrationResponse> Register([FromBody] DeviceRegistrationRequest request)
+    public async Task<ActionResult<DeviceRegistrationResponse>> Register([FromBody] DeviceRegistrationRequest request)
     {
         var result = _devices.Register(request);
+        if (result.Response != null && result.Kind != DeviceRegistrationKind.ReRegistered)
+        {
+            var how = result.Kind switch
+            {
+                DeviceRegistrationKind.Enrolled => "with the enrollment token",
+                DeviceRegistrationKind.ReEnrolled => "again with the enrollment token (new key, old key invalid)",
+                _ => "without token; waits for approval"
+            };
+            await AuditAsync(AuditActions.DeviceRegistered, result.Response.DeviceId, $"PC {request.Hostname} registered {how}",
+                new { request.Hostname, kind = result.Kind.ToString(), result.Response.Status });
+        }
         return result.Kind switch
         {
             DeviceRegistrationKind.Invalid => BadRequest(new { error = result.Error }),
@@ -106,8 +122,11 @@ public class DevicesController : ControllerBase
     {
         var device = await _db.Devices.FindAsync(deviceId);
         if (device == null) return NotFound();
+        var before = device.ZoneId;
         device.ZoneId = req.ZoneId;
         await _db.SaveChangesAsync();
+        if (before != req.ZoneId)
+            await AuditAsync(AuditActions.DeviceZoneChanged, deviceId, $"Zone of {device.Hostname} changed", new { from = before, to = req.ZoneId });
         return Ok();
     }
 
@@ -130,13 +149,25 @@ public class DevicesController : ControllerBase
 
     [HttpPost("{deviceId:guid}/commands")]
     [Authorize(Policy = Policies.AnyStaff)]
-    public ActionResult<CommandView> Enqueue(Guid deviceId, [FromBody] EnqueueCommandRequest request)
+    public async Task<ActionResult<CommandView>> Enqueue(Guid deviceId, [FromBody] EnqueueCommandRequest request)
     {
         // session_set is sent only by the server (it would give free time); unknown types are refused
         if (!StaffCommandTypes.Contains(request.Type ?? string.Empty))
             return BadRequest(new { error = $"Unknown command. Allowed: {string.Join(", ", StaffCommandTypes)}." });
-        var cmd = _devices.EnqueueCommand(deviceId, request with { Type = request.Type!.ToLowerInvariant() });
+        var type = request.Type!.ToLowerInvariant();
+        var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId);
+        if (device == null) return NotFound();
+
+        var cmd = _devices.EnqueueCommand(deviceId, request with { Type = type });
         if (cmd is null) return NotFound();
+
+        // An unlock of a PC without an active session gives time without payment
+        var withoutSession = type == CommandTypes.Unlock &&
+                             !await _db.Sessions.AnyAsync(s => s.DeviceId == deviceId && s.Status == "active");
+        var text = type == CommandTypes.Message ? request.Payload?.ToString() : null;
+        await AuditAsync(withoutSession ? AuditActions.UnlockWithoutSession : AuditActions.DeviceCommand, deviceId,
+            withoutSession ? $"Unlocked {device.Hostname} without an active session (no payment)" : $"Command {type} sent to {device.Hostname}",
+            new { type, message = text is { Length: > 200 } ? text[..200] : text });
         return Ok(cmd);
     }
 
@@ -168,6 +199,7 @@ public class DevicesController : ControllerBase
         if (device.Status != DeviceStatuses.Pending) return Conflict(new { error = "Only a pending PC can be approved." });
         device.Status = DeviceStatuses.Approved;
         await _db.SaveChangesAsync();
+        await AuditAsync(AuditActions.DeviceApproved, deviceId, $"PC {device.Hostname} approved", new { device.Hostname, device.LastIp });
         return Ok();
     }
 
@@ -181,6 +213,7 @@ public class DevicesController : ControllerBase
         if (device.Status != DeviceStatuses.Pending) return Conflict(new { error = "Only a pending PC can be rejected. Revoke an approved PC instead." });
         _db.Devices.Remove(device);
         await _db.SaveChangesAsync();
+        await AuditAsync(AuditActions.DeviceRejected, deviceId, $"Pending PC {device.Hostname} rejected", new { device.Hostname, device.LastIp });
         return NoContent();
     }
 
@@ -198,6 +231,7 @@ public class DevicesController : ControllerBase
         device.Status = DeviceStatuses.Revoked;
         device.DeviceKey = DeviceKeys.Hash(DeviceKeys.Generate()); // nobody knows this key
         await _db.SaveChangesAsync();
+        await AuditAsync(AuditActions.DeviceRevoked, deviceId, $"PC {device.Hostname} revoked", new { device.Hostname });
         return Ok();
     }
 }

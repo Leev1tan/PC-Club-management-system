@@ -43,6 +43,7 @@ public static class DatabaseInitializer
                         if (changes.Count > 0)
                             logger.LogWarning("Upgraded the SQLite database schema: added {Changes}", string.Join(", ", changes));
                     }
+                    await Cms.Server.Auth.AuditLogGuard.EnsureSqliteTriggersAsync(db, ct);
                 }
 
                 var hashed = await Cms.Server.Auth.DeviceKeys.HashLegacyKeysAsync(db, ct);

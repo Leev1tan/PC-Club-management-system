@@ -14,11 +14,13 @@ public class UsersController : ControllerBase
 {
     private readonly CmsDbContext _db;
     private readonly LoginThrottle _throttle;
+    private readonly AuditLogger _audit;
 
-    public UsersController(CmsDbContext db, LoginThrottle throttle)
+    public UsersController(CmsDbContext db, LoginThrottle throttle, AuditLogger audit)
     {
         _db = db;
         _throttle = throttle;
+        _audit = audit;
     }
 
     [HttpGet]
@@ -62,6 +64,7 @@ public class UsersController : ControllerBase
         };
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.PlayerRegistered, "player", user.Id, $"Player @{user.Username} registered", new { user.Username });
         return Ok(new UserView(user.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc));
     }
 
@@ -113,6 +116,7 @@ public class UsersController : ControllerBase
         if (user == null) return NotFound();
         user.PasswordHash = Passwords.Hash(req.Password!);
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.PlayerPasswordSet, "player", user.Id, $"Password / PIN of @{user.Username} set by staff");
         return NoContent();
     }
 
@@ -135,6 +139,7 @@ public class UsersController : ControllerBase
                 CreatedUtc = DateTimeOffset.UtcNow
             });
             await _db.SaveChangesAsync();
+            await _audit.WriteAsync(AuditActions.PlayerTopUp, "player", id, $"Balance top-up +{req.Amount} ₴", new { amount = req.Amount, req.Description });
             await tx.CommitAsync();
         }
 
@@ -175,6 +180,7 @@ public class UsersController : ControllerBase
                 CreatedUtc = DateTimeOffset.UtcNow
             });
             await _db.SaveChangesAsync();
+            await _audit.WriteAsync(AuditActions.PlayerBalanceAdjusted, "player", id, $"Balance correction {req.Amount:+0.##;-0.##} ₴: {reason}", new { amount = req.Amount, reason });
             await tx.CommitAsync();
         }
 

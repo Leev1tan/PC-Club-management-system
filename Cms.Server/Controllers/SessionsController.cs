@@ -14,12 +14,17 @@ public class SessionsController : ControllerBase
 {
     private readonly CmsDbContext _db;
     private readonly IDeviceRepository _devices;
+    private readonly AuditLogger? _audit;
 
-    public SessionsController(CmsDbContext db, IDeviceRepository devices)
+    public SessionsController(CmsDbContext db, IDeviceRepository devices, AuditLogger? audit = null)
     {
         _db = db;
         _devices = devices;
+        _audit = audit;
     }
+
+    private Task AuditAsync(string action, Guid sessionId, string summary, object details) =>
+        _audit?.WriteAsync(action, "session", sessionId, summary, details) ?? Task.CompletedTask;
 
     /// <summary>
     /// Start a new session. Supports two modes:
@@ -103,6 +108,13 @@ public class SessionsController : ControllerBase
                 if (expired.Count > 0) await _db.SaveChangesAsync(); // free the unique index first
                 _db.Sessions.Add(session);
                 await _db.SaveChangesAsync();
+                var paidFromBalance = user != null && isPrepaid;
+                await AuditAsync(AuditActions.SessionStarted, session.Id,
+                    $"Session on {device.Hostname} for {(user != null ? "@" + user.Username : "a guest")}: " +
+                    (isPrepaid ? $"{req.DurationMinutes} min, {totalCost} ₴" : "open-ended") +
+                    (paidFromBalance ? " from the balance" : isPrepaid ? " not paid from a balance (cash at the desk)" : ""),
+                    new { device.Hostname, deviceId = device.Id, tariff = tariff.Name, minutes = req.DurationMinutes, cost = totalCost,
+                          prepaid = isPrepaid, player = user?.Username, paidFromBalance });
                 await tx.CommitAsync();
             }
             catch (DbUpdateException)
@@ -181,6 +193,9 @@ public class SessionsController : ControllerBase
                     await _db.SaveChangesAsync();
                 }
             }
+            await AuditAsync(AuditActions.SessionEnded, session.Id,
+                $"Session ended: {session.TotalCost} ₴" + (amountDue > 0 ? $", {amountDue} ₴ due at the desk" : ""),
+                new { session.DeviceId, cost = session.TotalCost, amountDue, prepaid = session.IsPrepaid, player = session.UserId });
             await tx.CommitAsync();
         }
 
@@ -236,6 +251,10 @@ public class SessionsController : ControllerBase
             try
             {
                 await _db.SaveChangesAsync(); // fails if the session was ended or extended in between
+                await AuditAsync(AuditActions.SessionExtended, session.Id,
+                    $"Session on {device?.Hostname ?? "?"} extended by {req.Minutes} min, {extraCost} ₴ " +
+                    (user != null ? "from the balance of @" + user.Username : "not paid from a balance (guest: cash at the desk)"),
+                    new { device?.Hostname, minutes = req.Minutes, cost = extraCost, player = user?.Username, paidFromBalance = user != null, newEndUtc = session.EndUtc });
                 await tx.CommitAsync();
             }
             catch (DbUpdateConcurrencyException)

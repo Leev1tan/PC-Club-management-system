@@ -76,6 +76,7 @@ public static class DemoSeeder
         await db.Tariffs.ExecuteDeleteAsync(ct);
         await db.Users.ExecuteDeleteAsync(ct);
         await db.Zones.ExecuteDeleteAsync(ct);
+        await AuditLogGuard.ClearForDemoResetAsync(db, ct);
         await db.StaffUsers.ExecuteDeleteAsync(ct);
         await db.ClubSettings.ExecuteDeleteAsync(ct);
         db.ChangeTracker.Clear();

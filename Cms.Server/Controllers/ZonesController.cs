@@ -12,8 +12,13 @@ namespace Cms.Server.Controllers;
 public class ZonesController : ControllerBase
 {
     private readonly CmsDbContext _db;
+    private readonly AuditLogger _audit;
 
-    public ZonesController(CmsDbContext db) => _db = db;
+    public ZonesController(CmsDbContext db, AuditLogger audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ZoneView>>> List()
@@ -43,6 +48,7 @@ public class ZonesController : ControllerBase
         };
         _db.Zones.Add(zone);
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.ZoneCreated, "zone", zone.Id, $"Zone '{zone.Name}' created");
         return Ok(new ZoneView(zone.Id, zone.Name, zone.Color, zone.SortOrder));
     }
 
@@ -52,10 +58,12 @@ public class ZonesController : ControllerBase
     {
         var zone = await _db.Zones.FindAsync(id);
         if (zone == null) return NotFound();
+        var before = zone.Name;
         zone.Name = req.Name;
         zone.Color = req.Color ?? zone.Color;
         zone.SortOrder = req.SortOrder ?? zone.SortOrder;
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.ZoneUpdated, "zone", zone.Id, $"Zone '{before}' changed to '{zone.Name}'");
         return Ok(new ZoneView(zone.Id, zone.Name, zone.Color, zone.SortOrder));
     }
 
@@ -67,6 +75,7 @@ public class ZonesController : ControllerBase
         if (zone == null) return NotFound();
         _db.Zones.Remove(zone);
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.ZoneDeleted, "zone", id, $"Zone '{zone.Name}' deleted");
         return NoContent();
     }
 }

@@ -12,8 +12,13 @@ namespace Cms.Server.Controllers;
 public class TariffsController : ControllerBase
 {
     private readonly CmsDbContext _db;
+    private readonly AuditLogger _audit;
 
-    public TariffsController(CmsDbContext db) => _db = db;
+    public TariffsController(CmsDbContext db, AuditLogger audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<TariffView>>> List()
@@ -40,6 +45,8 @@ public class TariffsController : ControllerBase
         };
         _db.Tariffs.Add(tariff);
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.TariffCreated, "tariff", tariff.Id, $"Tariff '{tariff.Name}' created: {tariff.PricePerHour} ₴/h",
+            new { tariff.Name, tariff.PricePerHour, tariff.IsDefault, tariff.ZoneId });
         return Ok(new TariffView(tariff.Id, tariff.Name, tariff.PricePerHour, tariff.IsDefault, tariff.ZoneId, null));
     }
 
@@ -49,11 +56,15 @@ public class TariffsController : ControllerBase
     {
         var tariff = await _db.Tariffs.FindAsync(id);
         if (tariff == null) return NotFound();
+        var before = new { tariff.Name, tariff.PricePerHour, tariff.IsDefault, tariff.ZoneId };
         tariff.Name = req.Name;
         tariff.PricePerHour = req.PricePerHour;
         tariff.IsDefault = req.IsDefault;
         tariff.ZoneId = req.ZoneId;
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.TariffUpdated, "tariff", tariff.Id,
+            $"Tariff '{tariff.Name}' changed: {before.PricePerHour} -> {tariff.PricePerHour} ₴/h",
+            new { before, after = new { tariff.Name, tariff.PricePerHour, tariff.IsDefault, tariff.ZoneId } });
         return Ok(new TariffView(tariff.Id, tariff.Name, tariff.PricePerHour, tariff.IsDefault, tariff.ZoneId, null));
     }
 
@@ -65,6 +76,8 @@ public class TariffsController : ControllerBase
         if (tariff == null) return NotFound();
         _db.Tariffs.Remove(tariff);
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.TariffDeleted, "tariff", id, $"Tariff '{tariff.Name}' deleted ({tariff.PricePerHour} ₴/h)",
+            new { tariff.Name, tariff.PricePerHour });
         return NoContent();
     }
 }

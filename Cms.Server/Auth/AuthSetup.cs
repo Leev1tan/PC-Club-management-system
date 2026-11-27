@@ -45,6 +45,7 @@ public static class AuthSetup
         services.AddSingleton<SetupState>();
         services.AddSingleton(new LoginThrottle { Enabled = !demoMode });
         services.AddHttpContextAccessor();
+        services.AddScoped<AuditLogger>();
 
         services.AddDataProtection()
             .SetApplicationName("PCClub.Cms.Server")

@@ -16,6 +16,7 @@ public class CmsDbContext : DbContext
     public DbSet<TransactionEntity> Transactions => Set<TransactionEntity>();
     public DbSet<StaffUserEntity> StaffUsers => Set<StaffUserEntity>();
     public DbSet<ClubSettingEntity> ClubSettings => Set<ClubSettingEntity>();
+    public DbSet<AuditLogEntity> AuditLog => Set<AuditLogEntity>();
 
     public const string ActiveSessionIndex = "IX_Sessions_DeviceId_Active";
 
@@ -42,6 +43,13 @@ public class CmsDbContext : DbContext
 
     private void BeforeSave()
     {
+        // The audit log is append-only (the database also refuses UPDATE and DELETE with a trigger)
+        foreach (var entry in ChangeTracker.Entries<AuditLogEntity>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("The audit log is append-only: entries cannot be changed or deleted.");
+        }
+
         // Every change of a session gets a new stamp; EF checks the old one in the UPDATE
         foreach (var entry in ChangeTracker.Entries<SessionEntity>())
         {
@@ -148,6 +156,22 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.PasswordHash).HasMaxLength(500).IsRequired();
             entity.Property(e => e.Role).HasMaxLength(20).IsRequired();
             entity.Property(e => e.SecurityStamp).HasMaxLength(64).IsRequired();
+        });
+
+        modelBuilder.Entity<AuditLogEntity>(entity =>
+        {
+            entity.ToTable("AuditLog");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.ActorUsername).HasMaxLength(64);
+            entity.Property(e => e.ActorRole).HasMaxLength(20);
+            entity.Property(e => e.Action).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.TargetType).HasMaxLength(32);
+            entity.Property(e => e.TargetId).HasMaxLength(64);
+            entity.Property(e => e.Summary).HasMaxLength(500);
+            entity.Property(e => e.DetailsJson).HasMaxLength(4000);
+            entity.Property(e => e.Ip).HasMaxLength(64);
+            entity.HasIndex(e => e.Action);
         });
 
         modelBuilder.Entity<ClubSettingEntity>(entity =>
@@ -268,6 +292,26 @@ public class StaffUserEntity
     public string SecurityStamp { get; set; } = Guid.NewGuid().ToString("N");
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginUtc { get; set; }
+}
+
+/// <summary>
+/// Immutable record of a staff action (who, when, what, from which IP). Append-only: no API changes
+/// or deletes entries, SaveChanges refuses it, and a database trigger blocks UPDATE and DELETE.
+/// The actor name and role are copied, so the entry stays readable when the account changes.
+/// </summary>
+public class AuditLogEntity
+{
+    public long Id { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; }
+    public Guid? ActorId { get; set; }
+    public string? ActorUsername { get; set; }
+    public string? ActorRole { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string? TargetType { get; set; }
+    public string? TargetId { get; set; }
+    public string? Summary { get; set; }
+    public string? DetailsJson { get; set; }
+    public string? Ip { get; set; }
 }
 
 /// <summary>Club-wide settings that the owner changes at run time (key/value).</summary>

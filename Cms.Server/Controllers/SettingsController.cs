@@ -18,11 +18,13 @@ public class SettingsController : ControllerBase
 {
     private readonly CmsDbContext _db;
     private readonly DeviceEnrollmentOptions _enrollment;
+    private readonly AuditLogger _audit;
 
-    public SettingsController(CmsDbContext db, DeviceEnrollmentOptions enrollment)
+    public SettingsController(CmsDbContext db, DeviceEnrollmentOptions enrollment, AuditLogger audit)
     {
         _db = db;
         _enrollment = enrollment;
+        _audit = audit;
     }
 
     [HttpGet]
@@ -52,6 +54,7 @@ public class SettingsController : ControllerBase
         setting.UpdatedUtc = DateTimeOffset.UtcNow;
         setting.UpdatedBy = User.Identity?.Name;
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.StaffPinChanged, "setting", KioskSettings.StaffPinHashKey, "Staff PIN of the lock screens changed");
         return NoContent();
     }
 
@@ -64,6 +67,7 @@ public class SettingsController : ControllerBase
         {
             _db.ClubSettings.Remove(setting);
             await _db.SaveChangesAsync();
+            await _audit.WriteAsync(AuditActions.StaffPinRemoved, "setting", KioskSettings.StaffPinHashKey, "Staff PIN removed: no emergency unlock");
         }
         return NoContent();
     }

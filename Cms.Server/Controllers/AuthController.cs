@@ -20,13 +20,15 @@ public class AuthController : ControllerBase
     private readonly SetupState _setup;
     private readonly LoginThrottle _throttle;
     private readonly DemoOptions _demo;
+    private readonly AuditLogger _audit;
 
-    public AuthController(CmsDbContext db, SetupState setup, LoginThrottle throttle, DemoOptions demo)
+    public AuthController(CmsDbContext db, SetupState setup, LoginThrottle throttle, DemoOptions demo, AuditLogger audit)
     {
         _db = db;
         _setup = setup;
         _throttle = throttle;
         _demo = demo;
+        _audit = audit;
     }
 
     /// <summary>Public: what the login page should show (setup screen, demo accounts).</summary>
@@ -49,8 +51,12 @@ public class AuthController : ControllerBase
         var username = StaffNames.Normalize(req.Username);
         var key = LoginThrottle.Key("staff", username, HttpContext.ClientIp());
         var now = DateTimeOffset.UtcNow;
+        var attempted = username.Length > 64 ? username[..64] : username;
         if (_throttle.IsLockedOut(key, now))
+        {
+            await _audit.WriteAsync(AuditActions.LoginFailed, "staff", null, $"Login of '{attempted}' refused: locked after failed attempts", new { username = attempted, lockedOut = true });
             return StatusCode(StatusCodes.Status429TooManyRequests, new { error = "Too many failed attempts. Try again in 15 minutes." });
+        }
 
         var staff = username.Length == 0 ? null : await _db.StaffUsers.FirstOrDefaultAsync(s => s.Username == username);
         var check = PasswordCheck.Failed;
@@ -62,6 +68,8 @@ public class AuthController : ControllerBase
         if (check == PasswordCheck.Failed)
         {
             _throttle.RecordFailure(key, now);
+            await _audit.WriteAsync(AuditActions.LoginFailed, "staff", staff?.Id, $"Failed login for '{attempted}'",
+                new { username = attempted, knownAccount = staff != null, active = staff?.IsActive });
             return Unauthorized(new { error = "Wrong user name or password." });
         }
 
@@ -70,6 +78,7 @@ public class AuthController : ControllerBase
             staff!.PasswordHash = Passwords.Hash(req.Password!);
         staff!.LastLoginUtc = now;
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.Login, "staff", staff.Id, $"{staff.Username} signed in ({staff.Role})", actor: staff);
 
         await HttpContext.SignInStaffAsync(staff);
         return Ok(StaffMeView.From(staff));
@@ -79,6 +88,7 @@ public class AuthController : ControllerBase
     [Authorize(Policy = Policies.AnyStaff)]
     public async Task<IActionResult> Logout()
     {
+        await _audit.WriteAsync(AuditActions.Logout, "staff", User.FindFirstValue(ClaimTypes.NameIdentifier), $"{User.Identity?.Name} signed out");
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return NoContent();
     }
@@ -133,6 +143,7 @@ public class AuthController : ControllerBase
         }
         _setup.Close();
         _throttle.Reset(key);
+        await _audit.WriteAsync(AuditActions.OwnerCreated, "staff", owner.Id, $"Owner '{owner.Username}' created with the setup screen", actor: owner);
 
         await HttpContext.SignInStaffAsync(owner);
         return Ok(StaffMeView.From(owner));
@@ -154,6 +165,7 @@ public class AuthController : ControllerBase
         staff.PasswordHash = Passwords.Hash(req.NewPassword!);
         staff.SecurityStamp = Guid.NewGuid().ToString("N");
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.PasswordChanged, "staff", staff.Id, $"{staff.Username} changed the own password", actor: staff);
         await HttpContext.SignInStaffAsync(staff);
         return NoContent();
     }

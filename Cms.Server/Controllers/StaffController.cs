@@ -13,8 +13,13 @@ namespace Cms.Server.Controllers;
 public class StaffController : ControllerBase
 {
     private readonly CmsDbContext _db;
+    private readonly AuditLogger _audit;
 
-    public StaffController(CmsDbContext db) => _db = db;
+    public StaffController(CmsDbContext db, AuditLogger audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<StaffView>>> List()
@@ -48,6 +53,8 @@ public class StaffController : ControllerBase
         };
         _db.StaffUsers.Add(staff);
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.StaffCreated, "staff", staff.Id, $"Created staff account '{staff.Username}' ({staff.Role})",
+            new { staff.Username, staff.Role });
         return Ok(StaffView.From(staff));
     }
 
@@ -66,12 +73,16 @@ public class StaffController : ControllerBase
         if (removesOwner && !await _db.StaffUsers.AnyAsync(s => s.Id != id && s.Role == StaffRoles.Owner && s.IsActive))
             return Conflict(new { error = "At least one active Owner account must remain." });
 
+        var before = new { staff.Role, staff.IsActive, staff.DisplayName };
         if (role != staff.Role || active != staff.IsActive)
             staff.SecurityStamp = Guid.NewGuid().ToString("N"); // ends the current logins of this account
         staff.Role = role;
         staff.IsActive = active;
         if (!string.IsNullOrWhiteSpace(req.DisplayName)) staff.DisplayName = req.DisplayName.Trim();
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.StaffUpdated, "staff", staff.Id,
+            $"Changed staff account '{staff.Username}': role {before.Role} -> {staff.Role}, active {before.IsActive} -> {staff.IsActive}",
+            new { before, after = new { staff.Role, staff.IsActive, staff.DisplayName } });
         return Ok(StaffView.From(staff));
     }
 
@@ -86,6 +97,7 @@ public class StaffController : ControllerBase
         staff.PasswordHash = Passwords.Hash(req.Password!);
         staff.SecurityStamp = Guid.NewGuid().ToString("N");
         await _db.SaveChangesAsync();
+        await _audit.WriteAsync(AuditActions.StaffPasswordReset, "staff", staff.Id, $"New password set for '{staff.Username}'");
         return NoContent();
     }
 }
