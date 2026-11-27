@@ -6,7 +6,8 @@
 #   approved at once; without it the PC waits as "pending" until staff approve it in the admin UI.
 #   The token is used only with an explicit -ServerUrl (never sent to a server found by discovery),
 #   is stored in C:\ProgramData\ClubAgent\private (SYSTEM, Administrators, agent only) and is
-#   deleted by the agent after the first successful registration.
+#   deleted by the agent after its first successful registration or heartbeat. On a PC that is registered
+#   already (an update) the installer does not store it, and removes a token file of an earlier run.
 # -KioskMode: the player account ClubUser signs in automatically and gets the lock screen as its shell.
 #   - Its password is random (32 characters) and new on every run. The installer never prints it and never
 #     writes it to a file. Windows keeps it for the automatic sign-in as the LSA secret "DefaultPassword"
@@ -429,12 +430,25 @@ if ((Test-Path $legacyDeviceFile) -and !(Test-Path (Join-Path $privateDir "devic
     serverUrl = $ServerUrl
 } | ConvertTo-Json -Depth 3 | Set-Content -Path (Join-Path $programDataConfigDir "config.json")
 
-if ($EnrollmentToken) {
-    Set-Content -Path (Join-Path $privateDir "enrollment-token.txt") -Value $EnrollmentToken.Trim() -NoNewline
+# The enrollment token is needed only for the first registration of the PC. A PC with a device registration
+# (private\device.json, for example an update) gets no token file, and a token file of an earlier run is removed:
+# the token must not stay on the PCs. If the server does not know the PC any more, approve it in the admin UI.
+$deviceFile = Join-Path $privateDir "device.json"
+$tokenFile = Join-Path $privateDir "enrollment-token.txt"
+if (Test-Path $deviceFile) {
+    if (Test-Path $tokenFile) {
+        Remove-Item -Path $tokenFile -Force -ErrorAction SilentlyContinue
+        Write-Host "   Removed the enrollment token file of an earlier install" -ForegroundColor Gray
+    }
+    if ($EnrollmentToken) {
+        Write-Host "   This PC is registered already: the enrollment token is not stored (not needed)" -ForegroundColor Gray
+    }
+} elseif ($EnrollmentToken) {
+    Set-Content -Path $tokenFile -Value $EnrollmentToken.Trim() -NoNewline
     if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
         Write-Warning "The enrollment token is used only with -ServerUrl. With auto-discovery the PC waits for approval in the admin UI."
     } else {
-        Write-Host "   Enrollment token stored (the agent deletes it after the first registration)" -ForegroundColor Gray
+        Write-Host "   Enrollment token stored (the agent deletes it after the registration)" -ForegroundColor Gray
     }
 } else {
     Write-Host "   No enrollment token: approve this PC in the admin UI (Devices) after the first start" -ForegroundColor Gray

@@ -291,6 +291,7 @@ public partial class Worker : BackgroundService
                     {
                         _nextHeartbeatUtc = DateTimeOffset.UtcNow + HeartbeatInterval;
                         var hb = await SendHeartbeatAsync(http, stoppingToken);
+                        if (hb == HeartbeatResult.Ok) DeleteEnrollmentTokenFile();
                         if (hb == HeartbeatResult.Ok && _enrollmentStatus == "approved")
                         {
                             await SendLauncherEventsAsync(http, stoppingToken);
@@ -478,7 +479,7 @@ public partial class Worker : BackgroundService
         var hostname = Environment.MachineName;
         var os = Environment.OSVersion.VersionString;
         var agentVersion = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0";
-        var (token, tokenFromFile) = allowToken && !haveCredentials ? ReadEnrollmentToken() : (null, false);
+        var (token, _) = allowToken && !haveCredentials ? ReadEnrollmentToken() : (null, false);
 
         object req = haveCredentials
             ? new { Hostname = hostname, OsVersion = os, AgentVersion = agentVersion, DeviceId = _deviceId, DeviceKey = _deviceKey }
@@ -508,13 +509,32 @@ public partial class Worker : BackgroundService
         SetEnrollmentStatus(body.Status);
         SaveDeviceCredentials();
 
-        if (token != null && tokenFromFile)
-        {
-            // The token is needed only once; do not leave it on the PC
-            try { File.Delete(Path.Combine(PrivateDir, AgentFiles.EnrollmentTokenFile)); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Could not delete the enrollment token file"); }
-        }
         _logger.LogInformation("Registered device {DeviceId} (status {Status})", _deviceId, body.Status);
+        DeleteEnrollmentTokenFile();
+    }
+
+    private bool _tokenFileChecked;
+
+    /// <summary>
+    /// The server accepted this PC (a registration or a heartbeat): the enrollment token is not needed on the PC any more.
+    /// Windows test 2026-11-27, defect 7: the file stayed on every updated PC, because it was deleted only after a first
+    /// registration with it. Checked once per agent start; the installer no longer writes it on a registered PC.
+    /// </summary>
+    private void DeleteEnrollmentTokenFile()
+    {
+        if (_tokenFileChecked) return;
+        _tokenFileChecked = true;
+        var path = Path.Combine(PrivateDir, AgentFiles.EnrollmentTokenFile);
+        try
+        {
+            if (!File.Exists(path)) return;
+            File.Delete(path);
+            _logger.LogInformation("Deleted the enrollment token file: this PC is registered, the token is not needed any more");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Could not delete the enrollment token file {Path}: {Error}", path, ex.Message);
+        }
     }
 
     private static async Task<string> ReadErrorAsync(HttpResponseMessage resp, CancellationToken ct)
