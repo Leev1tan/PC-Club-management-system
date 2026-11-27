@@ -1,9 +1,9 @@
-$ErrorActionPreference = 'Stop'
-
 param(
     [string]$ServiceName = 'ClubAgent',
     [string]$BinaryPath = ''
 )
+
+$ErrorActionPreference = 'Stop'
 
 function Test-IsAdmin {
     $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
