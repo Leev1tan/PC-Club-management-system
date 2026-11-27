@@ -7,7 +7,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cms.Server.Billing;
 
-public sealed record EndResult(SessionEntity Session, decimal AmountDue, Charge FromBalances);
+/// <summary>AmountDue: paid at the desk now; Debt: recorded on the player account instead (deskMethod debt).</summary>
+public sealed record EndResult(SessionEntity Session, decimal AmountDue, Charge FromBalances, decimal Debt = 0);
 
 /// <summary>Price difference of a move to another PC (see SessionService.QuoteTransferAsync).</summary>
 public sealed record TransferQuote(
@@ -104,6 +105,8 @@ public sealed class SessionService
         }
 
         var prepaid = package != null || minutes.HasValue;
+        // A player who owes money plays prepaid until the debt is paid (an open-ended session could add to it)
+        if (!prepaid && user is { Debt: > 0 }) return BillingErrors.PlayerHasDebt.With(user.Debt);
         string? method = null;
         if (prepaid)
         {
@@ -195,18 +198,21 @@ public sealed class SessionService
         var session = await _db.Sessions.FindAsync(id);
         if (session == null) return BillingErrors.SessionNotFound;
         if (session.Status == "ended") return BillingErrors.SessionEnded;
-        // balance (default for players): balances first, the rest at the desk with DeskMethod (default cash);
-        // cash / card: everything at the desk (always for guests)
+        // balance (default for players): balances first, the rest at the desk with DeskMethod (default cash)
+        // or, with DeskMethod debt, on the player's account; cash / card: everything at the desk (always for guests)
         var method = PaymentMethods.Normalize(req?.PaymentMethod);
-        var restMethod = PaymentMethods.Normalize(req?.DeskMethod);
+        var owes = string.Equals(req?.DeskMethod?.Trim(), PaymentMethods.Debt, StringComparison.OrdinalIgnoreCase);
+        var restMethod = owes ? PaymentMethods.Debt : PaymentMethods.Normalize(req?.DeskMethod);
         if (method == string.Empty || restMethod == string.Empty || restMethod == PaymentMethods.Balance) return BillingErrors.BadPaymentMethod;
+        if (owes && !session.UserId.HasValue) return BillingErrors.DebtNeedsPlayer;
+        if (owes && method is PaymentMethods.Cash or PaymentMethods.Card) return BillingErrors.BadPaymentMethod;
         if (method == null || (method == PaymentMethods.Balance && !session.UserId.HasValue))
             method = session.UserId.HasValue ? PaymentMethods.Balance : restMethod ?? PaymentMethods.Cash;
         var deskMethod = method == PaymentMethods.Balance ? restMethod ?? PaymentMethods.Cash : method;
 
         var now = _clock.UtcNow;
         var playedUntil = session.PausedUtc ?? now;
-        decimal amountDue = 0;
+        decimal amountDue = 0, debt = 0;
         var charge = Charge.None;
         var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == session.DeviceId);
 
@@ -252,7 +258,20 @@ public sealed class SessionService
                     }
                 }
                 amountDue = session.TotalCost - charge.Total;
-                if (amountDue > 0)
+                if (amountDue > 0 && deskMethod == PaymentMethods.Debt)
+                {
+                    // The player cannot pay: the rest goes on the player account, never lost
+                    await Wallet.AddDebtAsync(_db, session.UserId!.Value, amountDue);
+                    await Ledger.AppendAsync(_db, new LedgerEntryEntity
+                    {
+                        UserId = session.UserId, Type = LedgerTypes.SessionCharge, Method = PaymentMethods.Debt,
+                        Amount = amountDue, DebtDelta = amountDue, SessionId = session.Id, DeviceId = session.DeviceId,
+                        Description = $"Сесія на {device?.Hostname ?? "?"} ({minutesText}) — {amountDue} ₴ у борг"
+                    }, _actor, now);
+                    debt = amountDue;
+                    amountDue = 0;
+                }
+                else if (amountDue > 0)
                 {
                     // The rest is paid at the desk
                     await Ledger.AppendAsync(_db, new LedgerEntryEntity
@@ -262,21 +281,30 @@ public sealed class SessionService
                         Description = $"Сесія на {device?.Hostname ?? "?"} ({minutesText}) — {amountDue} ₴ на касі"
                     }, _actor, now);
                 }
-                session.PaymentMethod = charge.Total > 0 && amountDue > 0 ? $"{PaymentMethods.Balance}+{deskMethod}"
+                var rest = amountDue + debt;
+                session.PaymentMethod = charge.Total > 0 && rest > 0 ? $"{PaymentMethods.Balance}+{deskMethod}"
                     : charge.Total > 0 ? PaymentMethods.Balance : deskMethod;
                 await _db.SaveChangesAsync();
             }
 
             await AuditAsync(AuditActions.SessionEnded, session.Id,
-                $"Session on {device?.Hostname ?? "?"} ended: {session.TotalCost} ₴" + (amountDue > 0 ? $", {amountDue} ₴ due at the desk" : ""),
-                new { session.DeviceId, cost = session.TotalCost, amountDue, fromBalance = charge.FromBalance, fromBonus = charge.FromBonus,
+                $"Session on {device?.Hostname ?? "?"} ended: {session.TotalCost} ₴" + (amountDue > 0 ? $", {amountDue} ₴ due at the desk" : "") +
+                (debt > 0 ? $", {debt} ₴ recorded as debt" : ""),
+                new { session.DeviceId, cost = session.TotalCost, amountDue, debt, fromBalance = charge.FromBalance, fromBonus = charge.FromBonus,
                       prepaid = session.IsPrepaid, player = session.UserId, billedMinutes = quote?.BilledMinutes });
+            if (debt > 0 && _audit != null)
+            {
+                var owed = await Wallet.GetAccountsAsync(_db, session.UserId!.Value);
+                await _audit.WriteAsync(AuditActions.PlayerDebtRecorded, "player", session.UserId,
+                    $"Debt {debt} ₴ recorded: post-paid session on {device?.Hostname ?? "?"} not paid (debt now {owed?.Debt} ₴)",
+                    new { amount = debt, sessionId = session.Id, device = device?.Hostname, cost = session.TotalCost, paidFromBalances = charge.Total, debtNow = owed?.Debt });
+            }
             await tx.CommitAsync();
         }
 
         _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = now }));
         _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.Lock, null));
-        return BillingResult<EndResult>.Success(new EndResult(session, amountDue, charge));
+        return BillingResult<EndResult>.Success(new EndResult(session, amountDue, charge, debt));
     }
 
     /// <summary>Current price of an open-ended session (also for the live display).</summary>

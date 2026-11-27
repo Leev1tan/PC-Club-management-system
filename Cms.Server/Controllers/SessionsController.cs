@@ -51,7 +51,8 @@ public class SessionsController : ControllerBase
     /// <summary>
     /// End a session. Open-ended sessions are billed now per segment and time-of-day rule, taken from
     /// the player balances (never below zero); the rest is due at the desk (AmountDue), paid with
-    /// deskMethod cash (default) or card; paymentMethod cash | card puts everything at the desk.
+    /// deskMethod cash (default) or card, or recorded as the player's debt with deskMethod debt
+    /// (DebtRecorded); paymentMethod cash | card puts everything at the desk.
     /// Ending the same session twice at once charges once.
     /// </summary>
     [HttpPost("{id:guid}/end")]
@@ -64,7 +65,8 @@ public class SessionsController : ControllerBase
         {
             AmountDue = result.Value.AmountDue,
             PaidFromBalance = result.Value.FromBalances.FromBalance,
-            PaidFromBonus = result.Value.FromBalances.FromBonus
+            PaidFromBonus = result.Value.FromBalances.FromBonus,
+            DebtRecorded = result.Value.Debt
         });
     }
 
@@ -212,8 +214,8 @@ public record StartSessionRequest(Guid DeviceId, Guid? TariffId, Guid? UserId, i
 public record ExtendSessionRequest(int Minutes, string? PaymentMethod = null, bool UseBonus = true);
 /// <summary>
 /// Open-ended sessions: PaymentMethod balance (default for players: bonus first unless UseBonus = false,
-/// then the real balance; the rest at the desk with DeskMethod cash | card, default cash) or cash | card
-/// (all at the desk; guests always).
+/// then the real balance; the rest at the desk with DeskMethod cash | card, default cash, or with
+/// DeskMethod debt on the player account) or cash | card (all at the desk; guests always).
 /// </summary>
 public record EndSessionRequest(string? PaymentMethod = null, bool UseBonus = true, string? DeskMethod = null);
 public record TransferSessionRequest(Guid TargetDeviceId, string? PaymentMethod = null, bool UseBonus = true);
@@ -240,6 +242,8 @@ public record SessionDetailView(
     public decimal PaidFromBonus { get; init; }
     /// <summary>Transfer: price difference paid for the move.</summary>
     public decimal Surcharge { get; init; }
+    /// <summary>End with deskMethod debt: the part recorded on the player account.</summary>
+    public decimal DebtRecorded { get; init; }
 }
 
 public record RevenueSummary(decimal Today, decimal Week, decimal Month, string Currency);

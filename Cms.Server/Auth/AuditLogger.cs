@@ -43,6 +43,9 @@ public static class AuditActions
     public const string PlayerBonusAdjusted = "player.bonus_adjusted";
     public const string PlayerRefund = "player.refund";
     public const string PlayerPasswordSet = "player.password_set";
+    public const string PlayerDebtRecorded = "player.debt_recorded";
+    public const string PlayerDebtPaid = "player.debt_paid";
+    public const string PlayerDebtWrittenOff = "player.debt_written_off";
 
     public const string TariffCreated = "tariff.created";
     public const string TariffUpdated = "tariff.updated";

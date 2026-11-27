@@ -31,7 +31,7 @@ public class UsersController : ControllerBase
     {
         // SQLite cannot ORDER BY DateTimeOffset — sort in memory
         var users = (await _db.Users.AsNoTracking().ToListAsync()).OrderByDescending(u => u.CreatedUtc).ToList();
-        return Ok(users.Select(u => new UserView(u.Id, u.Username, u.DisplayName, u.Balance, u.BonusPoints, u.CreatedUtc)));
+        return Ok(users.Select(u => new UserView(u.Id, u.Username, u.DisplayName, u.Balance, u.BonusPoints, u.CreatedUtc, u.Debt)));
     }
 
     [HttpGet("{id:guid}")]
@@ -39,7 +39,7 @@ public class UsersController : ControllerBase
     {
         var u = await _db.Users.FindAsync(id);
         if (u == null) return NotFound();
-        return Ok(new UserView(u.Id, u.Username, u.DisplayName, u.Balance, u.BonusPoints, u.CreatedUtc));
+        return Ok(new UserView(u.Id, u.Username, u.DisplayName, u.Balance, u.BonusPoints, u.CreatedUtc, u.Debt));
     }
 
     /// <summary>Staff create a player account. A password or PIN is required for the lock-screen login.</summary>
@@ -68,7 +68,7 @@ public class UsersController : ControllerBase
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
         await _audit.WriteAsync(AuditActions.PlayerRegistered, "player", user.Id, $"Player @{user.Username} registered", new { user.Username });
-        return Ok(new UserView(user.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc));
+        return Ok(new UserView(user.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc, user.Debt));
     }
 
     /// <summary>
@@ -106,7 +106,7 @@ public class UsersController : ControllerBase
             user!.PasswordHash = Passwords.Hash(req.Password!);
             await _db.SaveChangesAsync();
         }
-        return Ok(new UserView(user!.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc));
+        return Ok(new UserView(user!.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc, user.Debt));
     }
 
     /// <summary>Set or reset the password / PIN of a player (front desk).</summary>
@@ -129,7 +129,7 @@ public class UsersController : ControllerBase
     private async Task<UserView> ViewAsync(Guid id)
     {
         var u = await _db.Users.AsNoTracking().FirstAsync(x => x.Id == id);
-        return new UserView(u.Id, u.Username, u.DisplayName, u.Balance, u.BonusPoints, u.CreatedUtc);
+        return new UserView(u.Id, u.Username, u.DisplayName, u.Balance, u.BonusPoints, u.CreatedUtc, u.Debt);
     }
 
     /// <summary>
@@ -262,6 +262,73 @@ public class UsersController : ControllerBase
         return Ok(await ViewAsync(id));
     }
 
+    /// <summary>
+    /// The player pays off (part of) the debt: cash or card at the desk (needs an open shift) or from
+    /// the real balance. Never more than the debt.
+    /// </summary>
+    [HttpPost("{id:guid}/debt/pay")]
+    public async Task<ActionResult<UserView>> PayDebt(Guid id, [FromBody] DebtPaymentRequest req)
+    {
+        if (req.Amount <= 0 || req.Amount > 100_000 || req.Amount != TariffCalculator.Round(req.Amount))
+            return BillingErrors.BadAmount.ToActionResult();
+        var method = PaymentMethods.Normalize(req.Method) ?? PaymentMethods.Cash;
+        if (method == string.Empty) return BillingErrors.BadPaymentMethod.ToActionResult();
+        var fromBalance = method == PaymentMethods.Balance;
+        var now = Now;
+
+        await using (var tx = await _db.Database.BeginTransactionAsync())
+        {
+            if (!await Wallet.TryReduceDebtAsync(_db, id, req.Amount, fromBalance))
+            {
+                var have = await Wallet.GetAccountsAsync(_db, id);
+                if (have == null) return NotFound();
+                return (have.Debt < req.Amount ? BillingErrors.DebtTooHigh.With(have.Debt) : BillingErrors.BalanceTooLow).ToActionResult();
+            }
+            await Ledger.AppendAsync(_db, new LedgerEntryEntity
+            {
+                UserId = id, Type = LedgerTypes.DebtPayment, Method = method, Amount = req.Amount, DebtDelta = -req.Amount,
+                BalanceDelta = fromBalance ? -req.Amount : 0m, DeskAmount = fromBalance ? 0m : req.Amount,
+                Description = $"Сплата боргу {req.Amount} ₴ ({(fromBalance ? "з балансу" : method == PaymentMethods.Card ? "карткою" : "готівкою")})"
+            }, Actor, now);
+            var left = await Wallet.GetAccountsAsync(_db, id);
+            await _audit.WriteAsync(AuditActions.PlayerDebtPaid, "player", id, $"Debt paid: {req.Amount} ₴ ({method}), {left?.Debt} ₴ left",
+                new { amount = req.Amount, method, debtLeft = left?.Debt });
+            await tx.CommitAsync();
+        }
+        return Ok(await ViewAsync(id));
+    }
+
+    /// <summary>Writes off (part of) the debt without money (Owner, Manager), with a reason.</summary>
+    [HttpPost("{id:guid}/debt/writeoff")]
+    [Authorize(Policy = Policies.Management)]
+    public async Task<ActionResult<UserView>> WriteOffDebt(Guid id, [FromBody] DebtWriteOffRequest req)
+    {
+        if (req.Amount <= 0 || req.Amount > 100_000 || req.Amount != TariffCalculator.Round(req.Amount))
+            return BillingErrors.BadAmount.ToActionResult();
+        var reason = CleanReason(req.Reason);
+        if (reason == null) return BillingErrors.ReasonRequired.ToActionResult();
+        var now = Now;
+
+        await using (var tx = await _db.Database.BeginTransactionAsync())
+        {
+            if (!await Wallet.TryReduceDebtAsync(_db, id, req.Amount, fromBalance: false))
+            {
+                var have = await Wallet.GetAccountsAsync(_db, id);
+                if (have == null) return NotFound();
+                return BillingErrors.DebtTooHigh.With(have.Debt).ToActionResult();
+            }
+            await Ledger.AppendAsync(_db, new LedgerEntryEntity
+            {
+                UserId = id, Type = LedgerTypes.DebtWriteOff, Method = PaymentMethods.None, Amount = req.Amount, DebtDelta = -req.Amount,
+                Reason = reason, Description = $"Списання боргу {req.Amount} ₴: {reason}"
+            }, Actor, now);
+            await _audit.WriteAsync(AuditActions.PlayerDebtWrittenOff, "player", id, $"Debt written off: {req.Amount} ₴: {reason}",
+                new { amount = req.Amount, reason });
+            await tx.CommitAsync();
+        }
+        return Ok(await ViewAsync(id));
+    }
+
     private static string? CleanReason(string? reason)
     {
         var r = reason?.Trim();
@@ -291,7 +358,11 @@ public class UsersController : ControllerBase
         var mismatch = (await Ledger.ReconcileAsync(_db, id)).SingleOrDefault();
         var broken = await Ledger.CheckChainAsync(_db, id);
         return Ok(new LedgerCheckView(user.Balance, mismatch?.LedgerBalance ?? user.Balance,
-            user.BonusPoints, mismatch?.LedgerBonus ?? user.BonusPoints, mismatch == null && broken == null, broken));
+            user.BonusPoints, mismatch?.LedgerBonus ?? user.BonusPoints, mismatch == null && broken == null, broken)
+        {
+            Debt = user.Debt,
+            LedgerDebt = mismatch?.LedgerDebt ?? user.Debt
+        });
     }
 
     /// <summary>Balance history in the format of earlier versions (now read from the ledger).</summary>
@@ -316,8 +387,15 @@ public record TopUpRequest(decimal Amount, string? Description, string? Method =
 public record AdjustBalanceRequest(decimal Amount, string? Reason, string? Target = null);
 /// <summary>Method: cash (default) or card.</summary>
 public record RefundRequest(decimal Amount, string? Method, string? Reason);
-/// <summary>Ok: cached balances equal the ledger sums and every BalanceAfter follows from the previous row (else BrokenRowId).</summary>
-public record LedgerCheckView(decimal Balance, decimal LedgerBalance, decimal Bonus, decimal LedgerBonus, bool Ok, long? BrokenRowId = null);
+/// <summary>Ok: cached balances (and debt) equal the ledger sums and every BalanceAfter follows from the previous row (else BrokenRowId).</summary>
+public record LedgerCheckView(decimal Balance, decimal LedgerBalance, decimal Bonus, decimal LedgerBonus, bool Ok, long? BrokenRowId = null)
+{
+    public decimal Debt { get; init; }
+    public decimal LedgerDebt { get; init; }
+}
+/// <summary>Method: cash (default), card or balance (the player's real balance).</summary>
+public record DebtPaymentRequest(decimal Amount, string? Method = null);
+public record DebtWriteOffRequest(decimal Amount, string? Reason);
 
 public record LedgerEntryView(
     long Id, DateTimeOffset CreatedUtc, Guid? UserId, string Type, string Method, decimal Amount,
@@ -326,6 +404,9 @@ public record LedgerEntryView(
 {
     /// <summary>Shift that was open when the row was written.</summary>
     public long? ShiftId { get; init; }
+    /// <summary>Change of the player's debt (+ recorded, - paid or written off) and the debt after the row.</summary>
+    public decimal DebtDelta { get; init; }
+    public decimal? DebtAfter { get; init; }
     /// <summary>Bar receipt of a bar sale or refund.</summary>
     public long? SaleId { get; init; }
 
@@ -334,8 +415,11 @@ public record LedgerEntryView(
         l.BalanceAfter, l.BonusAfter, l.SessionId, l.PackageId, l.DeviceId, l.Description, l.Reason, l.ActorUsername)
     {
         ShiftId = l.ShiftId,
-        SaleId = l.SaleId
+        SaleId = l.SaleId,
+        DebtDelta = l.DebtDelta,
+        DebtAfter = l.DebtAfter
     };
 }
-public record UserView(Guid Id, string Username, string DisplayName, decimal Balance, decimal BonusPoints, DateTimeOffset CreatedUtc);
+/// <summary>Debt: unpaid post-paid time on the player account (0 = none).</summary>
+public record UserView(Guid Id, string Username, string DisplayName, decimal Balance, decimal BonusPoints, DateTimeOffset CreatedUtc, decimal Debt = 0);
 public record TransactionView(Guid Id, Guid UserId, decimal Amount, string Type, string? Description, DateTimeOffset CreatedUtc);

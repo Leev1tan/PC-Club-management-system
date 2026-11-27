@@ -28,6 +28,10 @@ public static class LedgerTypes
     public const string Legacy = "legacy";
     /// <summary>Cash taken out of the drawer during a shift (collection, supplier), with a reason (-desk).</summary>
     public const string CashPayout = "cash_payout";
+    /// <summary>Debt paid off: cash or card at the desk (+desk) or from the real balance (-balance); -debt.</summary>
+    public const string DebtPayment = "debt_payment";
+    /// <summary>Debt written off by a manager with a reason (-debt, no money).</summary>
+    public const string DebtWriteOff = "debt_writeoff";
     /// <summary>Bar receipt: cash or card at the desk (+desk) or from the real balance (-balance; bonus never pays at the bar).</summary>
     public const string BarSale = "bar_sale";
     /// <summary>Refund of a bar receipt, the same way it was paid (-desk or +balance).</summary>
@@ -40,6 +44,8 @@ public static class PaymentMethods
     public const string Cash = "cash";
     public const string Card = "card";
     public const string None = "none";
+    /// <summary>Post-paid time the player could not pay: recorded on the player account (Users.Debt).</summary>
+    public const string Debt = "debt";
 
     /// <summary>balance, cash or card; null for an empty value; "" for an unknown value.</summary>
     public static string? Normalize(string? method)
@@ -93,6 +99,36 @@ public static class Wallet
     private static Task<Balances?> ReadAsync(CmsDbContext db, Guid userId, CancellationToken ct) =>
         db.Users.AsNoTracking().Where(u => u.Id == userId)
             .Select(u => new Balances(u.Balance, u.BonusPoints)).FirstOrDefaultAsync(ct);
+
+    /// <summary>Real balance, bonus and debt of a player; null when the player does not exist.</summary>
+    public sealed record Accounts(decimal Balance, decimal Bonus, decimal Debt);
+
+    public static Task<Accounts?> GetAccountsAsync(CmsDbContext db, Guid userId, CancellationToken ct = default) =>
+        db.Users.AsNoTracking().Where(u => u.Id == userId)
+            .Select(u => new Accounts(u.Balance, u.BonusPoints, u.Debt)).FirstOrDefaultAsync(ct);
+
+    /// <summary>Adds unpaid post-paid time to the player's debt; false when the player does not exist.</summary>
+    public static async Task<bool> AddDebtAsync(CmsDbContext db, Guid userId, decimal amount, CancellationToken ct = default)
+    {
+        if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount));
+        return await db.Users.Where(u => u.Id == userId)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.Debt, u => u.Debt + amount), ct) == 1;
+    }
+
+    /// <summary>
+    /// Takes this much off the debt (never below zero), and the same from the real balance when
+    /// fromBalance (one conditional UPDATE); false when the debt or the balance is too low.
+    /// </summary>
+    public static async Task<bool> TryReduceDebtAsync(CmsDbContext db, Guid userId, decimal amount, bool fromBalance, CancellationToken ct = default)
+    {
+        if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount));
+        var fromReal = fromBalance ? amount : 0m;
+        return await db.Users
+            .Where(u => u.Id == userId && u.Debt >= amount && u.Balance >= fromReal)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(u => u.Debt, u => u.Debt - amount)
+                .SetProperty(u => u.Balance, u => u.Balance - fromReal), ct) == 1;
+    }
 
     /// <summary>Current balances (real, bonus); null when the player does not exist.</summary>
     public static async Task<(decimal Balance, decimal Bonus)?> GetAsync(CmsDbContext db, Guid userId, CancellationToken ct = default)
@@ -198,12 +234,13 @@ public static class Ledger
         {
             // A row without a balance change (player pays at the desk) locks the player row too, so
             // rows of one player are written one after the other and BalanceAfter forms a chain
-            if (entry.BalanceDelta == 0 && entry.BonusDelta == 0)
+            if (entry.BalanceDelta == 0 && entry.BonusDelta == 0 && entry.DebtDelta == 0)
                 await db.Users.Where(u => u.Id == entry.UserId.Value)
                     .ExecuteUpdateAsync(s => s.SetProperty(u => u.Balance, u => u.Balance), ct);
-            var balances = await Wallet.GetAsync(db, entry.UserId.Value, ct);
-            entry.BalanceAfter = balances?.Balance;
-            entry.BonusAfter = balances?.Bonus;
+            var accounts = await Wallet.GetAccountsAsync(db, entry.UserId.Value, ct);
+            entry.BalanceAfter = accounts?.Balance;
+            entry.BonusAfter = accounts?.Bonus;
+            entry.DebtAfter = accounts?.Debt;
         }
         // The open shift (if any) owns the row; on PostgreSQL the shift row is share-locked until the
         // transaction ends, so a shift cannot close while a payment of it is being written
@@ -219,25 +256,28 @@ public static class Ledger
     }
 
     /// <summary>
-    /// Checks the rows of one player in id order: each BalanceAfter / BonusAfter must equal the
-    /// previous one plus the row's deltas. Returns the id of the first row that breaks the chain, or null.
+    /// Checks the rows of one player in id order: each BalanceAfter / BonusAfter (and DebtAfter, in
+    /// rows that have it) must equal the previous one plus the row's deltas. Returns the id of the
+    /// first row that breaks the chain, or null.
     /// </summary>
     public static async Task<long?> CheckChainAsync(CmsDbContext db, Guid userId, CancellationToken ct = default)
     {
         var rows = await db.Ledger.AsNoTracking().Where(l => l.UserId == userId).OrderBy(l => l.Id)
-            .Select(l => new { l.Id, l.BalanceDelta, l.BonusDelta, l.BalanceAfter, l.BonusAfter }).ToListAsync(ct);
-        decimal balance = 0, bonus = 0;
+            .Select(l => new { l.Id, l.BalanceDelta, l.BonusDelta, l.DebtDelta, l.BalanceAfter, l.BonusAfter, l.DebtAfter }).ToListAsync(ct);
+        decimal balance = 0, bonus = 0, debt = 0;
         foreach (var r in rows)
         {
             balance += r.BalanceDelta;
             bonus += r.BonusDelta;
-            if (r.BalanceAfter != balance || r.BonusAfter != bonus) return r.Id;
+            debt += r.DebtDelta;
+            if (r.BalanceAfter != balance || r.BonusAfter != bonus || (r.DebtAfter.HasValue && r.DebtAfter != debt)) return r.Id;
         }
         return null;
     }
 
-    /// <summary>A player whose cached balances differ from the sum of the ledger rows.</summary>
-    public sealed record Mismatch(Guid UserId, string Username, decimal Balance, decimal LedgerBalance, decimal Bonus, decimal LedgerBonus);
+    /// <summary>A player whose cached balances (or debt) differ from the sum of the ledger rows.</summary>
+    public sealed record Mismatch(Guid UserId, string Username, decimal Balance, decimal LedgerBalance, decimal Bonus, decimal LedgerBonus,
+        decimal Debt = 0, decimal LedgerDebt = 0);
 
     /// <summary>
     /// Compares Users.Balance / BonusPoints with the sums of the ledger (all players, or one).
@@ -247,21 +287,21 @@ public static class Ledger
     {
         var users = await db.Users.AsNoTracking()
             .Where(u => userId == null || u.Id == userId)
-            .Select(u => new { u.Id, u.Username, u.Balance, u.BonusPoints })
+            .Select(u => new { u.Id, u.Username, u.Balance, u.BonusPoints, u.Debt })
             .ToListAsync(ct);
         var rows = await db.Ledger.AsNoTracking()
             .Where(l => l.UserId != null && (userId == null || l.UserId == userId))
-            .Select(l => new { l.UserId, l.BalanceDelta, l.BonusDelta })
+            .Select(l => new { l.UserId, l.BalanceDelta, l.BonusDelta, l.DebtDelta })
             .ToListAsync(ct);
         var sums = rows.GroupBy(r => r.UserId!.Value)
-            .ToDictionary(g => g.Key, g => (Balance: g.Sum(r => r.BalanceDelta), Bonus: g.Sum(r => r.BonusDelta)));
+            .ToDictionary(g => g.Key, g => (Balance: g.Sum(r => r.BalanceDelta), Bonus: g.Sum(r => r.BonusDelta), Debt: g.Sum(r => r.DebtDelta)));
 
         var result = new List<Mismatch>();
         foreach (var u in users)
         {
-            var (balance, bonus) = sums.TryGetValue(u.Id, out var s) ? s : (0m, 0m);
-            if (balance != u.Balance || bonus != u.BonusPoints)
-                result.Add(new Mismatch(u.Id, u.Username, u.Balance, balance, u.BonusPoints, bonus));
+            var (balance, bonus, debt) = sums.TryGetValue(u.Id, out var s) ? s : (0m, 0m, 0m);
+            if (balance != u.Balance || bonus != u.BonusPoints || debt != u.Debt)
+                result.Add(new Mismatch(u.Id, u.Username, u.Balance, balance, u.BonusPoints, bonus, u.Debt, debt));
         }
         return result;
     }
