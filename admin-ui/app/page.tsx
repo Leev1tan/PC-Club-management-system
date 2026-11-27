@@ -10,6 +10,7 @@ import { PlayerCard } from './player-card';
 import { PosTab } from './pos-tab';
 import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-dialogs';
 import { ZONE_COLORS } from './palettes';
+import { ClubLogo, ClubThemeProvider, ModeToggle } from './theme';
 import { GamesTab } from './games-tab';
 import { LoginLockouts } from './lockouts';
 import { CheckInDialog, ReservationsTab } from './reservations-tab';
@@ -106,8 +107,12 @@ function timeAgo(iso: string | null): string {
   return fmtText(t.ago.days, { n: Math.floor(h / 24) });
 }
 
-// ===== Auth gate: setup screen, login page or the admin UI =====
+// ===== Auth gate: setup screen, login page or the admin UI, all in the club theme =====
 export default function Page() {
+  return <ClubThemeProvider staff><Gate /></ClubThemeProvider>;
+}
+
+function Gate() {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = still loading
 
@@ -880,7 +885,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="sidebar-logo">
-            <div className="sidebar-logo-icon">🎮</div>
+            <div className="sidebar-logo-icon"><ClubLogo alt={t.theme.logoAlt} /></div>
             <div>
               <div className="sidebar-logo-text">PC Club</div>
               <div className="sidebar-logo-sub">Management</div>
@@ -925,6 +930,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {fmtText(t.top.pcsOnline, { online: onlineDevices.length, total: devices.length })}
             </span>
+            <ModeToggle />
             <LangSwitch />
             <span className="user-chip" title={roleLabel(me.role)}>👤 {me.displayName} · {roleLabel(me.role)}</span>
             <button className="btn btn-sm" onClick={onLogout}>{t.nav.logout}</button>

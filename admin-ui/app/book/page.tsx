@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { LangSwitch } from '../auth';
 import { errorText, getJson, postJson } from '../api';
 import { fmt, lang, locale, t } from '../i18n';
+import { ClubThemeProvider, useClubTheme } from '../theme';
 
 // The public booking page (no login). It shows only the free capacity of a zone per start time, never other bookings.
 type Zone = { id: string; name: string; color: string; pcs: number; pricePerHourNow: number | null };
@@ -20,7 +21,13 @@ function addDays(date: string, days: number) {
 const weekday = (date: string) => t.days[(new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7];
 const durationText = (m: number) => `${(m / 60).toLocaleString(locale)} ${t.hoursShort}`;
 
+// The club theme in its default mode (a visitor has no light/dark switch)
 export default function BookPage() {
+  return <ClubThemeProvider staff={false}><BookContent /></ClubThemeProvider>;
+}
+
+function BookContent() {
+  const { logoUrl } = useClubTheme();
   const [info, setInfo] = useState<Info | null | undefined>(undefined);
   const [zone, setZone] = useState('');
   const [date, setDate] = useState('');
@@ -71,7 +78,11 @@ export default function BookPage() {
   return (
     <div className="book-page">
       <header className="book-header">
-        <h1 className="book-title">{t.book.title}</h1>
+        <div className="book-brand">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {logoUrl && <img className="club-logo book-logo" src={logoUrl} alt={t.theme.logoAlt} />}
+          <h1 className="book-title">{t.book.title}</h1>
+        </div>
         <LangSwitch />
       </header>
       {info?.demo && <div className="demo-banner book-banner" role="note">{t.book.demoBanner}</div>}

@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { AuthStatus, Me, errorText, postJson } from './api';
 import { lang, setLang, t } from './i18n';
+import { ClubLogo } from './theme';
 
 export function roleLabel(role: string) {
   return t.roles[role] ?? role;
@@ -25,7 +26,7 @@ function AuthCard({ title, sub, children }: { title: string; sub?: string; child
       <div className="modal auth-card">
         <div className="auth-lang"><LangSwitch /></div>
         <div className="sidebar-logo" style={{ marginBottom: 18 }}>
-          <div className="sidebar-logo-icon">🎮</div>
+          <div className="sidebar-logo-icon"><ClubLogo alt={t.theme.logoAlt} /></div>
           <div>
             <div className="sidebar-logo-text">PC Club</div>
             <div className="sidebar-logo-sub">Management</div>

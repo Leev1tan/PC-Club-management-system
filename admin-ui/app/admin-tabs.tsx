@@ -4,6 +4,8 @@ import { Me, api, errorText, getJson, postJson } from './api';
 import { roleLabel } from './auth';
 import { currency, fmt, locale, t } from './i18n';
 import { AuditVerify } from './pos';
+import { DEFAULT_MODE, THEMES, ThemeId, isHex, useClubTheme } from './theme';
+import { ACCENT_PICKER_START } from './palettes';
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
 
@@ -233,6 +235,118 @@ type Settings = {
   language?: string; languages?: string[];
 };
 
+// ===== Club theme (Owner): one theme for the admin UI, /book and the lock screens; accent colour; logo =====
+const MAX_LOGO_BYTES = 512 * 1024;
+
+/** The text of a theme or logo error of the server (code, and for the accent the mode and the ratio). */
+async function themeProblem(res: Response): Promise<string> {
+  if (res.status === 403) return t.common.forbidden;
+  try {
+    const body = await res.clone().json();
+    const text = body?.code ? t.settings.themeErrors[body.code] : undefined;
+    if (text) return fmt(text, { ratio: typeof body.ratio === 'number' ? body.ratio.toFixed(2) : '?', mode: t.settings.modeOn[body.mode] ?? '' });
+  } catch { /* not JSON */ }
+  return failed(res);
+}
+
+function ClubThemeSettings({ toast }: { toast: ToastFn }) {
+  const club = useClubTheme();
+  const [theme, setTheme] = useState<ThemeId>(club.theme);
+  const [accent, setAccent] = useState(club.accent ?? '');
+  const [busy, setBusy] = useState(false);
+  const [demo, setDemo] = useState(false);
+  useEffect(() => { setTheme(club.theme); setAccent(club.accent ?? ''); }, [club.theme, club.accent]);
+  useEffect(() => { getJson<{ enabled: boolean }>('/api/demo').then(d => setDemo(!!d?.enabled)); }, []);
+
+  const typed = accent.trim();
+  const accentValid = typed === '' || isHex(typed);
+  const changed = theme !== club.theme || (typed ? typed.toUpperCase() : null) !== club.accent;
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const res = await postJson('/api/settings/theme', { theme, accent: typed || null }, 'PUT');
+      if (!res.ok) { toast(await themeProblem(res), 'error'); return; }
+      toast(fmt(t.settings.themeSaved, { name: t.settings.themeNames[theme] }), 'success');
+      await club.refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > MAX_LOGO_BYTES) { toast(t.settings.themeErrors.logo_size, 'error'); return; }
+    const res = await api('/api/settings/logo', { method: 'PUT', body: file, headers: { 'Content-Type': file.type || 'application/octet-stream' } });
+    if (!res.ok) { toast(await themeProblem(res), 'error'); return; }
+    toast(t.settings.logoSaved, 'success');
+    await club.refresh();
+  };
+
+  const removeLogo = async () => {
+    const res = await api('/api/settings/logo', { method: 'DELETE' });
+    if (!res.ok) { toast(await themeProblem(res), 'error'); return; }
+    toast(t.settings.logoRemoved, 'info');
+    await club.refresh();
+  };
+
+  return (
+    <div className="section-card theme-card">
+      <div className="section-card-header"><span className="section-card-title">{t.settings.themeTitle}</span></div>
+      <p className="auth-sub">{t.settings.themeHint}</p>
+      <div className="theme-tiles" role="radiogroup" aria-label={t.settings.themeTitle}>
+        {THEMES.map(id => (
+          <button key={id} type="button" role="radio" aria-checked={theme === id} className={`theme-choice ${theme === id ? 'active' : ''}`} onClick={() => setTheme(id)}>
+            {/* The tile carries the tokens of its own theme (default mode): a true preview */}
+            <span className="theme-tile" data-theme={id} data-mode={DEFAULT_MODE[id]}>
+              <span className="theme-tile-sample">{t.settings.themeSample}</span>
+              <span className="theme-tile-name">{t.settings.themeNames[id]}</span>
+              <span className="theme-tile-text">{t.settings.themeTexts[id]}</span>
+              <span className="theme-swatches" aria-hidden="true">
+                {['--bg-panel', '--accent', '--ok', '--warn', '--danger'].map(v => <i key={v} style={{ background: `var(${v})` }} />)}
+              </span>
+            </span>
+            {theme === id && <span className="badge badge-blue theme-chosen">✓ {t.settings.themeChosen}</span>}
+          </button>
+        ))}
+      </div>
+      <form className="theme-form" onSubmit={e => { e.preventDefault(); if (!busy) save(); }}>
+        <label className="form-label" htmlFor="club-accent">{t.settings.accentLabel}</label>
+        <div className="accent-row">
+          <input type="color" aria-label={t.settings.accentLabel} value={isHex(typed) ? typed.toLowerCase() : ACCENT_PICKER_START}
+            onChange={e => setAccent(e.target.value.toUpperCase())} />
+          <input id="club-accent" className="form-input accent-input" maxLength={7} placeholder={t.settings.accentPlaceholder} value={accent}
+            aria-invalid={!accentValid} onChange={e => setAccent(e.target.value)} />
+          <button type="button" className="btn btn-sm" disabled={!typed} onClick={() => setAccent('')}>{t.settings.accentReset}</button>
+        </div>
+        <div className="form-hint">{t.settings.accentHint}</div>
+        {!accentValid && <div className="auth-error" role="alert">{t.settings.themeErrors.bad_accent}</div>}
+        <div className="modal-actions">
+          <button className="btn btn-primary theme-save" type="submit" disabled={busy || !accentValid || !changed}>{t.settings.themeSave}</button>
+        </div>
+      </form>
+      <div className="form-label" style={{ marginTop: 8 }}>{t.settings.logoLabel}</div>
+      <div className="theme-logo-row">
+        <span className="theme-logo-box">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {club.logoUrl ? <img className="club-logo" src={club.logoUrl} alt={t.theme.logoAlt} /> : <span className="form-hint">{t.settings.logoNone}</span>}
+        </span>
+        {demo ? <span className="form-hint">{t.settings.logoDemo}</span> : (
+          <>
+            <label className="btn btn-sm file-pick">
+              {t.settings.logoUpload}
+              <input id="club-logo" className="sr-only" type="file" accept="image/png,image/jpeg"
+                onChange={e => { upload(e.target.files?.[0]); e.target.value = ''; }} />
+            </label>
+            {club.logoUrl && <button type="button" className="btn btn-sm btn-danger" onClick={removeLogo}>{t.settings.logoRemove}</button>}
+          </>
+        )}
+      </div>
+      <div className="form-hint">{t.settings.logoHint}</div>
+    </div>
+  );
+}
+
 /** Language of the lock screens on the club PCs (uk, en); the admin UI language is a browser choice. */
 function LockScreenLanguage({ settings, toast, onSaved }: { settings: Settings | null; toast: ToastFn; onSaved: () => void }) {
   const [code, setCode] = useState(settings?.language ?? 'uk');
@@ -327,6 +441,7 @@ export function SettingsTab({ toast, onCurrency }: { toast: ToastFn; onCurrency:
 
   return (
     <>
+      <ClubThemeSettings toast={toast} />
       <CurrencySettings settings={settings} toast={toast} onCurrency={code => { onCurrency(code); load(); }} />
       <LockScreenLanguage settings={settings} toast={toast} onSaved={load} />
 

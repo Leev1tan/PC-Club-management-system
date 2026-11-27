@@ -1910,3 +1910,37 @@ body::after {
 .account-actions { min-width: 250px; }
 .account-actions > div { display: flex; flex-wrap: wrap; gap: 4px; max-width: 300px; }
 
+/* ===== Club theme (phase 9): logo, light/dark toggle, the Owner card with preview tiles ===== */
+.sidebar-logo-icon { overflow: hidden; flex-shrink: 0; }
+.club-logo { display: block; width: 100%; height: 100%; object-fit: contain; }
+.mode-toggle { min-width: 34px; padding: 4px 8px; font-size: 14px; line-height: 1.2; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.file-pick { position: relative; display: inline-flex; align-items: center; }
+.file-pick:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 10px; margin-bottom: 16px; }
+.theme-choice { display: flex; flex-direction: column; gap: 6px; align-items: stretch; padding: 4px; text-align: left; cursor: pointer; font: inherit;
+  background: none; color: var(--text-primary); border: 2px solid transparent; border-radius: calc(var(--radius-md) + 4px); min-width: 0; }
+.theme-choice:hover { border-color: var(--border-strong); }
+.theme-choice.active { border-color: var(--accent); }
+.theme-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-chosen { align-self: flex-start; }
+.theme-tile { display: flex; flex-direction: column; gap: 6px; padding: 14px; min-height: 150px; font-family: var(--font-body);
+  background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-md);
+  clip-path: var(--shape-card); box-shadow: var(--card-shadow); }
+.theme-tile-sample { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--accent-text); line-height: 1.3; }
+.theme-tile-name { font-family: var(--font-display); font-size: 13px; font-weight: 700; text-transform: var(--label-case);
+  letter-spacing: calc(1px * var(--tracking)); color: var(--text-primary); }
+.theme-tile-text { font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+.theme-swatches { display: flex; gap: 4px; margin-top: auto; }
+.theme-swatches i { display: inline-block; width: 18px; height: 18px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
+[data-theme="arcade"] .theme-tile-sample { font-size: 12px; font-weight: 400; font-synthesis: none; }
+[data-theme="arcade"] .theme-tile-name { font-size: 10px; font-weight: 400; font-synthesis: none; line-height: 1.6; }
+.accent-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.accent-row input[type="color"] { width: 44px; height: 38px; padding: 2px; cursor: pointer; background: var(--bg-dark); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); }
+.accent-input { width: 140px; font-family: var(--font-mono); text-transform: uppercase; }
+.theme-logo-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 6px; }
+.theme-logo-box { display: flex; align-items: center; justify-content: center; width: 72px; height: 72px; padding: 4px; background: var(--bg-dark);
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); }
+.book-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.book-logo { width: 40px; height: 40px; flex-shrink: 0; }
