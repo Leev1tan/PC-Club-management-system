@@ -103,6 +103,9 @@ POST /api/devices/{id}/commands/{cmdId}/ack → Acknowledge command             
 GET  /api/devices                → List all devices                               [all staff]
 POST /api/devices/{id}/commands  → Enqueue lock/unlock/restart/logoff/message     [all staff]
 POST /api/devices/{id}/approve | reject | revoke, PUT .../zone                    [Owner, Manager, Tech]
+POST /api/devices/{id}/power     → action shutdown | reboot (command queue) | wake (Wake-on-LAN to the MAC from
+                                   the heartbeat, Power:WakeBroadcast / Power:WakePort; simulated in the demo),
+                                   audited device.power; "restart" in /commands needs these roles too  [Owner, Manager, Tech]
 POST /api/devices/{id}/events    → Agent: emergency staff PIN unlock noted by the lock screen; game_started /
                                    game_stopped of a catalog entry (current game, top games)     [X-Device-Key, approved]
 GET  /api/devices/{id}/games     → Agent: active catalog entries of the PC's zone; ETag, 304 with If-None-Match  [X-Device-Key, approved]
@@ -176,7 +179,8 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 |---------|--------|
 | `lock` | Lock the PC (write lock state to file) |
 | `unlock` | Unlock the PC |
-| `restart` | Schedule system restart in 5 seconds |
+| `restart` | Reboot in 5 seconds (`shutdown /r /t 5`; Owner, Manager, Tech) |
+| `shutdown` | Shut down in 5 seconds (`shutdown /s /t 5`; Owner, Manager, Tech; only through `/power`) |
 | `message` | Log message (UI popup planned) |
 | `session_set` | Set the session end time; `{"endUtc": null}` = no end (open-ended or paused session) |
 

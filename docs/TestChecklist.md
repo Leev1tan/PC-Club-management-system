@@ -293,6 +293,25 @@ Prepare: a Steam game and Notepad in the catalog; Discord and Chrome installed. 
       the agent again: the session continues
 - [ ] Reinstall the client (`Install.cmd` again): the changed `Teardown` section stays
 
+### Test 18: Shutdown, Reboot and Wake-on-LAN (phase 6)
+Prepare: Wake-on-LAN on in the BIOS and in Windows (see ClubDeployment.md, Wake-on-LAN); the server's
+`Power:WakeBroadcast` set to the broadcast address of the PC network; the PC online.
+- [ ] Admin UI → Devices: the MAC column shows the MAC address of the card in the club LAN (compare with
+      `Get-NetAdapter | Select Name, MacAddress` on the PC)
+- [ ] As a Cashier: the PC map menu and the Devices tab have no reboot, shutdown or start; the API answers 403
+      for `POST /api/devices/{id}/power` and `power_forbidden` for the command `restart`
+- [ ] As Tech: PC map → the PC → 🔄 Reboot → the dialog names the PC; Cancel sends nothing; Reboot: the PC
+      restarts within 10 s and comes back online; the audit log has `device.power` "Reboot sent to …"
+- [ ] Start a session, then ⏻ Shut down: the dialog warns that the session goes on and is billed; confirm:
+      the PC shuts down within 10 s; the session still runs in the admin UI
+- [ ] The PC is offline: PC map → ⚡ Start (WoL) → confirm: the PC starts within a minute; the audit log has
+      "Wake-on-LAN sent to … (MAC) via <broadcast>:<port>"
+- [ ] Set a wrong `Power:WakeBroadcast` (for example `abc`), restart the server: the log says that Wake-on-LAN
+      is off; the start button answers "Wake-on-LAN is off: check Power:WakeBroadcast …"; set it back
+- [ ] Shut down a PC that the server cannot reach any more for a while: the queued command runs when the PC is
+      back within an hour; after an hour it expires and never runs
+- [ ] UA / EN: the dialog, the buttons and the toasts are in the selected language
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

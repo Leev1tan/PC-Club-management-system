@@ -286,9 +286,31 @@ on each PC (only administrators can change the folder; the installer keeps the s
 - Players must be standard Windows users on the club PCs (the kiosk install does this). A local
   administrator can stop the agent or read its key.
 
+## Wake-on-LAN
+
+The agent reports the MAC address of the network card that reaches the server with every heartbeat (admin UI,
+Devices: column MAC). Owner, Manager or Tech can then start a PC from the PC map or the Devices tab (⚡); the
+server sends three Wake-on-LAN "magic packets" (UDP) to `Power:WakeBroadcast`, port `Power:WakePort`.
+
+- Enable Wake-on-LAN on every PC: in the BIOS / UEFI ("Wake on LAN", "Power on by PCI-E"), and in Windows
+  (Device Manager → network card → Power Management: "Allow this device to wake the computer", "Only allow a
+  magic packet"; Advanced: "Wake on Magic Packet"). Turn off "Fast startup" in the power options.
+- Option A (Windows server in the club LAN): set `Power:WakeBroadcast` to the broadcast address of the PC
+  network, for example `10.3.3.255` (installer folder `appsettings.json`, section `Power`), then restart the
+  `ClubServer` service.
+- Option B (Docker): a container on the compose network cannot broadcast into the club LAN. Either run the
+  server with `network_mode: host` on a Linux host in the club LAN, or send the packets to a relay: on MikroTik
+  for example a script with `/tool wol mac=<MAC> interface=<bridge>`, or a directed broadcast that the router
+  forwards. Set `CMS_WAKE_BROADCAST` / `Power__WakeBroadcast` accordingly.
+- With switch port isolation the broadcast must still reach the ports of the PCs (the isolation of most
+  switches lets traffic from the uplink port through).
+- Shutdown and reboot go through the command queue of the PC (`shutdown /s /t 5`, `shutdown /r /t 5` by the
+  agent); a command for a PC that is off runs when it comes back within an hour, else it expires.
+- A shutdown or reboot does not end a running session: it goes on and is billed. The confirmation dialog says so.
+
 ## Features That Need Extra Network Design
 
 - UDP auto-discovery may fail because isolated switch ports block broadcast-style discovery.
-- Wake-on-LAN may require MikroTik-specific WOL or broadcast relay setup.
+- Wake-on-LAN from a Docker server needs host networking or a relay on the router (see [Wake-on-LAN](#wake-on-lan)).
 - Direct PC-to-PC remote desktop or game hosting requires router forwarding, VPN, or a relay.
 - Diskless boot/PXE is not part of this deployment path and needs a different network design.
