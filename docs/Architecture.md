@@ -542,6 +542,20 @@ erDiagram
   and applies to the start price, extensions, the post-paid quote at the end, the transfer surcharge and the projection
   of a session from the balance (`Loyalty.Apply`). The ledger rows hold the discounted price.
 
+## Club game-account pool (phase 8)
+
+- `GameAccounts` (encrypted login and secret, masked login) and `GameAccountLeases` (migration `GameAccountPool`);
+  `Games.AccountPlatform`. Partial unique indexes: one open lease per account, one per PC and platform.
+- `Accounts/GameAccountVault`: Data Protection with the purpose `Cms.GameAccounts.Credentials.v1` (the key ring of the
+  data directory). `Accounts/GameAccountService`: add, rotate, on/off, remove (wipes the ciphertext), free, lease (a free
+  account of the platform, least recently used first; a unique index violation retries the next one), deliver (once:
+  a conditional update of `DeliveredUtc`), and the end of leases (with the session in `SessionService`, every 5 s in
+  `SessionExpiryService`, at the start in `Program.cs`).
+- PC side: pipe operation `account` (Cms.Client); the agent checks the program of the pipe client
+  (`GetNamedPipeClientProcessId`, `AccountPool:LauncherPath`), calls the lease and the credential endpoints and answers
+  with `AccountLease`; it writes `account-pool.json` from `AccountPool:Platforms`; the lock screen builds the client start
+  with `AccountLogin.Plan` (argument list) and starts the game after it.
+
 ## Communication Flow
 
 ### Device Registration

@@ -376,6 +376,27 @@ Prepare: two PCs of one zone with the agent and the lock screen, locked without 
       balance; the audit log has `event.cancelled` without the event name
 - [ ] UA / EN: the lock screen texts, the tab, the dialogs and the errors are in one language
 
+### Test 23: Club Game Account on the Lock Screen (phase 8)
+Prepare: a test account of a platform that allows a login with a password and has **no** two-step verification (never a
+real customer account); one PC with the agent and the lock screen in kiosk mode; on that PC, in
+`C:\ClubAgent\appsettings.json`, `AccountPool:Platforms:steam` with the client path and `-login {login} {secret}` (or
+the arguments of your client); restart the agent; a game of the catalog with "Club account for the game: Steam".
+- [ ] `C:\ProgramData\ClubAgent\account-pool.json` lists the platform; the agent log says "1 platform(s) can log in"
+- [ ] Manager → Акаунти ігор → add the account: the row shows the masked login and "збережено"; no screen shows the login
+      or the secret again; a Cashier has no add or change buttons (and the API answers 403)
+- [ ] Without a session the tile does nothing (the PC is locked). Start a session; click the tile: the lock screen says
+      "Клубний акаунт ...: вхід у Steam…", the client starts and logs in, then the game starts
+- [ ] The admin UI shows the account "зайнятий" on this PC with "вхід виконано"; the audit log has
+      `game_account.leased` and `game_account.delivered` with the masked login only
+- [ ] Click the tile again: the game starts at once (no second login, no second delivery)
+- [ ] A second PC opens the game while the pool has no free account: "Усі клубні акаунти Steam зараз зайняті"
+- [ ] Copy `Cms.Launcher.exe` to the Desktop of the player and run it (as an administrator test): its account request is
+      refused (the agent log says "refused (only C:\ClubLauncher\Cms.Launcher.exe may ask)")
+- [ ] End the session: the teardown closes the client; the account is "вільний" again; the next player on the PC does
+      not find the client logged in (check the "remember me" setting of the client)
+- [ ] Remove the account: the database row has no login or secret any more (only the masked login)
+- [ ] UA / EN: the lock screen messages and the tab are in one language
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`
