@@ -460,7 +460,8 @@ PowerShell on the club PC (Ctrl+Alt+Del > Switch user > `ClubAdmin`, or the gues
 - [ ] Exit code 0. The last lines say "RESULT: OK - the club PC software is updated", the agent version 0.9.1.0 and
       "ClubUser was signed out; the automatic sign-in starts the new lock screen".
 - [ ] `ClubUser` signs in again by itself; the new lock screen shows "[ ЗАБЛОКОВАНО ]". `C:\ClubAgent.new`,
-      `C:\ClubAgent.old`, `C:\ClubLauncher.new` and `C:\ClubLauncher.old` do not exist.
+      `C:\ClubAgent.old`, `C:\ClubLauncher.new` and `C:\ClubLauncher.old` do not exist, and no folder `ccms-update-*`
+      stays in `C:\Windows\Temp`, `C:\Windows\SystemTemp` or the TEMP folder of the administrator (see 26.7).
 - [ ] `C:\ClubAgent\appsettings.json` keeps `Teardown` and `AccountPool:Platforms`; `AccountPool:LauncherPath` is
       `C:\ClubLauncher\Cms.Launcher.exe`.
 2. Failure test. In an administrator PowerShell keep the lock screen file open for reading only:
@@ -503,7 +504,7 @@ PowerShell on the club PC (Ctrl+Alt+Del > Switch user > `ClubAdmin`, or the gues
 
 **25.8 No window above the locked screen (defect 8)**
 1. Start a session; start the catalog entry of `calc.exe` (the "Open with" dialog opens). Pause the session in the admin UI.
-- [ ] Within 2 s the dialog is gone from the screen; the locked screen is on top and takes the clicks.
+- [ ] Within 5 s the dialog is gone from the screen; the locked screen is on top and takes the clicks (see 26.2).
 - [ ] Ctrl+Shift+U opens the staff PIN dialog above the lock screen; it takes the input; the PIN works.
 
 **25.9 One language, texts and layout (defect 9)**
@@ -529,6 +530,92 @@ PowerShell on the club PC (Ctrl+Alt+Del > Switch user > `ClubAdmin`, or the gues
 **25.11 The lock state after a start (known issue)**
 - [ ] Restart `ClubServer`: within 10 s the admin UI shows 🔒 for every locked PC that is online (not empty).
 - [ ] Restart a club PC that has no session: within 10 s after it is online, the admin UI shows 🔒.
+
+### Test 26: Fixes of the Windows Re-test of 2026-11-27 Night (v0.9.1)
+Bench as in Test 25 (kiosk mode, the agent as LocalService). The guard of the locked screen works every second, only
+while the PC is locked: in a running session it does nothing. Version: the release of the tag `v0.9.1-beta.1` shows
+`0.9.1.0` (file version, agent log, installer); a dry-run build (`dryrun-<commit>`) shows `0.0.0.0` on purpose.
+Prepare two catalog entries (zone of the club PC):
+- "Calc" (`C:\Windows\System32\calc.exe`): on a PC without the Store Calculator it opens the Windows "Open with" dialog.
+- "Topmost test": as administrator copy `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` to
+  `C:\Users\Public\explorer.exe` (a program of the player with the NAME of a Windows program). Exe
+  `C:\Users\Public\explorer.exe`, arguments
+  `-NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object Windows.Forms.Form; $f.TopMost = $true; $f.Text = 'TOPMOST TEST'; [Windows.Forms.Application]::Run($f)"`.
+- Notepad with the process name `notepad` (25.9).
+
+**26.1 The staff PIN dialog after the sign-in (re-test defect 1)**
+1. The PC is locked and has no session. In the admin session: `logoff <session id of ClubUser>`. The automatic
+   sign-in starts the lock screen. At once, before any click, press Ctrl+Shift+U.
+- [ ] The PIN dialog is fully drawn above the locked screen and the PIN box has the cursor. Type the PIN and press
+      Enter (no click): the PC unlocks. Repeat 3 times.
+2. Press Ctrl+Shift+U, wait 15 s with the dialog open, then type the PIN.
+- [ ] The dialog keeps the keys the whole time (the guard does not give the activation back to the main window).
+
+**26.2 No window above the locked or paused screen (re-test defect 2, security review)**
+1. Start a session; start "Calc" (the "Open with" dialog opens) and Notepad (type a line). Pause the session.
+- [ ] Within 5 s the "Open with" dialog is gone; in the admin session `Get-Process OpenWith -ErrorAction
+      SilentlyContinue | Where-Object SessionId -eq <session of ClubUser>` finds nothing within 10 s.
+- [ ] Without a click, Ctrl+Shift+U opens the PIN dialog in front and it takes the PIN (Cancel it).
+- [ ] Notepad still runs (`Get-Process notepad`). Resume: Notepad is there with its line; "Зараз: Notepad" is on the
+      top bar.
+2. In the session start "Topmost test" (the window "TOPMOST TEST" is above everything, also in the session: that is
+   correct). Pause the session.
+- [ ] Within 3 s the window is no longer on the screen (pushed down: not top-most, minimized; in a pause the program
+      is closed only when it comes back above the locked screen): a program with the name of a Windows program is not
+      trusted (3aa3619 left it above the locked screen). The real Windows programs (`C:\Windows\explorer.exe`, the
+      touch keyboard, the IME) are never touched; this is in the unit tests (LockScreenGuardTests).
+- [ ] End the session: within 15 s after the end the process `explorer` of `C:\Users\Public` is ended (teardown, or the
+      guard 10 s after the lock).
+3. Resume, start "Calc" again, then end the session in the admin UI (the "Open with" dialog is not in the kill list).
+- [ ] The teardown runs as before (audit `device.session_teardown`). Within 15 s after the end the "Open with" dialog
+      is gone too (a locked PC without a session closes every program of ClubUser after 10 s).
+4. Start a session; start "Topmost test" and Notepad. Stop the agent (`Stop-Service ClubAgent`) and wait 20 s.
+- [ ] The PC locks (agent silent); "TOPMOST TEST" is no longer on the screen within 5 s; Notepad still runs (nothing is
+      closed while the PC cannot know whether the session goes on).
+      `Start-Service ClubAgent`: the session goes on.
+
+**26.3 Ctrl+Shift+U at the first press (re-test defect 3)**
+1. Start a session and pause it. Click once on the paused screen, then press Ctrl+Shift+U once.
+- [ ] The PIN dialog opens at the first press. Cancel it. Hold Ctrl+Shift+U for 3 s: only one dialog opens.
+2. Resume. In the session press Ctrl+Shift+U in the lock screen window (not in a game).
+- [ ] The PIN dialog opens as before (a game in the foreground gets the keys: the hook is on only while locked).
+
+**26.4 The agent log names the real event (re-test defect 4)**
+1. In a session start and close Notepad; end the session; then do a staff PIN unlock.
+- [ ] agent.log has "Reported the start of game <id>", "Reported the stop of game <id>", "Reported the teardown of the
+      ended session at ... (N program(s) closed)", and only for the PIN unlock "Reported the emergency unlock with the
+      staff PIN at ...".
+
+**26.5 The newest lock wins in the admin view (re-test defect 5)**
+1. The PC is locked, no session. Staff PIN unlock (Ctrl+Shift+U). Wait until `GET /api/devices` shows
+   `isLocked=false`, `lockScreen=staff_unlock` for the PC.
+2. Lock it in the admin UI and read `GET /api/devices` every 0.5 s for 15 s.
+- [ ] After the first `isLocked=true` the PC never shows `isLocked=false` again; the map shows 🔒, never "🔓 PIN".
+      Repeat once more (lock 2).
+
+**26.6 "Зараз: <game>" stays (re-test defect 6)**
+1. In a session start Notepad; the top bar shows "Зараз: Notepad". In the admin session end only the lock screen
+   (25.5 step 2): `Get-Process Cms.Launcher | Where-Object MainWindowHandle -ne 0 | Stop-Process -Force`.
+- [ ] Within 5 s the new lock screen shows the session with "Зараз: Notepad"; the admin UI shows the current game Notepad.
+- [ ] Close Notepad: within 15 s the top bar has no game line and the admin UI shows no current game.
+2. Start Notepad again; pause the session for 1 minute; resume.
+- [ ] "Зараз: Notepad" is on the top bar all the time after the resume.
+
+**26.7 The installers never follow a junction (security review)**
+1. As a standard Windows user (not ClubUser, not an administrator): create `C:\Users\Public\victim\keep.txt`, then
+   `mklink /J C:\ClubAgent.new C:\Users\Public\victim`. Run the update of 25.4 as SYSTEM.
+- [ ] "RESULT: OK". The installer warns "Not removed: C:\ClubAgent.new (it is a junction or a symbolic link)";
+      `C:\Users\Public\victim\keep.txt` is still there. Remove the junction by hand: `rmdir C:\ClubAgent.new`.
+- [ ] During the run a folder `ccms-update-<random>` exists in the TEMP folder of SYSTEM (`C:\Windows\SystemTemp` or
+      `C:\Windows\Temp`); `icacls` shows only SYSTEM and Administrators; it is gone after the run.
+2. A PC without the club software: as a standard user `mkdir C:\ClubAgent`, then run `Install.cmd` as administrator.
+- [ ] Exit code 1: "C:\ClubAgent cannot be used: its owner (...) is not SYSTEM or an administrator ... Nothing was
+      changed". The same with `mklink /J C:\ProgramData\ClubAgent C:\Users\Public\victim` instead: "it is a junction".
+3. As administrator create `mklink /J C:\Users\ClubUser\AppData\Local\jump C:\Users\Public\victim`. Run
+   `uninstall-kiosk.ps1` and delete the ClubUser account and profile.
+- [ ] The profile folder is gone; `C:\Users\Public\victim\keep.txt` is still there.
+4. Server PC: run the server update (`Install.cmd`).
+- [ ] `icacls C:\ClubServer` lists only SYSTEM (F), Administrators (F) and Users (RX); the server runs.
 
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates and
