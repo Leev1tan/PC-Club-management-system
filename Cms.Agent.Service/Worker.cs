@@ -18,7 +18,7 @@ namespace Cms.Agent.Service;
 /// Files in %ProgramData%\ClubAgent:
 ///    state.json, agent_heartbeat.txt, config.json, staff-pin.json  - readable by the launcher
 ///    private\device.json, private\enrollment-token.txt            - SYSTEM, Administrators, agent only
-///    inbox\event-*.json - written by the launcher (emergency PIN unlock), sent to the server, then deleted
+///    inbox\event-*.json - written by the launcher (emergency PIN unlock, games, teardown), sent to the server, then deleted
 /// </summary>
 public partial class Worker : BackgroundService
 {
@@ -647,7 +647,7 @@ public partial class Worker : BackgroundService
     }
 
     /// <summary>
-    /// Sends the launcher's notes (emergency PIN unlock) to the server's audit log. A file is deleted
+    /// Sends the launcher's notes (emergency PIN unlock, game start and stop, teardown) to the server. A file is deleted
     /// when the server accepted it (or refused it as invalid); otherwise it is sent again later, also
     /// after the server or the agent was down.
     /// </summary>
@@ -692,7 +692,8 @@ public partial class Worker : BackgroundService
             using var resp = await http.SendAsync(req, ct);
             if (resp.IsSuccessStatusCode || resp.StatusCode == HttpStatusCode.BadRequest)
             {
-                if (resp.IsSuccessStatusCode) _logger.LogInformation("Reported the emergency unlock of {Time:O} to the server", e.OccurredUtc);
+                // The real type of the note: a game or a teardown is not an emergency unlock (Windows test 2026-11-27 night, defect 4)
+                if (resp.IsSuccessStatusCode) _logger.LogInformation("Reported {Note} to the server", LauncherEventLog.Describe(e));
                 TryDelete(file);
             }
             else
