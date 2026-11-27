@@ -30,9 +30,10 @@ PowerShell instead:
   .\install-client.ps1 -ServerUrl "http://<server>:5081" -EnrollmentToken "<token>" -KioskMode -AdminPassword (Read-Host -AsSecureString)
 
 Update: extract the new zips into a new folder and run Install.cmd again with the same options. Do it
-when no session runs on the PC. The installer first copies the new files to C:\ClubAgent.new and
-C:\ClubLauncher.new and backs up the old ones (C:\ClubAgent.old, C:\ClubLauncher.old); a failure there
-changes nothing. Then it stops the agent and the lock screen, copies the files and starts the agent.
+when no session runs on the PC. The installer first copies the new files and a backup of the old ones to
+a new private folder (ccms-update-<random> in the temp folder; only SYSTEM and Administrators can open
+it); a failure there changes nothing. A program or data folder that is a junction, a symbolic link or a
+folder of a player stops the install ("cannot be used"): check it and remove it by hand. Then it stops the agent and the lock screen, copies the files and starts the agent.
 If the copy or the start fails, it restores the old version, starts it again and ends with exit code 1
 ("UPDATE FAILED ... The old version is restored and runs again"). On success it signs out ClubUser; the
 automatic sign-in starts the new lock screen ("RESULT: OK"). No restart of the PC is needed.

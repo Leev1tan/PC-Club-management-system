@@ -42,6 +42,8 @@ function Test-IsAdmin {
 # kiosk user are signed out, so the automatic sign-in starts the lock screen (Resume-LockScreens).
 function Stop-Install([string]$Message) {
     if (Get-Command Resume-LockScreens -ErrorAction SilentlyContinue) { Resume-LockScreens }
+    # The staged files are not needed while the old version was never stopped (later the backup stays for a restore by hand)
+    if ($script:workFolder -and $script:workDisposable) { Remove-FolderSafely $script:workFolder (Get-TrustedOwners) | Out-Null }
     Write-Host ""
     Write-Host "ERROR: $Message" -ForegroundColor Red
     Write-Host "RESULT: FAILED (exit code 1)" -ForegroundColor Red
@@ -328,25 +330,149 @@ function Remove-MachineValue([string]$Path, [string]$Name, [string]$What) {
 # Copies a folder with robocopy, 3 tries 2 s apart for a file that is held for a moment (antivirus). A normal copy
 # copies every file (also unchanged ones). -Mirror restores the old version: it copies only the files that differ and
 # removes the files that the source does not have, so an old file that is still open does not stop the restore.
-# True when every file was copied (robocopy exit code below 8).
+# /XJ: junctions and symbolic links are not followed or copied. True when every file was copied (exit code below 8).
 function Copy-Folder([string]$From, [string]$To, [switch]$Mirror) {
     $ErrorActionPreference = 'Continue'
     if ($Mirror) {
-        & robocopy.exe $From $To /MIR /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+        & robocopy.exe $From $To /MIR /XJ /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
     } else {
-        & robocopy.exe $From $To /E /IS /IT /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+        & robocopy.exe $From $To /E /IS /IT /XJ /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
     }
     return ($LASTEXITCODE -lt 8)
 }
 
-# A new empty folder that only SYSTEM and Administrators may change (the agent and the players may read it): the staged
-# new version and the backup of the old one, so a player cannot plant a program there.
-function New-ProtectedFolder([string]$Path) {
-    if (Test-Path $Path) { Remove-Item -Path $Path -Recurse -Force }
-    New-Item -ItemType Directory -Path $Path -Force | Out-Null
-    icacls $Path /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)RX" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not set the permissions of $Path" }
-    if (Get-ChildItem -Path $Path -Force) { throw "$Path is not empty after it was created" }
+# ---- BEGIN safe folders (the same text in install-client.ps1, install-server.ps1 and uninstall-kiosk.ps1) ----
+# Security review of 3aa3619: every user may create folders in C:\ and C:\ProgramData, and the player owns the profile of
+# ClubUser. A junction or a symbolic link there in place of a folder of the installer made the installer delete or change
+# ANOTHER folder as SYSTEM: Windows PowerShell 5.1 follows a junction in Remove-Item -Recurse, and icacls changes the
+# target of a link. So the installers never delete, copy into or change the permissions of a folder that is a reparse
+# point (junction, symbolic link, mount point) or that belongs to somebody other than SYSTEM or an administrator, and a
+# delete never enters a reparse point inside a folder: the link itself is removed, its target stays.
+
+# The reason why an existing folder must not be used, or $null. Only the attributes and the owner SID: tested by the
+# installer self-check.
+function Get-UnsafeFolderReason([IO.FileAttributes]$Attributes, [string]$OwnerSid, [string[]]$TrustedOwners) {
+    if (($Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return 'it is a junction or a symbolic link' }
+    if ([string]::IsNullOrEmpty($OwnerSid)) { return 'its owner cannot be read' }
+    if ($TrustedOwners -notcontains $OwnerSid) { return "its owner ($OwnerSid) is not SYSTEM or an administrator" }
+    return $null
+}
+
+# SYSTEM, Administrators, TrustedInstaller, the account of this run, the members of the local Administrators group, and
+# the extra SIDs (for example LocalService for the data folder of the agent).
+function Get-TrustedOwners([string[]]$Extra = @()) {
+    $list = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($sid in (@('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464') + $Extra)) { $list.Add($sid) }
+    $self = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    if ($self) { $list.Add($self.Value) }
+    try {
+        foreach ($member in @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop)) { if ($member.SID) { $list.Add($member.SID.Value) } }
+    } catch {
+        # Get-LocalGroupMember fails on a group with an orphaned member: then only the accounts above count
+    }
+    return ,$list.ToArray()
+}
+
+# The reason why this path must not be used, or $null (it may be used, or it does not exist).
+function Get-FolderProblem([string]$Path, [string[]]$TrustedOwners) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return $null }
+    $owner = $null
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+        try { $owner = (Get-Acl -LiteralPath $Path).GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { $owner = $null }
+    }
+    return Get-UnsafeFolderReason $item.Attributes $owner $TrustedOwners
+}
+
+# The first reparse point inside a folder (the walk never enters one), or $null.
+function Find-ReparsePoint([string]$Path) {
+    foreach ($entry in [IO.Directory]::GetFileSystemEntries($Path)) {
+        $attributes = [IO.File]::GetAttributes($entry)
+        if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $entry }
+        if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) {
+            $inner = Find-ReparsePoint $entry
+            if ($inner) { return $inner }
+        }
+    }
+    return $null
+}
+
+# Deletes a folder and its content without entering a reparse point: a junction or a link inside is removed as a link.
+function Remove-TreeNoFollow([string]$Path) {
+    foreach ($entry in [IO.Directory]::GetFileSystemEntries($Path)) {
+        $attributes = [IO.File]::GetAttributes($entry)
+        $isFolder = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+        if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            if ($isFolder) { [IO.Directory]::Delete($entry, $false) } else { [IO.File]::Delete($entry) }
+        } elseif ($isFolder) {
+            Remove-TreeNoFollow $entry
+        } else {
+            if (($attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) { [IO.File]::SetAttributes($entry, [IO.FileAttributes]::Normal) }
+            [IO.File]::Delete($entry)
+        }
+    }
+    [IO.Directory]::Delete($Path, $false)
+}
+
+# Removes a folder (a staged or backed-up version, a leftover of an earlier version, a profile). Refused with a warning
+# when Get-FolderProblem finds a problem. True when the folder is gone.
+function Remove-FolderSafely([string]$Path, [string[]]$TrustedOwners) {
+    $problem = Get-FolderProblem $Path $TrustedOwners
+    if ($problem) {
+        Write-Warning "Not removed: $Path ($problem). Check it and remove it by hand."
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    try {
+        Remove-TreeNoFollow $Path
+        return $true
+    } catch {
+        Write-Warning "Could not remove ${Path}: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# A protected DACL (no inherited entries) from icacls-style grants "*<SID>:(OI)(CI)F", "M" or "RX".
+function New-FolderSecurity([string[]]$Grants) {
+    $security = New-Object System.Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $rights = @{ 'F' = 'FullControl'; 'M' = 'Modify'; 'RX' = 'ReadAndExecute' }
+    foreach ($grant in $Grants) {
+        if ($grant -notmatch '^\*(S-[0-9-]+):\(OI\)\(CI\)(F|M|RX)$') { throw "Unknown permission: $grant" }
+        $sid = New-Object System.Security.Principal.SecurityIdentifier($Matches[1])
+        $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sid, $rights[$Matches[2]], 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+    }
+    return $security
+}
+
+# A folder of the installer. A missing one is created WITH its permissions in one call: a new folder in C:\ would inherit
+# "Authenticated Users: Modify" for a moment, and a player could replace it with a junction or put a program into it. An
+# existing one must be a plain folder of SYSTEM or an administrator (Get-FolderProblem). Throws otherwise.
+function Initialize-ProtectedFolder([string]$Path, [string[]]$Grants, [string[]]$TrustedOwners) {
+    $problem = Get-FolderProblem $Path $TrustedOwners
+    if ($problem) { throw "$Path cannot be used: $problem. A player may have prepared it; check it and remove it by hand" }
+    if (-not (Test-Path -LiteralPath $Path)) {
+        $security = New-FolderSecurity $Grants
+        if ([IO.Directory].GetMethod('CreateDirectory', [Type[]]@([string], [System.Security.AccessControl.DirectorySecurity]))) {
+            [IO.Directory]::CreateDirectory($Path, $security) | Out-Null                        # Windows PowerShell 5.1
+        } else {
+            [IO.FileSystemAclExtensions]::Create((New-Object IO.DirectoryInfo($Path)), $security) # PowerShell 7
+        }
+    }
+    $problem = Get-FolderProblem $Path $TrustedOwners
+    if ($problem) { throw "$Path cannot be used: $problem" }
+}
+# ---- END safe folders ----
+
+# The folder of this run for the staged new version and the backup of the old one (security review of 3aa3619: they
+# were C:\ClubAgent.new and .old, in C:\, where every user may create a folder or a junction). A new folder with a random
+# name in the temp folder of this administrator or of SYSTEM, that only SYSTEM and Administrators may open.
+function New-PrivateWorkFolder([string[]]$TrustedOwners) {
+    $path = Join-Path ([IO.Path]::GetTempPath()) ('ccms-update-' + [Guid]::NewGuid().ToString('N'))
+    if (Test-Path -LiteralPath $path) { throw "$path exists already" }
+    Initialize-ProtectedFolder $path @("*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F") $TrustedOwners
+    if (Get-ChildItem -LiteralPath $path -Force) { throw "$path is not empty after it was created" }
+    return $path
 }
 
 # The agent settings: the shipped appsettings.json with the server URL of this run, and the parts that an administrator
@@ -494,19 +620,24 @@ $serviceName = "ClubAgent"
 $kioskUserName = "ClubUser"
 $exePath = Join-Path $AgentPath "Cms.Agent.Service.exe"
 $launcherExe = Join-Path $LauncherPath "Cms.Launcher.exe"
-$agentStage = "$AgentPath.new"
-$launcherStage = "$LauncherPath.new"
-$agentBackup = "$AgentPath.old"
-$launcherBackup = "$LauncherPath.old"
+# Program folders: only SYSTEM and Administrators may change them; the agent (LocalService) and the players read and run them
+$programGrants = @("*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-19:(OI)(CI)RX", "*S-1-5-32-545:(OI)(CI)RX")
+$trustedOwners = Get-TrustedOwners
+$script:workFolder = $null
+$script:workDisposable = $true
+$agentStage = $null
+$launcherStage = $null
+$agentBackup = $null
+$launcherBackup = $null
 $script:agentBackupReady = $false
 $script:launcherBackupReady = $false
 $script:watchTask = $null
 $script:stoppedSessions = @()
 $signedOut = 0
 
-# Step 1: Check the package and prepare everything while the old version still runs: the new files are staged in
-# C:\ClubAgent.new and C:\ClubLauncher.new (with the merged agent settings), the old files are copied to
-# C:\ClubAgent.old and C:\ClubLauncher.old. A failure here changes nothing on the PC.
+# Step 1: Check the package and prepare everything while the old version still runs: the new files are staged in a
+# private folder of this run (New-PrivateWorkFolder; with the merged agent settings), and the old files are copied there.
+# A failure here changes nothing on the PC (only new, empty program folders may stay).
 Write-Host "[1/8] Checking the package and preparing the files..." -ForegroundColor Yellow
 if (!(Test-Path (Join-Path $agentFiles "Cms.Agent.Service.exe"))) {
     Stop-Install "Agent files not found at: $agentFiles. Extract the agent zip and the launcher zip into the same folder. Nothing was changed."
@@ -521,23 +652,23 @@ if (Test-Path (Join-Path $AgentPath "appsettings.json")) {
     try { $previousConfig = [IO.File]::ReadAllText((Join-Path $AgentPath "appsettings.json")) | ConvertFrom-Json } catch { }
 }
 try {
-    foreach ($path in @($AgentPath, $LauncherPath)) {
-        if (!(Test-Path $path)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
-    }
-    New-ProtectedFolder $agentStage
+    # Never a junction, a symbolic link or a folder of a player (a new folder gets its permissions when it is created)
+    foreach ($path in @($AgentPath, $LauncherPath)) { Initialize-ProtectedFolder $path $programGrants $trustedOwners }
+    $script:workFolder = New-PrivateWorkFolder $trustedOwners
+    $agentStage = Join-Path $script:workFolder 'agent-new'
+    $launcherStage = Join-Path $script:workFolder 'launcher-new'
+    $agentBackup = Join-Path $script:workFolder 'agent-old'
+    $launcherBackup = Join-Path $script:workFolder 'launcher-old'
     if (-not (Copy-Folder $agentFiles $agentStage)) { throw "Could not copy $agentFiles to $agentStage" }
     Set-AgentConfig -Path (Join-Path $agentStage "appsettings.json") -PreviousConfig $previousConfig
     if ($haveLauncher) {
-        New-ProtectedFolder $launcherStage
         if (-not (Copy-Folder $launcherFiles $launcherStage)) { throw "Could not copy $launcherFiles to $launcherStage" }
     }
     if ($isUpdate) {
-        New-ProtectedFolder $agentBackup
         if (-not (Copy-Folder $AgentPath $agentBackup)) { throw "Could not back up $AgentPath to $agentBackup" }
         $script:agentBackupReady = $true
     }
     if (Test-Path $launcherExe) {
-        New-ProtectedFolder $launcherBackup
         if (-not (Copy-Folder $LauncherPath $launcherBackup)) { throw "Could not back up $LauncherPath to $launcherBackup" }
         $script:launcherBackupReady = $true
     }
@@ -550,31 +681,46 @@ if ($isUpdate) { Write-Host "   Update: the old version is backed up in $agentBa
 Write-Host "[2/8] Configuring the agent data folder..." -ForegroundColor Yellow
 $programDataConfigDir = Join-Path $env:ProgramData "ClubAgent"
 $privateDir = Join-Path $programDataConfigDir "private"
-foreach ($dir in @($programDataConfigDir, $privateDir)) {
-    if (!(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+$inboxDir = Join-Path $programDataConfigDir "inbox"
+$logsDir = Join-Path $programDataConfigDir "logs"
+# Every user may create a folder in C:\ProgramData: the data folder of the agent must not be a junction or a folder of a
+# player, and no junction may be inside it (the agent, LocalService, creates the folders below it, so it is trusted too).
+# A new folder gets the permissions below when it is created.
+$agentDataOwners = Get-TrustedOwners @('S-1-5-19')
+try {
+    Initialize-ProtectedFolder $programDataConfigDir @("*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-19:(OI)(CI)M", "*S-1-5-32-545:(OI)(CI)RX") $agentDataOwners
+    $inside = Find-ReparsePoint $programDataConfigDir
+    if ($inside) { throw "$inside is a junction or a symbolic link" }
+    foreach ($dir in @($privateDir, $inboxDir, $logsDir)) {
+        $problem = Get-FolderProblem $dir $agentDataOwners
+        if ($problem) { throw "$dir cannot be used: $problem" }
+    }
+} catch {
+    Stop-Install "The agent data folder cannot be used: $($_.Exception.Message). A player may have prepared it; check it and remove it by hand. Nothing was changed."
 }
+if (!(Test-Path $privateDir)) { New-Item -ItemType Directory -Path $privateDir -Force | Out-Null }
 
 # Permissions (SIDs, so this works on every Windows language):
 #   ClubAgent         SYSTEM, Administrators: full; agent (LocalService): modify; Users: read only.
 #                     Players can read the lock state and the PIN hash, but cannot create or change
 #                     files there (a planted state.json or staff-pin.json would unlock the PC).
 #   ClubAgent\private SYSTEM, Administrators: full; agent: modify; no access for players (device key, token).
-# /setowner: files left by older versions are owned by Administrators afterwards.
-icacls $programDataConfigDir /setowner "*S-1-5-32-544" /T /C | Out-Null
+# The folder first (then no player can add anything), then /setowner: files left by older versions are owned by
+# Administrators afterwards (the tree has no junction: checked above).
 icacls $programDataConfigDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
-icacls $privateDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the permissions of $programDataConfigDir" }
+icacls $programDataConfigDir /setowner "*S-1-5-32-544" /T /C | Out-Null
+icacls $privateDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the permissions of $privateDir" }
 #   ClubAgent\inbox   the lock screen drops a note of each emergency PIN unlock here; the agent sends it
 #                     to the server audit log. Users: create files only (WD = add file, this folder only);
 #                     OWNER RIGHTS (S-1-3-4): read permissions only, so a player cannot read, change or
 #                     delete the note afterwards.
-$inboxDir = Join-Path $programDataConfigDir "inbox"
 if (!(Test-Path $inboxDir)) { New-Item -ItemType Directory -Path $inboxDir -Force | Out-Null }
 icacls $inboxDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" "*S-1-5-32-545:(WD,S)" "*S-1-3-4:(OI)(IO)(RC)" | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the permissions of $inboxDir" }
 #   ClubAgent\logs    the text log of the agent (agent.log, at most 4 files of 1 MB): SYSTEM, Administrators: full;
 #                     agent: modify; no access for players.
-$logsDir = Join-Path $programDataConfigDir "logs"
 if (!(Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -Force | Out-Null }
 icacls $logsDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the permissions of $logsDir" }
@@ -635,6 +781,7 @@ $copyError = $null
 try {
     # Step 3: Stop the agent and the lock screen (its watchdog too: the scheduled task is off during the copy)
     Write-Host "[3/8] Stopping the agent and the lock screen..." -ForegroundColor Yellow
+    $script:workDisposable = $false # from here the backup in the work folder may be needed
     $script:watchTask = Get-ScheduledTask -TaskName 'ClubLauncherWatchdog' -ErrorAction SilentlyContinue
     if ($script:watchTask) { $script:watchTask | Disable-ScheduledTask -ErrorAction SilentlyContinue | Out-Null }
     Stop-Agent $serviceName
@@ -662,9 +809,11 @@ if ($copyError) {
 
 # Program folders: C:\ClubAgent and C:\ClubLauncher inherit "Authenticated Users: Modify" from C:\, so a
 # player could replace the service program or its settings. Only SYSTEM and Administrators may change them;
-# the agent (LocalService) and the players may read and run them.
+# the agent (LocalService) and the players may read and run them (also for a folder of an older install).
 foreach ($path in @($AgentPath, $LauncherPath)) {
-    icacls $path /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)RX" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
+    $problem = Get-FolderProblem $path $trustedOwners
+    if ($problem) { Write-Warning "The permissions of $path were not changed: $problem"; continue }
+    icacls $path /inheritance:r /grant:r @programGrants | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Warning "Could not restrict the permissions of $path" }
 }
 
@@ -856,10 +1005,14 @@ if ($KioskMode) {
 }
 
 # The lock screens that this run stopped come back with the new version (the sessions of ClubUser are signed out; the
-# automatic sign-in starts the new lock screen), and the staged files and the backup are removed.
+# automatic sign-in starts the new lock screen), and the work folder (staged files, backup) is removed. The staging
+# and backup folders of older versions in C:\ are removed too, but never a junction or a folder of a player.
 Resume-LockScreens
-foreach ($dir in @($agentStage, $launcherStage, $agentBackup, $launcherBackup)) {
-    if (Test-Path $dir) { Remove-Item -Path $dir -Recurse -Force -ErrorAction SilentlyContinue }
+Remove-FolderSafely $script:workFolder $trustedOwners | Out-Null
+foreach ($old in @("$AgentPath.new", "$AgentPath.old", "$LauncherPath.new", "$LauncherPath.old")) {
+    if (Test-Path -LiteralPath $old) {
+        if (Remove-FolderSafely $old $trustedOwners) { Write-Host "   Removed $old (left by an older version)" -ForegroundColor Gray }
+    }
 }
 $launcherVersion = $null
 if (Test-Path $launcherExe) { $launcherVersion = (Get-Item $launcherExe).VersionInfo.FileVersion }

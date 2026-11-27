@@ -28,6 +28,129 @@ function Test-IsAdmin {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+# ---- BEGIN safe folders (the same text in install-client.ps1, install-server.ps1 and uninstall-kiosk.ps1) ----
+# Security review of 3aa3619: every user may create folders in C:\ and C:\ProgramData, and the player owns the profile of
+# ClubUser. A junction or a symbolic link there in place of a folder of the installer made the installer delete or change
+# ANOTHER folder as SYSTEM: Windows PowerShell 5.1 follows a junction in Remove-Item -Recurse, and icacls changes the
+# target of a link. So the installers never delete, copy into or change the permissions of a folder that is a reparse
+# point (junction, symbolic link, mount point) or that belongs to somebody other than SYSTEM or an administrator, and a
+# delete never enters a reparse point inside a folder: the link itself is removed, its target stays.
+
+# The reason why an existing folder must not be used, or $null. Only the attributes and the owner SID: tested by the
+# installer self-check.
+function Get-UnsafeFolderReason([IO.FileAttributes]$Attributes, [string]$OwnerSid, [string[]]$TrustedOwners) {
+    if (($Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return 'it is a junction or a symbolic link' }
+    if ([string]::IsNullOrEmpty($OwnerSid)) { return 'its owner cannot be read' }
+    if ($TrustedOwners -notcontains $OwnerSid) { return "its owner ($OwnerSid) is not SYSTEM or an administrator" }
+    return $null
+}
+
+# SYSTEM, Administrators, TrustedInstaller, the account of this run, the members of the local Administrators group, and
+# the extra SIDs (for example LocalService for the data folder of the agent).
+function Get-TrustedOwners([string[]]$Extra = @()) {
+    $list = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($sid in (@('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464') + $Extra)) { $list.Add($sid) }
+    $self = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    if ($self) { $list.Add($self.Value) }
+    try {
+        foreach ($member in @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop)) { if ($member.SID) { $list.Add($member.SID.Value) } }
+    } catch {
+        # Get-LocalGroupMember fails on a group with an orphaned member: then only the accounts above count
+    }
+    return ,$list.ToArray()
+}
+
+# The reason why this path must not be used, or $null (it may be used, or it does not exist).
+function Get-FolderProblem([string]$Path, [string[]]$TrustedOwners) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return $null }
+    $owner = $null
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+        try { $owner = (Get-Acl -LiteralPath $Path).GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { $owner = $null }
+    }
+    return Get-UnsafeFolderReason $item.Attributes $owner $TrustedOwners
+}
+
+# The first reparse point inside a folder (the walk never enters one), or $null.
+function Find-ReparsePoint([string]$Path) {
+    foreach ($entry in [IO.Directory]::GetFileSystemEntries($Path)) {
+        $attributes = [IO.File]::GetAttributes($entry)
+        if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $entry }
+        if (($attributes -band [IO.FileAttributes]::Directory) -ne 0) {
+            $inner = Find-ReparsePoint $entry
+            if ($inner) { return $inner }
+        }
+    }
+    return $null
+}
+
+# Deletes a folder and its content without entering a reparse point: a junction or a link inside is removed as a link.
+function Remove-TreeNoFollow([string]$Path) {
+    foreach ($entry in [IO.Directory]::GetFileSystemEntries($Path)) {
+        $attributes = [IO.File]::GetAttributes($entry)
+        $isFolder = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+        if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            if ($isFolder) { [IO.Directory]::Delete($entry, $false) } else { [IO.File]::Delete($entry) }
+        } elseif ($isFolder) {
+            Remove-TreeNoFollow $entry
+        } else {
+            if (($attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) { [IO.File]::SetAttributes($entry, [IO.FileAttributes]::Normal) }
+            [IO.File]::Delete($entry)
+        }
+    }
+    [IO.Directory]::Delete($Path, $false)
+}
+
+# Removes a folder (a staged or backed-up version, a leftover of an earlier version, a profile). Refused with a warning
+# when Get-FolderProblem finds a problem. True when the folder is gone.
+function Remove-FolderSafely([string]$Path, [string[]]$TrustedOwners) {
+    $problem = Get-FolderProblem $Path $TrustedOwners
+    if ($problem) {
+        Write-Warning "Not removed: $Path ($problem). Check it and remove it by hand."
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    try {
+        Remove-TreeNoFollow $Path
+        return $true
+    } catch {
+        Write-Warning "Could not remove ${Path}: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# A protected DACL (no inherited entries) from icacls-style grants "*<SID>:(OI)(CI)F", "M" or "RX".
+function New-FolderSecurity([string[]]$Grants) {
+    $security = New-Object System.Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $rights = @{ 'F' = 'FullControl'; 'M' = 'Modify'; 'RX' = 'ReadAndExecute' }
+    foreach ($grant in $Grants) {
+        if ($grant -notmatch '^\*(S-[0-9-]+):\(OI\)\(CI\)(F|M|RX)$') { throw "Unknown permission: $grant" }
+        $sid = New-Object System.Security.Principal.SecurityIdentifier($Matches[1])
+        $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sid, $rights[$Matches[2]], 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+    }
+    return $security
+}
+
+# A folder of the installer. A missing one is created WITH its permissions in one call: a new folder in C:\ would inherit
+# "Authenticated Users: Modify" for a moment, and a player could replace it with a junction or put a program into it. An
+# existing one must be a plain folder of SYSTEM or an administrator (Get-FolderProblem). Throws otherwise.
+function Initialize-ProtectedFolder([string]$Path, [string[]]$Grants, [string[]]$TrustedOwners) {
+    $problem = Get-FolderProblem $Path $TrustedOwners
+    if ($problem) { throw "$Path cannot be used: $problem. A player may have prepared it; check it and remove it by hand" }
+    if (-not (Test-Path -LiteralPath $Path)) {
+        $security = New-FolderSecurity $Grants
+        if ([IO.Directory].GetMethod('CreateDirectory', [Type[]]@([string], [System.Security.AccessControl.DirectorySecurity]))) {
+            [IO.Directory]::CreateDirectory($Path, $security) | Out-Null                        # Windows PowerShell 5.1
+        } else {
+            [IO.FileSystemAclExtensions]::Create((New-Object IO.DirectoryInfo($Path)), $security) # PowerShell 7
+        }
+    }
+    $problem = Get-FolderProblem $Path $TrustedOwners
+    if ($problem) { throw "$Path cannot be used: $problem" }
+}
+# ---- END safe folders ----
+
 if (-not (Test-IsAdmin)) {
     Write-Error "Please run this script as Administrator."
     exit 1
@@ -39,11 +162,25 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Project by Volodymyr Shabat" -ForegroundColor DarkGray
 Write-Host ""
 
-# Step 1: Create installation directory
+# Step 1: Create installation directory. C:\ClubServer and C:\ProgramData\PCClub are in folders where every user may
+# create a folder: they must not be a junction or a folder of another user (the server runs as LocalSystem). The program
+# folder: only SYSTEM and Administrators may change it (it inherited "Authenticated Users: Modify" from C:\ before).
 Write-Host "[1/5] Creating installation directory..." -ForegroundColor Yellow
-if (!(Test-Path $InstallPath)) {
-    New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
+$trustedOwners = Get-TrustedOwners
+try {
+    Initialize-ProtectedFolder $InstallPath @("*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-32-545:(OI)(CI)RX") $trustedOwners
+    Initialize-ProtectedFolder $DataPath @("*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F") $trustedOwners
+    # An older install left the program folder open to every user: no junction inside it may take the copy elsewhere
+    foreach ($folder in @($InstallPath, $DataPath)) {
+        $inside = Find-ReparsePoint $folder
+        if ($inside) { throw "$inside is a junction or a symbolic link; check it and remove it by hand" }
+    }
+} catch {
+    Write-Host "ERROR: $($_.Exception.Message). Nothing was changed." -ForegroundColor Red
+    exit 1
 }
+icacls $InstallPath /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not restrict the permissions of $InstallPath" }
 
 $appsettings = Join-Path $InstallPath "appsettings.json"
 
@@ -85,7 +222,6 @@ Write-Host "[3/5] Configuring server..." -ForegroundColor Yellow
 
 # Data directory: absolute path (a Windows service starts in C:\Windows\System32). The server copies a
 # cms.db of an earlier version from there or from the install folder on the first start.
-New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
 icacls $DataPath /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Warning "Could not restrict the permissions of $DataPath" }
 
