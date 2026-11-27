@@ -1929,3 +1929,7 @@ body::after {
 /* ===== Loyalty tiers (phase 8) ===== */
 .loyalty-row { flex-wrap: wrap; }
 .loyalty-row .rule-times .form-input { max-width: 130px; }
+
+/* ===== Club game-account pool (phase 8) ===== */
+.mono-cell { font-family: var(--font-mono); letter-spacing: 0.04em; }
+.account-security { border-left: 3px solid var(--neon-yellow); }

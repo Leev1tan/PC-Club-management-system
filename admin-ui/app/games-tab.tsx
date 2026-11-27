@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, errorText, getJson, postJson } from './api';
 import { fmt, t } from './i18n';
+import { accountPlatforms, platformName } from './accounts-tab';
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
 type Zone = { id: string; name: string; color: string };
@@ -9,7 +10,7 @@ type Kind = 'exe' | 'steam' | 'url';
 export type Game = {
   id: string; name: string; category: string; kind: Kind; exePath: string | null; arguments: string | null; workingDirectory: string | null;
   steamAppId: number | null; launchUrl: string | null; processName: string | null; allZones: boolean; zoneIds: string[];
-  color: string; initials: string; sortOrder: number; isActive: boolean; updatedUtc: string; plays: number;
+  color: string; initials: string; sortOrder: number; isActive: boolean; updatedUtc: string; plays: number; accountPlatform?: string | null;
 };
 
 // The same palette as the server (Cms.Shared.GameTile.Palette); new entries get a colour from the name
@@ -76,7 +77,7 @@ export function GamesTab({ zones, toast }: { zones: Zone[]; toast: ToastFn }) {
               {games.map(g => (
                 <tr key={g.id} className={g.isActive ? '' : 'row-muted'}>
                   <td><GameTile game={g} /></td>
-                  <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{g.name}<div className="user-chip">{g.category}</div></td>
+                  <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{g.name}<div className="user-chip">{g.category}{g.accountPlatform ? ` · 🔑 ${platformName(g.accountPlatform)}` : ''}</div></td>
                   <td><span className="badge badge-blue">{t.games.kinds[g.kind]}</span><div className="game-launch" title={launchText(g)}>{launchText(g)}</div></td>
                   <td>{zoneNames(g)}</td>
                   <td>{g.sortOrder}</td>
@@ -118,6 +119,7 @@ function GameDialog({ game, zones, categories, toast, onClose, onDone }: {
   const [color, setColor] = useState<string | null>(game?.color ?? null);
   const [sortOrder, setSortOrder] = useState(String(game?.sortOrder ?? 0));
   const [isActive, setIsActive] = useState(game?.isActive ?? true);
+  const [accountPlatform, setAccountPlatform] = useState(game?.accountPlatform ?? '');
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
@@ -126,6 +128,7 @@ function GameDialog({ game, zones, categories, toast, onClose, onDone }: {
       name, category, kind, exePath, arguments: args, workingDirectory: workdir,
       steamAppId: steamAppId === '' ? null : parseInt(steamAppId, 10), launchUrl, processName,
       allZones, zoneIds: allZones ? [] : zoneIds, color, sortOrder: parseInt(sortOrder, 10) || 0, isActive,
+      accountPlatform: accountPlatform || null,
     };
     const res = await postJson(game ? `/api/games/${game.id}` : '/api/games', body, game ? 'PUT' : 'POST');
     setBusy(false);
@@ -199,6 +202,14 @@ function GameDialog({ game, zones, categories, toast, onClose, onDone }: {
           </div>
           <div className="form-group"><label className="form-label" htmlFor="game-order">{t.games.sortOrder}</label>
             <input id="game-order" className="form-input" type="number" value={sortOrder} onChange={e => setSortOrder(e.target.value)} /></div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">{t.accounts.gamePlatform}</label>
+          <select className="form-select" value={accountPlatform} onChange={e => setAccountPlatform(e.target.value)}>
+            <option value="">{t.accounts.gamePlatformNone}</option>
+            {accountPlatforms.map(p => <option key={p} value={p}>{platformName(p)}</option>)}
+          </select>
+          <div className="form-hint">{t.accounts.gamePlatformHint}</div>
         </div>
         <label className="check-row"><input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} /> {t.games.active}</label>
 

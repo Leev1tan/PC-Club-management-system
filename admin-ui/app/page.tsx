@@ -13,6 +13,7 @@ import { GamesTab } from './games-tab';
 import { LoginLockouts } from './lockouts';
 import { CheckInDialog, ReservationsTab } from './reservations-tab';
 import { EventsTab, PcEvent } from './events-tab';
+import { AccountsTab } from './accounts-tab';
 import { PcReservation } from './reservations';
 import { OrderQueue, OrdersTab, orderChime } from './orders-tab';
 import { PowerAction, PowerDialog, PowerTarget } from './power-dialog';
@@ -53,7 +54,7 @@ type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' }
 type DemoInfo = { enabled: boolean; resetIntervalHours: number | null; lastResetUtc: string | null; nextResetUtc: string | null };
 
 // ===== Tab IDs =====
-type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'reservations' | 'events' | 'orders' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'games' | 'analytics' | 'audit' | 'staff' | 'settings';
+type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'reservations' | 'events' | 'accounts' | 'orders' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'games' | 'analytics' | 'audit' | 'staff' | 'settings';
 type Need = 'any' | 'frontDesk' | 'management' | 'owner';
 
 // Each tab is shown only to the roles that may use it (the server checks every request again)
@@ -71,6 +72,7 @@ const allTabs: { id: Tab; label: string; icon: string; section?: string; need: N
   { id: 'users', label: t.nav.users, icon: '👥', need: 'frontDesk' },
   { id: 'tariffs', label: t.nav.tariffs, icon: '💰', need: 'frontDesk' },
   { id: 'games', label: t.nav.games, icon: '🎮', need: 'management' },
+  { id: 'accounts', label: t.nav.accounts, icon: '🔑', need: 'frontDesk' },
   { id: 'analytics', label: t.analytics.title, icon: '📈', section: t.nav.sectionAnalytics, need: 'management' },
   { id: 'audit', label: t.nav.audit, icon: '📜', need: 'management' },
   { id: 'staff', label: t.nav.staff, icon: '🧑‍💼', section: t.nav.sectionAdmin, need: 'owner' },
@@ -372,6 +374,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'shift': return <ShiftTab can={can} toast={toast} onChanged={fetchAll} />;
       case 'stock': return <StockTab can={can} toast={toast} />;
       case 'games': return <GamesTab zones={zones} toast={toast} />;
+      case 'accounts': return <AccountsTab toast={toast} management={can.management} />;
       case 'analytics': return <AnalyticsTab />;
       case 'audit': return <AuditTab owner={can.owner} />;
       case 'staff': return <StaffTab me={me} toast={toast} />;

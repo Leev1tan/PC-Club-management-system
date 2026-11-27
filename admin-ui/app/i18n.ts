@@ -34,7 +34,7 @@ export const uk = {
 
   nav: {
     dashboard: 'Дашборд', map: 'Карта ПК', sessions: 'Сесії', devices: 'Пристрої', users: 'Гравці', tariffs: 'Тарифи',
-    pos: 'Каса / Бар', shift: 'Зміна', stock: 'Склад', finance: 'Фінанси', audit: 'Журнал дій', staff: 'Персонал', settings: 'Налаштування', games: 'Ігри', reservations: 'Бронювання', orders: 'Замовлення', events: 'Події',
+    pos: 'Каса / Бар', shift: 'Зміна', stock: 'Склад', finance: 'Фінанси', audit: 'Журнал дій', staff: 'Персонал', settings: 'Налаштування', games: 'Ігри', reservations: 'Бронювання', orders: 'Замовлення', events: 'Події', accounts: 'Акаунти ігор',
     sectionMain: 'ОСНОВНЕ', sectionDesk: 'КАСА', sectionManage: 'УПРАВЛІННЯ', sectionAnalytics: 'АНАЛІТИКА', sectionAdmin: 'АДМІНІСТРУВАННЯ',
     logout: 'Вийти',
   },
@@ -734,6 +734,28 @@ export const uk = {
     heldWarning: 'Цей ПК зайнятий для події «{name}» о {time}. Сесії гравців події запускає сама подія.',
   },
 
+  accounts: {
+    title: 'Акаунти ігор',
+    hint: 'Пул клубних акаунтів платформ (Steam, Epic ...). Коли гравець під час сесії відкриває гру, якій потрібен клубний акаунт, ПК отримує вільний акаунт цієї платформи до кінця сесії.',
+    poolTitle: 'Пул акаунтів і безпека',
+    security: 'Логін і секрет зберігаються зашифрованими. Сервер ніколи не показує їх тут: лише замаскований логін і чи є секрет. Секрет отримує тільки агент ПК, якому видано акаунт, один раз на видачу. Акаунти з двоетапною перевіркою (Steam Guard) не можуть входити автоматично. Перед використанням спільних акаунтів перевірте умови кожної платформи.',
+    add: '+ Новий акаунт', addTitle: '🔑 Новий клубний акаунт', empty: 'Клубних акаунтів ще немає', showRemoved: 'Показати видалені',
+    inUse: 'Зайнято: {n} з {total}',
+    col: { platform: 'Платформа', login: 'Логін', secret: 'Секрет', state: 'Стан', pc: 'Де використовується', leases: 'Видач' },
+    platforms: { steam: 'Steam', epic: 'Epic Games', battlenet: 'Battle.net', riot: 'Riot Client', ea: 'EA app', ubisoft: 'Ubisoft Connect', gog: 'GOG Galaxy', other: 'Інша' },
+    stored: 'збережено', noSecret: 'немає', since: 'від {when}', removed: 'видалено', off: 'вимкнено', used: 'зайнятий', free: 'вільний',
+    leasedAt: 'з {when}', delivered: 'вхід виконано', notDelivered: 'ще не передано',
+    release: 'Звільнити', rotate: 'Новий секрет', setSecret: 'Задати секрет', turnOff: 'Вимкнути', turnOn: 'Увімкнути',
+    confirmRemove: 'Видалити акаунт {login}? Зашифровані логін і секрет буде знищено; історія видач залишиться.',
+    confirmRelease: 'Звільнити акаунт {login} з {pc}? Клієнт на ПК може лишатися в системі до кінця сесії.',
+    done: { release: 'Акаунт звільнено ✓', on: 'Акаунт увімкнено ✓', off: 'Акаунт вимкнено ✓', remove: 'Акаунт видалено ✓' } as Record<string, string>,
+    login: 'Логін', secret: 'Секрет (пароль)', newSecret: 'Новий секрет (пароль)', added: 'Акаунт додано ✓', rotated: 'Секрет змінено ✓',
+    secretHint: 'Секрет лише записується: після збереження його не показує жоден екран і жодна відповідь сервера.',
+    twoFactor: 'Не додавайте акаунти з двоетапною перевіркою: клієнт не зможе увійти без коду. Система не обходить захист платформ.',
+    rotateTitle: '🔑 Новий секрет для {login}', gamePlatform: 'Клубний акаунт для гри', gamePlatformNone: 'Не потрібен (власний акаунт гравця)',
+    gamePlatformHint: 'Коли гравець відкриває гру, ПК отримує вільний клубний акаунт цієї платформи до кінця сесії (вкладка «Акаунти ігор»).',
+  },
+
   zones: {
     title: '🗺️ Зони',
     add: '+ Додати зону',
@@ -884,6 +906,14 @@ export const uk = {
   },
 
   errors: {
+    account_not_found: 'Акаунт не знайдено',
+    account_bad_platform: 'Оберіть платформу: {0}.',
+    account_bad_login: 'Логін — один рядок від 1 до 100 символів.',
+    account_bad_secret: 'Секрет — один рядок від 1 до 200 символів.',
+    account_login_exists: 'Ця платформа вже має акаунт із таким логіном.',
+    account_removed: 'Акаунт видалено.',
+    account_not_leased: 'Зараз жоден ПК не використовує цей акаунт.',
+    game_bad_account_platform: 'Платформа клубного акаунта — порожня або одна з: {0}.',
     bad_loyalty_settings: 'Перевірте рівні: період 7–365 днів, до 6 рівнів, назва 1–20 символів без повторів, різні суми витрат, відсотки 0–50.',
     event_not_found: 'Подію не знайдено',
     event_bad_name: 'Введіть назву: від 1 до 80 символів.',
@@ -1069,7 +1099,7 @@ export const en: typeof uk = {
 
   nav: {
     dashboard: 'Dashboard', map: 'PC map', sessions: 'Sessions', devices: 'Devices', users: 'Players', tariffs: 'Tariffs',
-    pos: 'Checkout / Bar', shift: 'Shift', stock: 'Stock', finance: 'Finance', audit: 'Audit log', staff: 'Staff', settings: 'Settings', games: 'Games', reservations: 'Reservations', orders: 'Orders', events: 'Events',
+    pos: 'Checkout / Bar', shift: 'Shift', stock: 'Stock', finance: 'Finance', audit: 'Audit log', staff: 'Staff', settings: 'Settings', games: 'Games', reservations: 'Reservations', orders: 'Orders', events: 'Events', accounts: 'Game accounts',
     sectionMain: 'MAIN', sectionDesk: 'DESK', sectionManage: 'MANAGEMENT', sectionAnalytics: 'ANALYTICS', sectionAdmin: 'ADMINISTRATION',
     logout: 'Sign out',
   },
@@ -1769,6 +1799,28 @@ export const en: typeof uk = {
     heldWarning: 'This PC is booked for the event «{name}» at {time}. The event itself starts the sessions of its players.',
   },
 
+  accounts: {
+    title: 'Game accounts',
+    hint: 'The pool of club accounts of the platforms (Steam, Epic ...). When a player opens a game that needs a club account during a session, the PC gets a free account of that platform until the session ends.',
+    poolTitle: 'Account pool and security',
+    security: 'The login and the secret are stored encrypted. The server never shows them here: only the masked login and whether a secret is stored. Only the agent of the PC that has the account gets the secret, once per lease. Accounts with two-step verification (Steam Guard) cannot log in automatically. Check the terms of each platform before you use shared accounts.',
+    add: '+ New account', addTitle: '🔑 New club account', empty: 'No club accounts yet', showRemoved: 'Show removed ones',
+    inUse: 'In use: {n} of {total}',
+    col: { platform: 'Platform', login: 'Login', secret: 'Secret', state: 'State', pc: 'Used on', leases: 'Leases' },
+    platforms: { steam: 'Steam', epic: 'Epic Games', battlenet: 'Battle.net', riot: 'Riot Client', ea: 'EA app', ubisoft: 'Ubisoft Connect', gog: 'GOG Galaxy', other: 'Other' },
+    stored: 'stored', noSecret: 'none', since: 'since {when}', removed: 'removed', off: 'off', used: 'in use', free: 'free',
+    leasedAt: 'since {when}', delivered: 'logged in', notDelivered: 'not handed out yet',
+    release: 'Free it', rotate: 'New secret', setSecret: 'Set the secret', turnOff: 'Turn off', turnOn: 'Turn on',
+    confirmRemove: 'Remove the account {login}? The encrypted login and secret are deleted; the history of leases stays.',
+    confirmRelease: 'Free the account {login} from {pc}? The client on the PC can stay logged in until the session ends.',
+    done: { release: 'Account freed ✓', on: 'Account on ✓', off: 'Account off ✓', remove: 'Account removed ✓' } as Record<string, string>,
+    login: 'Login', secret: 'Secret (password)', newSecret: 'New secret (password)', added: 'Account added ✓', rotated: 'Secret changed ✓',
+    secretHint: 'The secret is write-only: after you save it, no screen and no answer of the server shows it.',
+    twoFactor: 'Do not add accounts with two-step verification: the client cannot log in without the code. The system does not bypass the protection of a platform.',
+    rotateTitle: '🔑 New secret for {login}', gamePlatform: 'Club account for the game', gamePlatformNone: 'Not needed (the player\'s own account)',
+    gamePlatformHint: 'When a player opens the game, the PC gets a free club account of this platform until the session ends (tab "Game accounts").',
+  },
+
   zones: {
     title: '🗺️ Zones',
     add: '+ Add a zone',
@@ -1919,6 +1971,14 @@ export const en: typeof uk = {
   },
 
   errors: {
+    account_not_found: 'Account not found',
+    account_bad_platform: 'Choose a platform: {0}.',
+    account_bad_login: 'The login must be one line of 1 to 100 characters.',
+    account_bad_secret: 'The secret must be one line of 1 to 200 characters.',
+    account_login_exists: 'This platform already has an account with this login.',
+    account_removed: 'The account was removed.',
+    account_not_leased: 'No PC uses this account now.',
+    game_bad_account_platform: 'The club account platform must be empty or one of: {0}.',
     bad_loyalty_settings: 'Check the tiers: a period of 7 to 365 days, at most 6 tiers, names of 1 to 20 characters without repeats, different spends, percents 0 to 50.',
     event_not_found: 'Event not found',
     event_bad_name: 'Enter a name: 1 to 80 characters.',
