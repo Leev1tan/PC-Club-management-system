@@ -361,6 +361,11 @@ function Set-AgentConfig([string]$Path, $PreviousConfig) {
             Write-Host "   Kept the $section settings of the earlier install" -ForegroundColor Gray
         }
     }
+    # The agent trusts only this program on its pipe (club accounts, lock screen status): the lock screen of this install
+    if (-not $config.AccountPool) {
+        $config | Add-Member -NotePropertyName AccountPool -NotePropertyValue ([pscustomobject]@{ Platforms = [pscustomobject]@{} }) -Force
+    }
+    $config.AccountPool | Add-Member -NotePropertyName LauncherPath -NotePropertyValue (Join-Path $LauncherPath "Cms.Launcher.exe") -Force
     $config | ConvertTo-Json -Depth 8 | Set-Content -Path $Path -Encoding UTF8
 }
 
