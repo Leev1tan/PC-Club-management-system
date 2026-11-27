@@ -85,11 +85,39 @@ public static class WindowsParts
 }
 
 /// <summary>
-/// A visible top-level window of the player's desktop, as the lock screen sees it: its process, the full path of the
-/// program (null when it cannot be read), whether the process runs as the same Windows user as the lock screen, and its
-/// Windows session.
+/// The z-order band of a window (user32 GetWindowBand, Windows 8 and later; the ZBID_* values). Every window of a band
+/// above the desktop band is above every window of the desktop band, also above a top-most one, and SetWindowPos cannot
+/// move a window into another band. The lock screen is a top-most window of the desktop band. Windows re-test
+/// 2026-11-27 late, defect 1: the "Open with" dialog of Windows 11 (OpenWith.exe, a program of the player) is in band 4,
+/// so it stayed above the locked screen and kept the keyboard; EnumWindows does not return such windows.
 /// </summary>
-public sealed record GuardWindow(nint Handle, int ProcessId, string? ImagePath, bool SameUser, int SessionId, bool TopMost, bool Minimized);
+public static class WindowBands
+{
+    /// <summary>ZBID_DEFAULT: not known (GetWindowBand failed, or Windows 7): the window counts as a desktop window.</summary>
+    public const int Unknown = 0;
+    /// <summary>ZBID_DESKTOP: the windows of normal programs and the lock screen.</summary>
+    public const int Desktop = 1;
+
+    public static bool IsAboveDesktop(int band) => band > Desktop;
+}
+
+/// <summary>
+/// A visible top-level window of the player's desktop, as the lock screen sees it: its process, the full path of the
+/// program (null when it cannot be read), whether the process runs as the same Windows user as the lock screen, its
+/// Windows session, its z-order band (WindowBands) and whether Windows hides it (DWM cloaked: not drawn).
+/// </summary>
+public sealed record GuardWindow(nint Handle, int ProcessId, string? ImagePath, bool SameUser, int SessionId, bool TopMost, bool Minimized,
+    int Band = WindowBands.Unknown, bool Cloaked = false)
+{
+    /// <summary>In a band above the desktop band: above the lock screen, and a push-down cannot move it below.</summary>
+    public bool AboveDesktopBand => WindowBands.IsAboveDesktop(Band);
+
+    /// <summary>
+    /// The window covers the lock screen: it is shown (not minimized) and top-most, or shown in a band above the desktop
+    /// band. A window of a higher band that Windows hides (cloaked) covers nothing.
+    /// </summary>
+    public bool Covers => !Minimized && (TopMost || (AboveDesktopBand && !Cloaked));
+}
 
 /// <summary>The lock screen itself: its process, Windows session and program (the watchdog is the same program).</summary>
 public sealed record GuardContext(int OwnProcessId, int OwnSessionId, string? OwnImagePath, WindowsFolders Folders);
@@ -143,6 +171,14 @@ public static class LockScreenGuard
     public static bool IsForeign(GuardWindow window, GuardContext context) =>
         window.ProcessId > 4 && window.ProcessId != context.OwnProcessId && window.SameUser && window.SessionId == context.OwnSessionId &&
         !LauncherPath.Same(window.ImagePath, context.OwnImagePath) && !WindowsParts.IsTrusted(window.ImagePath, context.Folders);
+
+    /// <summary>
+    /// The guard looks at this window. The lock screen lists the top-level windows of every band (FindWindowEx), also the
+    /// ones that EnumWindows leaves out. Of those, a window of a higher band that Windows hides (cloaked: a suspended or
+    /// hidden window of a Store app or of the shell) is left out: it covers nothing, and EnumWindows never returned it, so
+    /// the guard does not close programs that it left alone before.
+    /// </summary>
+    public static bool Sees(GuardWindow window) => !(window.AboveDesktopBand && window.Cloaked);
 }
 
 /// <summary>What the guard does in this tick: push down (no longer top-most, minimized), close (WM_CLOSE), end the process.</summary>
@@ -159,9 +195,13 @@ public sealed record GuardPlan(IReadOnlyList<nint> PushDown, IReadOnlyList<nint>
 ///    the lock screen 1 s or more after the push-down (the push-down did not work), or when it comes back above the lock
 ///    screen for the 3rd time. Normal windows (a paused game) stay. 2 s after WM_CLOSE its process is ended only when the
 ///    window is still ABOVE the lock screen; a window that went below stays (a game with an overlay window keeps running).
+///    A shown foreign window in a band above the desktop band (the Windows 11 "Open with" dialog, re-test 2026-11-27 late,
+///    defect 1) gets WM_CLOSE at once: no push-down can move it below the lock screen. It is ended 2 s later when it is
+///    still there.
 ///  - ClosePrograms: every foreign window gets WM_CLOSE; a window that is still there 2 s later ends its process.
 ///  - A process is ended once; a process id is forgotten when it has no window any more (Windows uses ids again).
-/// Off (unlocked) forgets everything: nothing is closed or ended after the PC is unlocked.
+/// Off (unlocked) forgets everything: nothing is closed or ended after the PC is unlocked. PushDown mode (not kiosk)
+/// never closes: a window of a higher band is only minimized there.
 /// </summary>
 public sealed class ForeignWindowCloser
 {
@@ -197,12 +237,12 @@ public sealed class ForeignWindowCloser
         var presentProcesses = new HashSet<int>();
         foreach (var w in windows)
         {
-            if (!LockScreenGuard.IsForeign(w, context)) continue;
+            if (!LockScreenGuard.Sees(w) || !LockScreenGuard.IsForeign(w, context)) continue;
             present.Add(w.Handle);
             presentProcesses.Add(w.ProcessId);
             if (!_windows.TryGetValue(w.Handle, out var seen) || seen.ProcessId != w.ProcessId)
                 _windows[w.Handle] = seen = new Seen { ProcessId = w.ProcessId };
-            var above = w.TopMost && !w.Minimized;
+            var above = w.Covers;
             if (!above) seen.PushedDownUtc = null; // the push-down holds; when it comes back it is pushed down again (counted)
 
             if (seen.CloseSentUtc is { } sent)
@@ -225,7 +265,7 @@ public sealed class ForeignWindowCloser
                     break;
                 case GuardMode.KeepPrograms:
                     if (!above) break;
-                    if (seen.PushDowns >= MaxPushDowns || (seen.PushedDownUtc is { } pushed && now - pushed >= CloseAfterPushDown))
+                    if (w.AboveDesktopBand || seen.PushDowns >= MaxPushDowns || (seen.PushedDownUtc is { } pushed && now - pushed >= CloseAfterPushDown))
                     {
                         seen.CloseSentUtc = now;
                         close.Add(w.Handle);

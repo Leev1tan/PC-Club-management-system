@@ -13,7 +13,8 @@ namespace Cms.Launcher;
 /// While the PC is locked, the lock screen stays above everything and keeps the keyboard. The decisions are in Cms.Client
 /// (LockScreenGuard, ForeignWindowCloser, GuardFocus, WindowsParts; unit-tested); this part only calls Windows. Every
 /// second, only while locked (a running session is never touched):
-///  - it deals with the windows of other programs of the player: push down, close, end (ForeignWindowCloser);
+///  - it deals with the windows of other programs of the player: push down, close, end (ForeignWindowCloser), also the
+///    windows of the bands above the desktop band, which EnumWindows does not list (TopLevelWindows);
 ///  - it puts its window on top of the top-most band;
 ///  - it gives the foreground to its own window that must have it: the open dialog (staff PIN, message) or the main
 ///    window. From another program it takes the foreground with AttachThreadInput (see BringToFront).
@@ -41,6 +42,10 @@ public partial class MainWindow
     private delegate bool EnumWindowsProc(nint hwnd, nint lParam);
 
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "FindWindowExW")]
+    private static extern nint FindWindowEx(nint parent, nint childAfter, string? className, string? windowName);
+    [DllImport("user32.dll")] private static extern bool GetWindowBand(nint hwnd, out uint band); // Windows 8 and later, not documented
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint hwnd, int attribute, out int value, int size);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindowEnabled(nint hwnd);
     [DllImport("user32.dll")] private static extern bool IsIconic(nint hwnd);
@@ -216,22 +221,87 @@ public partial class MainWindow
         ShowWindowAsync(hwnd, SwMinimize);
     }
 
-    /// <summary>Every visible top-level window of the desktop except the own ones, with the facts of its process.</summary>
+    /// <summary>
+    /// Every visible top-level window of the desktop except the own ones, with the facts of its process, its band and
+    /// whether Windows hides it. The decisions (which ones to look at, close or end) are in ForeignWindowCloser.
+    /// </summary>
     private List<GuardWindow> DesktopWindows(Dictionary<uint, ProcessFacts> facts)
     {
         var windows = new List<GuardWindow>();
         var ownPid = (uint)Environment.ProcessId;
-        EnumWindows((hwnd, _) =>
+        foreach (var hwnd in TopLevelWindows())
         {
-            if (!IsWindowVisible(hwnd)) return true;
+            if (!IsWindowVisible(hwnd)) continue;
             GetWindowThreadProcessId(hwnd, out var pid);
-            if (pid == ownPid || pid <= 4) return true;
+            if (pid == ownPid || pid <= 4) continue;
             var f = Facts(pid, facts);
             var topMost = (GetWindowLongPtr(hwnd, GwlExStyle) & WsExTopMost) != 0;
-            windows.Add(new GuardWindow(hwnd, (int)pid, f.ImagePath, f.SameUser, f.SessionId, topMost, IsIconic(hwnd)));
+            var band = Band(hwnd);
+            windows.Add(new GuardWindow(hwnd, (int)pid, f.ImagePath, f.SameUser, f.SessionId, topMost, IsIconic(hwnd),
+                band, WindowBands.IsAboveDesktop(band) && IsCloaked(hwnd)));
+        }
+        return windows;
+    }
+
+    private const int MaxTopLevelWindows = 20000;
+
+    /// <summary>
+    /// The top-level windows of every band (Windows re-test 2026-11-27 late, defect 1). EnumWindows returns only the windows
+    /// of the desktop band (documented for Windows 8 and later): it never returned the "Open with" dialog of Windows 11 in
+    /// band 4. FindWindowEx with the desktop as the parent returns the windows of every band. The walk stops early when a
+    /// window closes during it (the next one cannot be found after it); the windows of EnumWindows are added, so the list
+    /// never has less than before. The next guard tick walks again.
+    /// </summary>
+    private static List<nint> TopLevelWindows()
+    {
+        var list = new List<nint>();
+        var seen = new HashSet<nint>();
+        nint after = 0;
+        for (var i = 0; i < MaxTopLevelWindows; i++)
+        {
+            var hwnd = FindWindowEx(0, after, null, null);
+            if (hwnd == 0 || !seen.Add(hwnd)) break;
+            list.Add(hwnd);
+            after = hwnd;
+        }
+        EnumWindows((hwnd, _) =>
+        {
+            if (seen.Add(hwnd)) list.Add(hwnd);
             return true;
         }, 0);
-        return windows;
+        return list;
+    }
+
+    private static bool _bandUnavailable;
+
+    /// <summary>The z-order band of a window (WindowBands), or WindowBands.Unknown (Windows 7, or the call failed).</summary>
+    private static int Band(nint hwnd)
+    {
+        if (_bandUnavailable) return WindowBands.Unknown;
+        try
+        {
+            return GetWindowBand(hwnd, out var band) ? (int)band : WindowBands.Unknown;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            _bandUnavailable = true; // Windows 7: no bands, every window is in the desktop band
+            return WindowBands.Unknown;
+        }
+    }
+
+    private const int DwmaCloaked = 14;
+
+    /// <summary>Windows hides the window (DWMWA_CLOAKED): it is not drawn, so it covers nothing.</summary>
+    private static bool IsCloaked(nint hwnd)
+    {
+        try
+        {
+            return DwmGetWindowAttribute(hwnd, DwmaCloaked, out var cloaked, sizeof(int)) == 0 && cloaked != 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>

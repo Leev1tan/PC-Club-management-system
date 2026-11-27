@@ -237,6 +237,130 @@ public sealed class LockScreenGuardTests
         }
     }
 
+    // ---- windows of a band above the desktop band (Windows re-test 2026-11-27 late, defect 1) ----
+
+    private const int NotificationBand = 4;                // ZBID_IMMERSIVE_NOTIFICATION: the "Open with" dialog of Windows 11
+    private const string OpenWith = @"C:\Windows\System32\OpenWith.exe";
+
+    private static GuardWindow Banded(int pid, string? path, int band = NotificationBand, bool topMost = true, bool minimized = false,
+        bool cloaked = false, bool sameUser = true, int session = Session) =>
+        Window(pid, path, topMost, minimized, sameUser, session) with { Band = band, Cloaked = cloaked };
+
+    [Theory]
+    [InlineData(WindowBands.Unknown, false)]
+    [InlineData(WindowBands.Desktop, false)]
+    [InlineData(2, true)]                                  // ZBID_UIACCESS
+    [InlineData(NotificationBand, true)]
+    [InlineData(16, true)]                                 // ZBID_SYSTEM_TOOLS
+    public void Bands_above_the_desktop_band(int band, bool above) => Assert.Equal(above, WindowBands.IsAboveDesktop(band));
+
+    [Fact]
+    public void A_shown_window_of_a_higher_band_covers_the_lock_screen_also_when_it_is_not_top_most()
+    {
+        Assert.True(Banded(77, OpenWith).Covers);
+        Assert.True(Banded(77, OpenWith, topMost: false).Covers);
+        Assert.False(Banded(77, OpenWith, topMost: false, cloaked: true).Covers);   // hidden by Windows
+        Assert.False(Banded(77, OpenWith, minimized: true).Covers);
+        Assert.False(Window(78, @"C:\Apps\x.exe", topMost: false).Covers);           // a normal desktop window
+        Assert.True(Window(78, @"C:\Apps\x.exe").Covers);                            // top-most: as before
+        Assert.True((Window(78, @"C:\Apps\x.exe") with { Cloaked = true }).Covers);             // desktop band: as before
+    }
+
+    [Fact]
+    public void Paused_session_the_open_with_dialog_in_band_4_is_closed_at_once_and_ended_2_s_later()
+    {
+        var closer = new ForeignWindowCloser();
+        var openWith = Banded(77, OpenWith);
+        var notepad = Window(78, @"C:\Windows\System32\notepad.exe", topMost: false);   // the program of the player stays
+        var both = new[] { openWith, notepad };
+
+        var plan = closer.Plan(both, Context, GuardMode.KeepPrograms, T0);
+        Assert.Equal(new[] { openWith.Handle }, plan.Close);                             // no push-down: it cannot work across bands
+        Assert.Empty(plan.PushDown);
+        Assert.Empty(closer.Plan(both, Context, GuardMode.KeepPrograms, T0.AddSeconds(1)).Terminate);
+        plan = closer.Plan(both, Context, GuardMode.KeepPrograms, T0.AddSeconds(2));   // still there 2 s after WM_CLOSE
+        Assert.Equal(new[] { 77 }, plan.Terminate);
+        Assert.DoesNotContain(notepad.Handle, plan.Close);
+        Assert.Empty(closer.Plan(both, Context, GuardMode.KeepPrograms, T0.AddSeconds(3)).Terminate); // once
+    }
+
+    [Fact]
+    public void A_dialog_of_a_higher_band_that_closes_on_wm_close_is_not_ended()
+    {
+        var closer = new ForeignWindowCloser();
+        var openWith = Banded(77, OpenWith, topMost: false);
+        Assert.Equal(new[] { openWith.Handle }, closer.Plan(new[] { openWith }, Context, GuardMode.KeepPrograms, T0).Close);
+        // Closed by WM_CLOSE: gone from the list, so nothing is ended
+        Assert.Empty(closer.Plan(Array.Empty<GuardWindow>(), Context, GuardMode.KeepPrograms, T0.AddSeconds(3)).Terminate);
+    }
+
+    [Fact]
+    public void After_the_end_of_a_session_a_window_of_a_higher_band_is_closed_and_ended()
+    {
+        var closer = new ForeignWindowCloser();
+        var openWith = Banded(77, OpenWith);
+        Assert.Equal(new[] { openWith.Handle }, closer.Plan(new[] { openWith }, Context, GuardMode.ClosePrograms, T0).Close);
+        Assert.Equal(new[] { 77 }, closer.Plan(new[] { openWith }, Context, GuardMode.ClosePrograms, T0.AddSeconds(2)).Terminate);
+    }
+
+    [Fact]
+    public void Hidden_windows_of_a_higher_band_are_never_touched()
+    {
+        // A suspended Store app or a hidden part of the shell: EnumWindows never returned these, the guard leaves them alone
+        var closer = new ForeignWindowCloser();
+        var hidden = Banded(77, @"C:\Program Files\WindowsApps\Microsoft.WindowsCalculator_8wekyb3d8bbwe\CalculatorApp.exe", topMost: false, cloaked: true);
+        foreach (var mode in new[] { GuardMode.PushDown, GuardMode.KeepPrograms, GuardMode.ClosePrograms })
+        {
+            for (var s = 0; s < 4; s++)
+            {
+                var plan = closer.Plan(new[] { hidden }, Context, mode, T0.AddSeconds(s));
+                Assert.Empty(plan.PushDown);
+                Assert.Empty(plan.Close);
+                Assert.Empty(plan.Terminate);
+            }
+        }
+        Assert.False(LockScreenGuard.Sees(hidden));
+        Assert.True(LockScreenGuard.Sees(Window(78, @"C:\Apps\x.exe") with { Cloaked = true })); // desktop band: as before
+    }
+
+    [Fact]
+    public void Higher_band_windows_of_windows_parts_other_users_and_other_sessions_are_never_touched()
+    {
+        var closer = new ForeignWindowCloser();
+        var windows = new[]
+        {
+            Banded(70, @"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\TextInputHost.exe", band: 3),  // touch keyboard
+            Banded(71, @"C:\Windows\SystemApps\ShellExperienceHost_cw5n1h2txyewy\ShellExperienceHost.exe", band: 5),
+            Banded(72, @"C:\Windows\System32\Magnify.exe", band: 2),
+            Banded(73, OpenWith, sameUser: false),                                                                         // another user
+            Banded(74, OpenWith, session: 3),                                                                              // another session
+        };
+        foreach (var mode in new[] { GuardMode.KeepPrograms, GuardMode.ClosePrograms })
+        {
+            for (var s = 0; s < 4; s++)
+            {
+                var plan = closer.Plan(windows, Context, mode, T0.AddSeconds(s));
+                Assert.Empty(plan.PushDown);
+                Assert.Empty(plan.Close);
+                Assert.Empty(plan.Terminate);
+            }
+        }
+    }
+
+    [Fact]
+    public void Not_in_kiosk_mode_a_window_of_a_higher_band_is_only_minimized_never_closed()
+    {
+        var closer = new ForeignWindowCloser();
+        var openWith = Banded(77, OpenWith);
+        for (var s = 0; s < 5; s++)
+        {
+            var plan = closer.Plan(new[] { openWith }, Context, GuardMode.PushDown, T0.AddSeconds(s));
+            Assert.Equal(new[] { openWith.Handle }, plan.PushDown);
+            Assert.Empty(plan.Close);
+            Assert.Empty(plan.Terminate);
+        }
+    }
+
     // ---- the foreground ----
 
     [Fact]
