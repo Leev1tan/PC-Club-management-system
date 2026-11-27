@@ -25,6 +25,8 @@ public static class DeviceEvents
         if (e.Id == Guid.Empty || e.OccurredUtc < now.AddDays(-30) || e.OccurredUtc > now.AddDays(1)) return Result.Invalid;
         if (e.Type is LauncherEvent.GameStarted or LauncherEvent.GameStopped)
             return await RecordGameAsync(db, device, e, now, runtime, ct);
+        if (e.Type == LauncherEvent.SessionTeardown)
+            return await RecordTeardownAsync(db, audit, device, e, now, clock, runtime, ct);
         if (!string.Equals(e.Type, LauncherEvent.StaffUnlock, StringComparison.Ordinal)) return Result.Invalid;
         if (audit == null) return Result.Invalid;
 
@@ -49,6 +51,35 @@ public static class DeviceEvents
             $"Emergency staff PIN unlock on {device.Hostname} at {local:yyyy-MM-dd HH:mm} ({reason})",
             new { eventId, device.Hostname, occurredUtc = e.OccurredUtc, reportedUtc = now, lockReason = e.LockReason,
                   windowsUser = e.WindowsUser is { Length: > 64 } w ? w[..64] : e.WindowsUser }, ct: ct);
+        return Result.Recorded;
+    }
+
+    /// <summary>The teardown of an ended session: audit device.session_teardown (each event id once).</summary>
+    private static async Task<Result> RecordTeardownAsync(CmsDbContext db, AuditLogger? audit, DeviceEntity device, DeviceEventRequest e,
+        DateTimeOffset now, ClubClock? clock, DeviceRuntimeState? runtime, CancellationToken ct)
+    {
+        if (audit == null) return Result.Invalid;
+        var target = device.Id.ToString();
+        var eventId = e.Id.ToString("N");
+        if (await db.AuditLog.AnyAsync(a => a.Action == AuditActions.SessionTeardown && a.TargetId == target && a.DetailsJson!.Contains(eventId), ct))
+            return Result.Duplicate;
+        if (runtime != null && !runtime.TakeGameEvent(device.Id, now, MaxGameEventsPerHour)) return Result.TooMany;
+
+        static string Clip(string? s, int max) => s == null ? "" : s.Length > max ? s[..max] : s;
+        var killed = (e.Killed ?? Array.Empty<string>()).Take(30).Select(k => Clip(k, 60)).ToList();
+        var removedPaths = (e.RemovedPaths ?? Array.Empty<string>()).Take(15).Select(p => Clip(p, 200)).ToList();
+        var names = killed.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var closed = names.Count == 0 ? "no program to close" : $"{killed.Count} program(s) closed ({string.Join(", ", names.Take(8))}{(names.Count > 8 ? ", ..." : "")})";
+        var failed = e.KillFailed is > 0 ? $", {e.KillFailed} not closed" : "";
+        var cleanup = e.CleanupEnabled == true
+            ? $"cleanup removed {e.RemovedFiles ?? 0} file(s) and {e.RemovedDirectories ?? 0} folder(s) in {removedPaths.Count} path(s)" + (e.CleanupErrors is > 0 ? $", {e.CleanupErrors} error(s)" : "")
+            : "cleanup off";
+        var local = (clock ?? ClubClock.System()).ToLocal(e.OccurredUtc);
+        await audit.WriteAsync(AuditActions.SessionTeardown, "device", device.Id,
+            $"Session teardown on {device.Hostname} at {local:HH:mm}: {closed}{failed}; {cleanup}",
+            new { eventId, device.Hostname, occurredUtc = e.OccurredUtc, killed, killFailed = e.KillFailed, cleanupEnabled = e.CleanupEnabled,
+                  removedFiles = e.RemovedFiles, removedDirectories = e.RemovedDirectories, removedPaths, cleanupErrors = e.CleanupErrors,
+                  windowsUser = Clip(e.WindowsUser, 64) }, ct: ct);
         return Result.Recorded;
     }
 

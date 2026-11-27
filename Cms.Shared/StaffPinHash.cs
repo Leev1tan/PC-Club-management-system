@@ -85,6 +85,8 @@ public static class AgentFiles
     public const string ClientSettingsFile = "client-settings.json";
     /// <summary>Game catalog of this PC (Cms.Shared.CatalogFile), written by the agent.</summary>
     public const string CatalogFile = "games.json";
+    /// <summary>What the lock screen closes and cleans up when a session ends (Cms.Client.TeardownSettings), from the agent's appsettings.json.</summary>
+    public const string TeardownFile = "teardown.json";
     public const string DeviceFile = "device.json";
     public const string EnrollmentTokenFile = "enrollment-token.txt";
     /// <summary>
@@ -115,7 +117,9 @@ public sealed class LauncherEvent
     public const string GameStarted = "game_started";
     /// <summary>The game of GameId stopped (closed by the player, or killed at the end of the session).</summary>
     public const string GameStopped = "game_stopped";
-    public const int MaxFileBytes = 4096;
+    /// <summary>The lock screen closed the programs of an ended session and maybe cleaned up (audit log).</summary>
+    public const string SessionTeardown = "session_teardown";
+    public const int MaxFileBytes = 8192;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Type { get; set; } = StaffUnlock;
@@ -126,6 +130,15 @@ public sealed class LauncherEvent
     public string? WindowsUser { get; set; }
     /// <summary>Catalog entry of a game_started or game_stopped event.</summary>
     public Guid? GameId { get; set; }
+
+    // session_teardown: what was closed and removed (short lists, the note stays under MaxFileBytes)
+    public string[]? Killed { get; set; }
+    public int? KillFailed { get; set; }
+    public bool? CleanupEnabled { get; set; }
+    public int? RemovedFiles { get; set; }
+    public int? RemovedDirectories { get; set; }
+    public string[]? RemovedPaths { get; set; }
+    public int? CleanupErrors { get; set; }
 
     public static string FileName(Guid id) => $"event-{id:N}.json";
 }

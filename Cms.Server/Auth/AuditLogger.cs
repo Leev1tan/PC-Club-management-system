@@ -33,6 +33,8 @@ public static class AuditActions
     public const string UnlockWithoutSession = "device.unlock_without_session";
     /// <summary>Staff PIN typed on the lock screen (Ctrl+Shift+U), reported by the agent afterwards.</summary>
     public const string EmergencyUnlock = "device.emergency_unlock";
+    /// <summary>The lock screen closed the programs of an ended session (and cleaned up, when on), reported by the agent.</summary>
+    public const string SessionTeardown = "device.session_teardown";
 
     public const string SessionStarted = "session.started";
     public const string SessionExtended = "session.extended";

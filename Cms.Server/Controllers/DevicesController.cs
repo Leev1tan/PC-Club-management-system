@@ -357,7 +357,17 @@ public record DeviceDetailView(
 }
 public record EnqueueCommandRequest(string Type, object? Payload);
 /// <summary>Event of the PC (Cms.Shared.LauncherEvent): Id (for de-duplication), Type staff_unlock, when, why the PC was locked.</summary>
-public record DeviceEventRequest(Guid Id, string? Type, DateTimeOffset OccurredUtc, string? LockReason = null, string? WindowsUser = null, Guid? GameId = null);
+public record DeviceEventRequest(Guid Id, string? Type, DateTimeOffset OccurredUtc, string? LockReason = null, string? WindowsUser = null, Guid? GameId = null)
+{
+    // session_teardown (Cms.Shared.LauncherEvent)
+    public string[]? Killed { get; init; }
+    public int? KillFailed { get; init; }
+    public bool? CleanupEnabled { get; init; }
+    public int? RemovedFiles { get; init; }
+    public int? RemovedDirectories { get; init; }
+    public string[]? RemovedPaths { get; init; }
+    public int? CleanupErrors { get; init; }
+}
 public record CommandView(Guid Id, string Type, object? Payload);
 public record AckCommandRequest(string Status, string? Result);
 public record AssignZoneRequest(Guid? ZoneId);
