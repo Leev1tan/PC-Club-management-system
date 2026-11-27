@@ -53,7 +53,15 @@ namespace Cms.Server.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
+                    b.Property<string>("Hash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("Ip")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PrevHash")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
@@ -262,6 +270,12 @@ namespace Cms.Server.Migrations
                     b.Property<DateTimeOffset>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<decimal?>("DebtAfter")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<decimal>("DebtDelta")
+                        .HasColumnType("decimal(10,2)");
+
                     b.Property<string>("Description")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
@@ -284,8 +298,14 @@ namespace Cms.Server.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
 
+                    b.Property<long?>("SaleId")
+                        .HasColumnType("bigint");
+
                     b.Property<Guid?>("SessionId")
                         .HasColumnType("uuid");
+
+                    b.Property<long?>("ShiftId")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Type")
                         .IsRequired()
@@ -299,7 +319,11 @@ namespace Cms.Server.Migrations
 
                     b.HasIndex("CreatedUtc");
 
+                    b.HasIndex("SaleId");
+
                     b.HasIndex("SessionId");
+
+                    b.HasIndex("ShiftId");
 
                     b.HasIndex("UserId", "Id");
 
@@ -346,6 +370,150 @@ namespace Cms.Server.Migrations
                     b.HasIndex("ZoneId");
 
                     b.ToTable("Packages", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.ProductEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("LowStockThreshold")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("StockQuantity")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("TrackStock")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Category", "SortOrder");
+
+                    b.ToTable("Products", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.SaleEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActorUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<long?>("RefundOfSaleId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ShiftId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Total")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RefundOfSaleId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Sales_RefundOfSaleId")
+                        .HasFilter("\"RefundOfSaleId\" IS NOT NULL");
+
+                    b.HasIndex("ShiftId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("Sales", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.SaleItemEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<decimal>("LineTotal")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("SaleId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("SaleId");
+
+                    b.ToTable("SaleItems", (string)null);
                 });
 
             modelBuilder.Entity("Cms.Server.Data.SessionEntity", b =>
@@ -446,6 +614,76 @@ namespace Cms.Server.Migrations
                     b.ToTable("SessionSegments", (string)null);
                 });
 
+            modelBuilder.Entity("Cms.Server.Data.ShiftEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AuditHeadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long?>("AuditHeadId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CloseNote")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<Guid?>("ClosedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ClosedByUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset?>("ClosedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("CountedCash")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<decimal?>("ExpectedCash")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("OpenNote")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<Guid?>("OpenedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OpenedByUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("OpenedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("OpeningFloat")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<decimal?>("Variance")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Shifts_Open")
+                        .HasFilter("\"Status\" = 'open'");
+
+                    b.ToTable("Shifts", (string)null);
+                });
+
             modelBuilder.Entity("Cms.Server.Data.StaffUserEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -492,6 +730,60 @@ namespace Cms.Server.Migrations
                         .IsUnique();
 
                     b.ToTable("StaffUsers");
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.StockMovementEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActorUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Delta")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("QuantityAfter")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<long?>("SaleId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ShiftId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<decimal?>("UnitCost")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ShiftId");
+
+                    b.HasIndex("ProductId", "Id");
+
+                    b.ToTable("StockMovements", (string)null);
                 });
 
             modelBuilder.Entity("Cms.Server.Data.TariffEntity", b =>
@@ -611,6 +903,9 @@ namespace Cms.Server.Migrations
                     b.Property<DateTimeOffset>("CreatedUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<decimal>("Debt")
+                        .HasColumnType("decimal(10,2)");
+
                     b.Property<string>("DisplayName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -699,6 +994,29 @@ namespace Cms.Server.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 
+            modelBuilder.Entity("Cms.Server.Data.SaleEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.UserEntity", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.SaleItemEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.ProductEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Cms.Server.Data.SaleEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SaleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Cms.Server.Data.SessionEntity", b =>
                 {
                     b.HasOne("Cms.Server.Data.DeviceEntity", null)
@@ -729,6 +1047,15 @@ namespace Cms.Server.Migrations
                         .WithMany()
                         .HasForeignKey("SessionId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.StockMovementEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.ProductEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

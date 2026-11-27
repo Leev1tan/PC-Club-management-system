@@ -46,6 +46,7 @@ public static class DatabaseInitializer
                     }
                     await Cms.Server.Auth.AuditLogGuard.EnsureSqliteTriggersAsync(db, ct);
                     await Cms.Server.Billing.LedgerGuard.EnsureSqliteTriggersAsync(db, ct);
+                    await PosGuard.EnsureSqliteTriggersAsync(db, ct);
                 }
 
                 // Balances of a version before the ledger become ledger rows (once)

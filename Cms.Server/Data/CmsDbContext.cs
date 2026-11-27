@@ -21,8 +21,29 @@ public class CmsDbContext : DbContext
     public DbSet<PackageEntity> Packages => Set<PackageEntity>();
     public DbSet<SessionSegmentEntity> SessionSegments => Set<SessionSegmentEntity>();
     public DbSet<LedgerEntryEntity> Ledger => Set<LedgerEntryEntity>();
+    public DbSet<ShiftEntity> Shifts => Set<ShiftEntity>();
+    public DbSet<ProductEntity> Products => Set<ProductEntity>();
+    public DbSet<StockMovementEntity> StockMovements => Set<StockMovementEntity>();
+    public DbSet<SaleEntity> Sales => Set<SaleEntity>();
+    public DbSet<SaleItemEntity> SaleItems => Set<SaleItemEntity>();
+
+    /// <summary>
+    /// Cash and card rows of the ledger need an open shift (Shifts:RequireOpenShift, default true).
+    /// Set by dependency injection; a context created with <c>new</c> (tools, unit tests) does not check.
+    /// </summary>
+    public bool RequireOpenShift { get; init; }
+
+    /// <summary>One-time jobs that copy old history (ledger backfill, demo seed) set this to skip the shift check.</summary>
+    internal bool SkipShiftCheck { get; set; }
+
+    public CmsDbContext(DbContextOptions<CmsDbContext> options, ShiftOptions shiftOptions) : base(options)
+    {
+        RequireOpenShift = shiftOptions.RequireOpenShift;
+    }
 
     public const string ActiveSessionIndex = "IX_Sessions_DeviceId_Active";
+    public const string OpenShiftIndex = "IX_Shifts_Open";
+    public const string RefundOfSaleIndex = "IX_Sales_RefundOfSaleId";
 
     /// <summary>
     /// Ends all but the newest active session of each PC. Runs before the unique index
@@ -59,6 +80,32 @@ public class CmsDbContext : DbContext
         {
             if (entry.State is EntityState.Modified or EntityState.Deleted)
                 throw new InvalidOperationException("The ledger is append-only: entries cannot be changed or deleted.");
+        }
+
+        // Receipts and the stock log are append-only too (database triggers as well)
+        foreach (var entry in ChangeTracker.Entries().Where(e => e.Entity is SaleEntity or SaleItemEntity or StockMovementEntity))
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException($"{entry.Metadata.GetTableName()} is append-only: rows cannot be changed or deleted.");
+        }
+
+        // A closed shift is final: nobody edits, reopens or deletes it (database trigger as well)
+        foreach (var entry in ChangeTracker.Entries<ShiftEntity>())
+        {
+            if (entry.State == EntityState.Deleted ||
+                (entry.State == EntityState.Modified && (string?)entry.OriginalValues[nameof(ShiftEntity.Status)] == ShiftStatuses.Closed))
+                throw new InvalidOperationException("A closed shift cannot be changed, reopened or deleted.");
+        }
+
+        // Money at the desk (cash, card) belongs to a shift, so the Z-report of the shift shows it
+        if (RequireOpenShift && !SkipShiftCheck)
+        {
+            foreach (var entry in ChangeTracker.Entries<LedgerEntryEntity>())
+            {
+                if (entry.State == EntityState.Added && entry.Entity.ShiftId == null && entry.Entity.DeskAmount != 0 &&
+                    Cms.Server.Billing.PaymentMethods.IsDesk(entry.Entity.Method))
+                    throw new ShiftRequiredException();
+            }
         }
 
         // Every change of a session gets a new stamp; EF checks the old one in the UPDATE
@@ -140,6 +187,8 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.DeskAmount).HasColumnType("decimal(10,2)");
             entity.Property(e => e.BalanceAfter).HasColumnType("decimal(10,2)");
             entity.Property(e => e.BonusAfter).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.DebtDelta).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.DebtAfter).HasColumnType("decimal(10,2)");
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Reason).HasMaxLength(300);
             entity.Property(e => e.ActorUsername).HasMaxLength(64);
@@ -148,6 +197,83 @@ public class CmsDbContext : DbContext
             entity.HasIndex(e => new { e.UserId, e.Id });
             entity.HasIndex(e => e.CreatedUtc);
             entity.HasIndex(e => e.SessionId);
+            // Plain ids, no foreign keys: the ledger never changes, and the demo reset truncates it alone
+            entity.HasIndex(e => e.ShiftId);
+            entity.HasIndex(e => e.SaleId);
+        });
+
+        modelBuilder.Entity<ShiftEntity>(entity =>
+        {
+            entity.ToTable("Shifts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Status).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.OpenedByUsername).HasMaxLength(64);
+            entity.Property(e => e.ClosedByUsername).HasMaxLength(64);
+            entity.Property(e => e.OpeningFloat).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.CountedCash).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.ExpectedCash).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.Variance).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.OpenNote).HasMaxLength(300);
+            entity.Property(e => e.CloseNote).HasMaxLength(300);
+            entity.Property(e => e.AuditHeadHash).HasMaxLength(64);
+            // At most ONE open shift per club, enforced by the database (partial unique index)
+            entity.HasIndex(e => e.Status).IsUnique().HasFilter("\"Status\" = 'open'").HasDatabaseName(OpenShiftIndex);
+        });
+
+        modelBuilder.Entity<ProductEntity>(entity =>
+        {
+            entity.ToTable("Products");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Category).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Price).HasColumnType("decimal(10,2)");
+            entity.HasIndex(e => new { e.Category, e.SortOrder });
+        });
+
+        modelBuilder.Entity<StockMovementEntity>(entity =>
+        {
+            entity.ToTable("StockMovements");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Type).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(300);
+            entity.Property(e => e.UnitCost).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.ActorUsername).HasMaxLength(64);
+            // Restrict: a product with stock history is taken off sale, never deleted
+            entity.HasOne<ProductEntity>().WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => new { e.ProductId, e.Id });
+            entity.HasIndex(e => e.ShiftId);
+        });
+
+        modelBuilder.Entity<SaleEntity>(entity =>
+        {
+            entity.ToTable("Sales");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Kind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Method).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Total).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.Reason).HasMaxLength(300);
+            entity.Property(e => e.ActorUsername).HasMaxLength(64);
+            entity.HasOne<UserEntity>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.ShiftId);
+            // A sale is refunded at most once: the refund receipt points to it (partial unique index)
+            entity.HasIndex(e => e.RefundOfSaleId).IsUnique().HasFilter("\"RefundOfSaleId\" IS NOT NULL").HasDatabaseName(RefundOfSaleIndex);
+        });
+
+        modelBuilder.Entity<SaleItemEntity>(entity =>
+        {
+            entity.ToTable("SaleItems");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Category).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.LineTotal).HasColumnType("decimal(10,2)");
+            entity.HasOne<SaleEntity>().WithMany().HasForeignKey(e => e.SaleId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ProductEntity>().WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.SaleId);
         });
 
         modelBuilder.Entity<UserEntity>(entity =>
@@ -159,6 +285,7 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.PasswordHash).HasMaxLength(500);
             entity.Property(e => e.Balance).HasColumnType("decimal(10,2)");
             entity.Property(e => e.BonusPoints).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.Debt).HasColumnType("decimal(10,2)");
         });
 
         modelBuilder.Entity<SessionEntity>(entity =>
@@ -236,6 +363,8 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.Summary).HasMaxLength(500);
             entity.Property(e => e.DetailsJson).HasMaxLength(4000);
             entity.Property(e => e.Ip).HasMaxLength(64);
+            entity.Property(e => e.PrevHash).HasMaxLength(64);
+            entity.Property(e => e.Hash).HasMaxLength(64);
             entity.HasIndex(e => e.Action);
         });
 
@@ -338,6 +467,8 @@ public class UserEntity
     public decimal Balance { get; set; }
     /// <summary>Bonus balance (cashback, promo): spendable on PC time only, never paid out or spent at the bar.</summary>
     public decimal BonusPoints { get; set; }
+    /// <summary>Unpaid post-paid time (always >= 0). Changed only together with a ledger row (DebtDelta).</summary>
+    public decimal Debt { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -412,6 +543,131 @@ public class LedgerEntryEntity
     public string? Reason { get; set; }
     public Guid? ActorId { get; set; }
     public string? ActorUsername { get; set; }
+    /// <summary>Shift that was open when the row was written (null: no shift open, or older rows).</summary>
+    public long? ShiftId { get; set; }
+    /// <summary>Bar receipt (Sales.Id) of a bar sale or refund.</summary>
+    public long? SaleId { get; set; }
+    /// <summary>Change of the player's debt: + post-paid time not paid, - debt paid or written off.</summary>
+    public decimal DebtDelta { get; set; }
+    /// <summary>Debt right after the row (null in rows of versions before the debt).</summary>
+    public decimal? DebtAfter { get; set; }
+}
+
+public static class ShiftStatuses
+{
+    public const string Open = "open";
+    public const string Closed = "closed";
+}
+
+/// <summary>
+/// Work shift at the desk. Opened with a cash float; closed with the counted cash. The server computes
+/// the expected cash from the ledger rows of the shift (float + every cash amount taken or paid out)
+/// and stores the variance. At most one shift is open (unique index). A closed shift is final: no API
+/// changes it, SaveChanges refuses it and a database trigger blocks UPDATE and DELETE.
+/// </summary>
+public class ShiftEntity
+{
+    public long Id { get; set; }
+    public string Status { get; set; } = ShiftStatuses.Open;
+    public DateTimeOffset OpenedUtc { get; set; }
+    public Guid? OpenedById { get; set; }
+    public string? OpenedByUsername { get; set; }
+    public decimal OpeningFloat { get; set; }
+    public string? OpenNote { get; set; }
+    public DateTimeOffset? ClosedUtc { get; set; }
+    public Guid? ClosedById { get; set; }
+    public string? ClosedByUsername { get; set; }
+    public decimal? CountedCash { get; set; }
+    public decimal? ExpectedCash { get; set; }
+    /// <summary>Counted minus expected cash: below zero = cash missing.</summary>
+    public decimal? Variance { get; set; }
+    public string? CloseNote { get; set; }
+    /// <summary>Last audit log row and its hash when the shift closed (printed on the Z-report as an anchor).</summary>
+    public long? AuditHeadId { get; set; }
+    public string? AuditHeadHash { get; set; }
+}
+
+/// <summary>Bar / snack product. Price changes are audited; a product with history is taken off sale, not deleted.</summary>
+public class ProductEntity
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public decimal Price { get; set; }
+    public bool IsActive { get; set; } = true;
+    /// <summary>Count the stock: sales take it, restocks add it, managers correct it (StockMovements).</summary>
+    public bool TrackStock { get; set; }
+    /// <summary>Cached sum of the stock movements; changed only together with a movement row (never below zero).</summary>
+    public int StockQuantity { get; set; }
+    /// <summary>Warn in the UI when the stock is at or below this number.</summary>
+    public int? LowStockThreshold { get; set; }
+    public int SortOrder { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; }
+}
+
+public static class StockMovementTypes
+{
+    public const string Restock = "restock";
+    public const string Sale = "sale";
+    public const string Refund = "refund";
+    public const string Correction = "correction";
+}
+
+/// <summary>Append-only stock log: who added, sold or corrected how many of a product, and when.</summary>
+public class StockMovementEntity
+{
+    public long Id { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; }
+    public Guid ProductId { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public int Delta { get; set; }
+    public int QuantityAfter { get; set; }
+    public long? SaleId { get; set; }
+    public long? ShiftId { get; set; }
+    public string? Reason { get; set; }
+    /// <summary>Purchase price per unit of a restock (optional, for the owner).</summary>
+    public decimal? UnitCost { get; set; }
+    public Guid? ActorId { get; set; }
+    public string? ActorUsername { get; set; }
+}
+
+public static class SaleKinds
+{
+    public const string Sale = "sale";
+    public const string Refund = "refund";
+}
+
+/// <summary>
+/// Bar receipt (append-only). A refund is a receipt of kind "refund" that points to the sale; a unique
+/// index allows one refund per sale. The money is in the ledger (bar_sale / bar_refund rows).
+/// </summary>
+public class SaleEntity
+{
+    public long Id { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; }
+    public string Kind { get; set; } = SaleKinds.Sale;
+    public long? RefundOfSaleId { get; set; }
+    public long? ShiftId { get; set; }
+    public Guid? UserId { get; set; }
+    /// <summary>cash, card or balance (real balance only: bonus never pays at the bar).</summary>
+    public string Method { get; set; } = string.Empty;
+    public decimal Total { get; set; }
+    public string? Reason { get; set; }
+    public Guid? ActorId { get; set; }
+    public string? ActorUsername { get; set; }
+}
+
+/// <summary>Line of a receipt; name, category and price are copied, so old receipts stay readable.</summary>
+public class SaleItemEntity
+{
+    public long Id { get; set; }
+    public long SaleId { get; set; }
+    public Guid ProductId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public decimal UnitPrice { get; set; }
+    public int Quantity { get; set; }
+    public decimal LineTotal { get; set; }
 }
 
 public class HeartbeatEntity
@@ -483,6 +739,10 @@ public class AuditLogEntity
     public string? Summary { get; set; }
     public string? DetailsJson { get; set; }
     public string? Ip { get; set; }
+    /// <summary>Hash of the previous row (64 zeros for the first row); see Auth/AuditChain.</summary>
+    public string? PrevHash { get; set; }
+    /// <summary>SHA-256 (hex) of PrevHash and the canonical content of this row.</summary>
+    public string? Hash { get; set; }
 }
 
 /// <summary>Club-wide settings that the owner changes at run time (key/value).</summary>
@@ -502,4 +762,21 @@ public static class ClubSettingKeys
     public const string BonusTopUpRules = "billing.bonus_topup_rules";
     /// <summary>Written once the balances of an older version are copied into the ledger.</summary>
     public const string LedgerBackfilled = "ledger.backfilled";
+    /// <summary>Written once the audit rows of an older version got their hashes (Auth/AuditChain).</summary>
+    public const string AuditChainSealed = "audit.chain_sealed";
+}
+
+/// <summary>Shifts:RequireOpenShift (default true): cash and card payments need an open shift.</summary>
+public sealed class ShiftOptions
+{
+    public bool RequireOpenShift { get; init; } = true;
+
+    public static ShiftOptions FromConfiguration(IConfiguration config) =>
+        new() { RequireOpenShift = config.GetValue("Shifts:RequireOpenShift", true) };
+}
+
+/// <summary>A cash or card ledger row without an open shift (Shifts:RequireOpenShift). The API answers 409 shift_required.</summary>
+public sealed class ShiftRequiredException : InvalidOperationException
+{
+    public ShiftRequiredException() : base("Open a shift first: cash and card payments need an open shift.") { }
 }
