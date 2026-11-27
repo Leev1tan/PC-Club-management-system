@@ -75,6 +75,7 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.DeviceId).IsRequired();
             entity.HasOne<DeviceEntity>().WithMany().HasForeignKey(e => e.DeviceId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => new { e.DeviceId, e.CreatedUtc });
+            entity.HasIndex(e => e.CreatedUtc); // retention clean-up
         });
 
         modelBuilder.Entity<CommandEntity>(entity =>
@@ -85,6 +86,7 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
             entity.HasOne<DeviceEntity>().WithMany().HasForeignKey(e => e.DeviceId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => new { e.DeviceId, e.Status });
+            entity.HasIndex(e => new { e.Status, e.CreatedUtc }); // retention clean-up
         });
 
         modelBuilder.Entity<TransactionEntity>(entity =>
@@ -197,7 +199,7 @@ public class CommandEntity
     public DateTimeOffset CreatedUtc { get; set; }
     public string Type { get; set; } = string.Empty;
     public string? PayloadJson { get; set; }
-    public string Status { get; set; } = "pending"; // pending, delivered, done, failed
+    public string Status { get; set; } = "pending"; // pending, delivered, done, failed, ignored, expired
     public string? Result { get; set; }
 }
 

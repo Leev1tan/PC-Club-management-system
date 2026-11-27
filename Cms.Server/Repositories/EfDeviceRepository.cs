@@ -12,12 +12,18 @@ public class EfDeviceRepository : IDeviceRepository
     private readonly CmsDbContext _db;
     private readonly DeviceRuntimeState? _runtime;
     private readonly DeviceEnrollmentOptions _enrollment;
+    private readonly RetentionOptions _retention;
 
-    public EfDeviceRepository(CmsDbContext db, DeviceRuntimeState? runtime = null, DeviceEnrollmentOptions? enrollment = null)
+    /// <summary>Devices.LastSeenUtc is written at most this often (online = seen in the last 20 s).</summary>
+    private static readonly TimeSpan LastSeenResolution = TimeSpan.FromSeconds(5);
+
+    public EfDeviceRepository(CmsDbContext db, DeviceRuntimeState? runtime = null, DeviceEnrollmentOptions? enrollment = null,
+        RetentionOptions? retention = null)
     {
         _db = db;
         _runtime = runtime;
         _enrollment = enrollment ?? new DeviceEnrollmentOptions();
+        _retention = retention ?? new RetentionOptions();
     }
 
     /// <summary>
@@ -109,19 +115,31 @@ public class EfDeviceRepository : IDeviceRepository
         var device = _db.Devices.FirstOrDefault(d => d.DeviceKey == hash);
         if (device == null || device.Status == DeviceStatuses.Revoked) return null;
 
-        device.LastSeenUtc = DateTimeOffset.UtcNow;
-        device.LastIp = request.Ip;
-        _db.Heartbeats.Add(new HeartbeatEntity
+        // A heartbeat only refreshes "last seen" (at most every 5 s). A metrics sample row is kept at
+        // most once per Retention:HeartbeatSampleMinutes per PC (one row per second filled the disk).
+        var now = DateTimeOffset.UtcNow;
+        var changed = false;
+        if (device.LastSeenUtc is not { } seen || now - seen >= LastSeenResolution || device.LastIp != request.Ip)
         {
-            Id = Guid.NewGuid(),
-            DeviceId = device.Id,
-            CreatedUtc = DateTimeOffset.UtcNow,
-            CpuPercent = request.CpuPercent,
-            MemPercent = request.MemPercent,
-            ActiveUser = request.ActiveUser,
-            Ip = request.Ip
-        });
-        _db.SaveChanges();
+            device.LastSeenUtc = now;
+            device.LastIp = request.Ip;
+            changed = true;
+        }
+        if (_runtime == null || _runtime.TakeHeartbeatSample(device.Id, now, _retention.HeartbeatSampleInterval))
+        {
+            _db.Heartbeats.Add(new HeartbeatEntity
+            {
+                Id = Guid.NewGuid(),
+                DeviceId = device.Id,
+                CreatedUtc = now,
+                CpuPercent = request.CpuPercent,
+                MemPercent = request.MemPercent,
+                ActiveUser = request.ActiveUser,
+                Ip = request.Ip
+            });
+            changed = true;
+        }
+        if (changed) _db.SaveChanges();
         return device.Status;
     }
 
@@ -162,11 +180,21 @@ public class EfDeviceRepository : IDeviceRepository
 
     public IEnumerable<CommandView> PollCommands(Guid deviceId, int max)
     {
-        var retryBefore = DateTimeOffset.UtcNow.AddSeconds(-30);
-        var candidates = _db.Commands
+        var now = DateTimeOffset.UtcNow;
+        var retryBefore = now.AddSeconds(-30);
+        var expireBefore = now - _retention.CommandExpireAfter;
+        var all = _db.Commands
             .Where(c => c.DeviceId == deviceId &&
                         (c.Status == "pending" || c.Status == "delivered"))
             .ToList();
+
+        // Too old to run (for example an "unlock" queued while the PC was off)
+        foreach (var stale in all.Where(c => c.CreatedUtc < expireBefore))
+        {
+            stale.Status = "expired";
+            stale.Result = "Not delivered in time";
+        }
+        var candidates = all.Where(c => c.Status != "expired").ToList();
 
         var pending = candidates
             .Where(c => c.Status == "pending" || c.CreatedUtc <= retryBefore)
@@ -178,7 +206,7 @@ public class EfDeviceRepository : IDeviceRepository
         {
             cmd.Status = "delivered";
         }
-        if (pending.Count > 0) _db.SaveChanges();
+        if (pending.Count > 0 || candidates.Count != all.Count) _db.SaveChanges();
 
         return pending.Select(cmd =>
         {

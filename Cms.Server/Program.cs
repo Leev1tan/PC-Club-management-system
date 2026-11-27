@@ -90,6 +90,10 @@ if (!demo.Enabled)
 }
 builder.Services.AddHostedService<SessionExpiryService>();
 
+// Retention: heartbeat samples and finished commands are deleted after a configurable time
+builder.Services.AddSingleton(RetentionOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddHostedService<RetentionService>();
+
 // Demo mode: seeded demo club + simulated PCs (DEMO_MODE=true)
 builder.Services.AddDemoMode(demo);
 

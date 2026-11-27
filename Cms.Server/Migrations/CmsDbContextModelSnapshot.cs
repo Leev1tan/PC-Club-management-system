@@ -76,6 +76,8 @@ namespace Cms.Server.Migrations
 
                     b.HasIndex("DeviceId", "Status");
 
+                    b.HasIndex("Status", "CreatedUtc");
+
                     b.ToTable("Commands");
                 });
 
@@ -165,6 +167,8 @@ namespace Cms.Server.Migrations
                         .HasColumnType("double precision");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CreatedUtc");
 
                     b.HasIndex("DeviceId", "CreatedUtc");
 
