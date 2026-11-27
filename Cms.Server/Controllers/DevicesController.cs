@@ -244,9 +244,12 @@ public class DevicesController : ControllerBase
             {
                 return StatusCode(StatusCodes.Status502BadGateway, new { error = $"Wake-on-LAN could not be sent: {ex.Message}", code = "wake_failed" });
             }
-            await AuditAsync(AuditActions.DevicePower, deviceId, $"Wake-on-LAN sent to {device.Hostname} ({device.MacAddress}) via {target}",
-                new { action, device.Hostname, mac = device.MacAddress, target = target.ToString() });
-            return Ok(new PowerView(action, device.Hostname, null, device.MacAddress, target.ToString(), session != null));
+            // The demo sends nothing to the network: its audit text says that the wake was simulated
+            await AuditAsync(AuditActions.DevicePower, deviceId, wake.Simulated
+                    ? $"Wake-on-LAN simulated for {device.Hostname} ({device.MacAddress}): demo mode, no network packet"
+                    : $"Wake-on-LAN sent to {device.Hostname} ({device.MacAddress}) via {target}",
+                new { action, device.Hostname, mac = device.MacAddress, target = wake.Simulated ? null : target.ToString(), simulated = wake.Simulated });
+            return Ok(new PowerView(action, device.Hostname, null, device.MacAddress, wake.Simulated ? null : target.ToString(), session != null) { Simulated = wake.Simulated });
         }
 
         var type = action == "shutdown" ? CommandTypes.Shutdown : CommandTypes.Restart;
@@ -394,7 +397,11 @@ public record DeviceHeartbeatRequest(double CpuPercent, double MemPercent, strin
 /// <summary>Action: shutdown, reboot or wake (Wake-on-LAN).</summary>
 public record PowerRequest(string? Action);
 /// <summary>CommandId: the queued shutdown or reboot; Mac and Target: where the Wake-on-LAN packet went.</summary>
-public record PowerView(string Action, string Hostname, Guid? CommandId, string? Mac, string? Target, bool ActiveSession);
+public record PowerView(string Action, string Hostname, Guid? CommandId, string? Mac, string? Target, bool ActiveSession)
+{
+    /// <summary>Demo mode: the Wake-on-LAN was simulated (no packet).</summary>
+    public bool Simulated { get; init; }
+}
 public record DeviceView(Guid Id, string Hostname, string OsVersion, string AgentVersion, DateTimeOffset? LastSeenUtc, string? LastIp, string Status);
 public record DeviceDetailView(
     Guid Id, string Hostname, string OsVersion, string AgentVersion,

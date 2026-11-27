@@ -26,7 +26,8 @@ export function PowerDialog({ target, action, toast, onClose, onDone }: {
     const res = await postJson(`/api/devices/${target.id}/power`, { action });
     setBusy(false);
     if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
-    toast(fmt(texts.done, { host: target.hostname }), 'success');
+    const view = await res.json().catch(() => null) as { simulated?: boolean } | null;
+    toast(fmt(view?.simulated ? t.power.wake.simulated : texts.done, { host: target.hostname }), 'success');
     onDone();
   };
 

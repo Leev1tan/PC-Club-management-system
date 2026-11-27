@@ -520,7 +520,7 @@ export const uk = {
   power: {
     shutdown: { title: 'Вимкнути {host}?', hint: 'ПК завершить роботу Windows через 5 секунд (команда агенту ПК).', confirm: '⏻ Вимкнути', done: 'Команду вимкнення надіслано на {host}', menu: '⏻ Вимкнути' },
     reboot: { title: 'Перезавантажити {host}?', hint: 'ПК перезавантажиться через 5 секунд (команда агенту ПК).', confirm: '🔄 Перезавантажити', done: 'Команду перезавантаження надіслано на {host}', menu: '🔄 Перезавантажити' },
-    wake: { title: 'Увімкнути {host} (Wake-on-LAN)?', hint: 'Сервер надішле «магічний пакет» на MAC-адресу ПК. Мережева карта ПК має підтримувати Wake-on-LAN (BIOS і Windows), а пакет має дійти до мережі ПК (див. налаштування Power:WakeBroadcast).', confirm: '⚡ Увімкнути', done: 'Wake-on-LAN надіслано на {host}', menu: '⚡ Увімкнути (WoL)' },
+    wake: { title: 'Увімкнути {host} (Wake-on-LAN)?', hint: 'Сервер надішле «магічний пакет» на MAC-адресу ПК. Мережева карта ПК має підтримувати Wake-on-LAN (BIOS і Windows), а пакет має дійти до мережі ПК (див. налаштування Power:WakeBroadcast).', confirm: '⚡ Увімкнути', done: 'Wake-on-LAN надіслано на {host}', simulated: 'Wake-on-LAN для {host} змодельовано (демо: пакет не надсилається)', menu: '⚡ Увімкнути (WoL)' },
     sessionWarning: 'На цьому ПК йде сесія ({who}). Вона триває й оплачується далі; за потреби спершу завершіть її.',
     wakeLater: 'Увімкнути ПК знову можна з адмін-панелі (Wake-on-LAN, MAC {mac}).',
     noWakeLater: 'ПК ще не повідомив MAC-адресу: увімкнути його знову можна лише кнопкою на самому ПК.',
@@ -1376,7 +1376,7 @@ export const en: typeof uk = {
   power: {
     shutdown: { title: 'Shut down {host}?', hint: 'The PC shuts Windows down in 5 seconds (a command to the agent of the PC).', confirm: '⏻ Shut down', done: 'Shutdown sent to {host}', menu: '⏻ Shut down' },
     reboot: { title: 'Reboot {host}?', hint: 'The PC restarts in 5 seconds (a command to the agent of the PC).', confirm: '🔄 Reboot', done: 'Reboot sent to {host}', menu: '🔄 Reboot' },
-    wake: { title: 'Start {host} (Wake-on-LAN)?', hint: 'The server sends a "magic packet" to the MAC address of the PC. The network card of the PC must support Wake-on-LAN (BIOS and Windows), and the packet must reach the network of the PC (see the setting Power:WakeBroadcast).', confirm: '⚡ Start', done: 'Wake-on-LAN sent to {host}', menu: '⚡ Start (WoL)' },
+    wake: { title: 'Start {host} (Wake-on-LAN)?', hint: 'The server sends a "magic packet" to the MAC address of the PC. The network card of the PC must support Wake-on-LAN (BIOS and Windows), and the packet must reach the network of the PC (see the setting Power:WakeBroadcast).', confirm: '⚡ Start', done: 'Wake-on-LAN sent to {host}', simulated: 'Wake-on-LAN for {host} simulated (demo: no packet is sent)', menu: '⚡ Start (WoL)' },
     sessionWarning: 'This PC has a running session ({who}). It goes on and is billed; end it first if needed.',
     wakeLater: 'You can start the PC again from the admin UI (Wake-on-LAN, MAC {mac}).',
     noWakeLater: 'The PC has not reported its MAC address yet: only its power button starts it again.',

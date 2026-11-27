@@ -36,6 +36,9 @@ public sealed class PowerOptions
 /// <summary>Sends the Wake-on-LAN packet (UDP in a club; simulated in the demo).</summary>
 public interface IWakeOnLanSender
 {
+    /// <summary>True in the demo: nothing goes to the network (the audit text says so).</summary>
+    bool Simulated => false;
+
     Task SendAsync(Guid deviceId, byte[] mac, IPEndPoint target, CancellationToken ct = default);
 }
 

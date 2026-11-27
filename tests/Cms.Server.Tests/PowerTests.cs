@@ -252,3 +252,24 @@ public sealed class DemoPowerTests : IDisposable
         Assert.True(sim.IsOnline(other.Id, now.AddMinutes(6)));
     }
 }
+
+/// <summary>In the demo the audit log says that a Wake-on-LAN was simulated (nothing went to the network).</summary>
+public sealed class DemoWakeAuditTests : ApiTestBase, IClassFixture<DemoFactory>
+{
+    public DemoWakeAuditTests(DemoFactory factory) : base(factory) { }
+
+    [Fact]
+    public async Task The_audit_text_of_a_demo_wake_says_simulated()
+    {
+        var tech = await _factory.LoginAsync("demo-tech", "demo");
+        var devices = (await tech.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/devices")).EnumerateArray().ToList();
+        var offline = devices.First(d => d.GetProperty("hostname").GetString() == "STD-12");
+        var view = await JsonAsync(await tech.PostAsJsonAsync($"/api/devices/{offline.GetProperty("id").GetString()}/power", new { action = "wake" }));
+        Assert.True(view.GetProperty("simulated").GetBoolean());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, view.GetProperty("target").ValueKind);
+        var owner = await _factory.LoginAsync("demo-owner", "demo");
+        var audit = (await owner.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/audit?action=device.power")).EnumerateArray().ToList();
+        Assert.Contains(audit, a => a.GetProperty("summary").GetString() == $"Wake-on-LAN simulated for STD-12 ({offline.GetProperty("macAddress").GetString()}): demo mode, no network packet");
+        Assert.DoesNotContain(audit, a => a.GetProperty("summary").GetString()!.StartsWith("Wake-on-LAN sent to STD-12"));
+    }
+}

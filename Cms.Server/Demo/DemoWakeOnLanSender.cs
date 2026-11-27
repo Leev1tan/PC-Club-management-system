@@ -10,6 +10,8 @@ public sealed class DemoWakeOnLanSender : IWakeOnLanSender
 
     public DemoWakeOnLanSender(DemoSimulator simulator) => _simulator = simulator;
 
+    public bool Simulated => true;
+
     public Task SendAsync(Guid deviceId, byte[] mac, IPEndPoint target, CancellationToken ct = default)
     {
         _simulator.Wake(deviceId);
