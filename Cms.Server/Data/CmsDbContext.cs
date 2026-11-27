@@ -525,6 +525,7 @@ public partial class CmsDbContext : DbContext
 
         ConfigureEvents(modelBuilder);
         ConfigureAccounts(modelBuilder);
+        ConfigureBranding(modelBuilder);
     }
 }
 
@@ -1137,6 +1138,10 @@ public static class ClubSettingKeys
     public const string BarOrders = "bar.orders";
     /// <summary>Loyalty tiers by spend over a rolling period: JSON (Billing/Loyalty).</summary>
     public const string Loyalty = "loyalty.tiers";
+    /// <summary>Club theme: cyber (default), pro-dark, light or arcade (Branding/ClubBranding, Cms.Shared.ClubThemes).</summary>
+    public const string Theme = "club.theme";
+    /// <summary>Owner accent colour #RRGGBB; missing or empty: the accent of the theme (Branding/ClubBranding).</summary>
+    public const string Accent = "club.accent";
 }
 
 /// <summary>Shifts:RequireOpenShift (default true): cash and card payments need an open shift.</summary>

@@ -33,10 +33,17 @@ public static class ClubLanguage
         return before;
     }
 
-    /// <summary>What an approved PC gets with its heartbeat: lock screen language and club currency.</summary>
-    public static async Task<ClientSettings> ClientSettingsAsync(CmsDbContext db, CancellationToken ct = default) => new()
+    /// <summary>What an approved PC gets with its heartbeat: lock screen language, club currency, theme, accent and logo hash.</summary>
+    public static async Task<ClientSettings> ClientSettingsAsync(CmsDbContext db, CancellationToken ct = default)
     {
-        Language = await LoadAsync(db, ct),
-        Currency = (await db.CurrencyAsync(ct)).Code
-    };
+        var branding = await Cms.Server.Branding.ClubBranding.LoadAsync(db, ct);
+        return new ClientSettings
+        {
+            Language = await LoadAsync(db, ct),
+            Currency = (await db.CurrencyAsync(ct)).Code,
+            Theme = branding.Theme,
+            Accent = branding.Accent,
+            LogoSha256 = branding.LogoSha256
+        };
+    }
 }

@@ -174,6 +174,7 @@ public static partial class DemoSeeder
             await db.Products.ExecuteDeleteAsync(ct);
             await db.StaffUsers.ExecuteDeleteAsync(ct);
             await db.ClubSettings.ExecuteDeleteAsync(ct);
+            await db.ClubLogos.ExecuteDeleteAsync(ct);
             // The foreign keys of the bulk tables are checked once, when they are added back after the
             // insert, instead of once per row (PostgreSQL: DDL is part of the transaction)
             foreignKeys = await db.Database.SqlQueryRaw<ForeignKeyDefinition>(
@@ -215,6 +216,7 @@ public static partial class DemoSeeder
             await AuditLogGuard.ClearForDemoResetAsync(db, ct);
             await db.StaffUsers.ExecuteDeleteAsync(ct);
             await db.ClubSettings.ExecuteDeleteAsync(ct);
+            await db.ClubLogos.ExecuteDeleteAsync(ct);
         }
         db.ChangeTracker.Clear();
         if (db.Database.IsSqlite() &&

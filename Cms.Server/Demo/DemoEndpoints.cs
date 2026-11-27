@@ -24,8 +24,10 @@ public static class DemoEndpoints
                 (HttpMethods.IsDelete(request.Method) && request.Path.StartsWithSegments("/api")) ||
                 (HttpMethods.IsPost(request.Method) && request.Path.StartsWithSegments("/api/devices/register")) ||
                 (write && request.Path.StartsWithSegments("/api/staff")) ||
+                // The demo owner may switch the currency, the lock screen language and the club theme; a logo upload
+                // stays closed (anybody can sign in to the public demo, and the logo would be shown to every visitor)
                 (write && request.Path.StartsWithSegments("/api/settings") && !request.Path.StartsWithSegments("/api/settings/currency")
-                    && !request.Path.StartsWithSegments("/api/settings/language")) ||
+                    && !request.Path.StartsWithSegments("/api/settings/language") && !request.Path.StartsWithSegments("/api/settings/theme")) ||
                 (write && request.Path.StartsWithSegments("/api/reservations/settings")) ||
                 (write && request.Path.StartsWithSegments("/api/orders/settings")) ||
                 (write && request.Path.StartsWithSegments("/api/auth/password")) ||

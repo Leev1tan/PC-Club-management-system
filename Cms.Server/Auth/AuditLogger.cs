@@ -22,6 +22,11 @@ public static class AuditActions
     public const string StaffPinRemoved = "settings.staff_pin_removed";
     public const string CurrencyChanged = "settings.currency_changed";
     public const string LanguageChanged = "settings.language_changed";
+    /// <summary>Club theme or accent colour changed (old and new values).</summary>
+    public const string ThemeChanged = "settings.theme_changed";
+    /// <summary>Club logo uploaded: type, size, pixels and the first 12 hex characters of its SHA-256, never the bytes.</summary>
+    public const string LogoChanged = "settings.logo_changed";
+    public const string LogoRemoved = "settings.logo_removed";
 
     public const string DeviceRegistered = "device.registered";
     public const string DeviceApproved = "device.approved";
