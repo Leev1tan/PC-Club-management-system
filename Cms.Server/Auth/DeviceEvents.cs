@@ -16,11 +16,16 @@ public static class DeviceEvents
 
     public const int MaxPerHour = 30;
 
+    /// <summary>Game events per PC and hour (a fake flood of the inbox cannot fill the table).</summary>
+    public const int MaxGameEventsPerHour = 120;
+
     public static async Task<Result> RecordAsync(CmsDbContext db, AuditLogger? audit, DeviceEntity device, DeviceEventRequest e,
-        DateTimeOffset now, ClubClock? clock = null, CancellationToken ct = default)
+        DateTimeOffset now, ClubClock? clock = null, CancellationToken ct = default, DeviceRuntimeState? runtime = null)
     {
-        if (e.Id == Guid.Empty || !string.Equals(e.Type, LauncherEvent.StaffUnlock, StringComparison.Ordinal)) return Result.Invalid;
-        if (e.OccurredUtc < now.AddDays(-30) || e.OccurredUtc > now.AddDays(1)) return Result.Invalid;
+        if (e.Id == Guid.Empty || e.OccurredUtc < now.AddDays(-30) || e.OccurredUtc > now.AddDays(1)) return Result.Invalid;
+        if (e.Type is LauncherEvent.GameStarted or LauncherEvent.GameStopped)
+            return await RecordGameAsync(db, device, e, now, runtime, ct);
+        if (!string.Equals(e.Type, LauncherEvent.StaffUnlock, StringComparison.Ordinal)) return Result.Invalid;
         if (audit == null) return Result.Invalid;
 
         var target = device.Id.ToString();
@@ -44,6 +49,22 @@ public static class DeviceEvents
             $"Emergency staff PIN unlock on {device.Hostname} at {local:yyyy-MM-dd HH:mm} ({reason})",
             new { eventId, device.Hostname, occurredUtc = e.OccurredUtc, reportedUtc = now, lockReason = e.LockReason,
                   windowsUser = e.WindowsUser is { Length: > 64 } w ? w[..64] : e.WindowsUser }, ct: ct);
+        return Result.Recorded;
+    }
+
+    /// <summary>
+    /// Current game of the PC: a play opens or closes now (the event time only when it is in the last
+    /// minutes, so a PC clock that is wrong cannot move plays into other days).
+    /// </summary>
+    private static async Task<Result> RecordGameAsync(CmsDbContext db, DeviceEntity device, DeviceEventRequest e, DateTimeOffset now,
+        DeviceRuntimeState? runtime, CancellationToken ct)
+    {
+        if (e.GameId is not { } gameId || gameId == Guid.Empty) return Result.Invalid;
+        if (runtime != null && !runtime.TakeGameEvent(device.Id, now, MaxGameEventsPerHour)) return Result.TooMany;
+        var at = e.OccurredUtc <= now && e.OccurredUtc >= now.AddMinutes(-10) ? e.OccurredUtc : now;
+        if (e.Type == LauncherEvent.GameStarted)
+            return await Cms.Server.Devices.GamePlays.StartAsync(db, device.Id, gameId, at, ct) ? Result.Recorded : Result.Invalid;
+        await Cms.Server.Devices.GamePlays.StopAsync(db, device.Id, gameId, at, ct);
         return Result.Recorded;
     }
 }

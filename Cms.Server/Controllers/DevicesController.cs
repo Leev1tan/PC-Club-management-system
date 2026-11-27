@@ -101,6 +101,8 @@ public class DevicesController : ControllerBase
         var tariffNames = await _db.Tariffs.AsNoTracking().Where(t => tariffIds.Contains(t.Id)).ToDictionaryAsync(t => t.Id, t => t.Name);
 
         // Commands queued for a device but not yet acknowledged by its agent
+        var games = await Cms.Server.Devices.GamePlays.CurrentAsync(_db, activeSessions.ToDictionary(kv => kv.Key, kv => kv.Value.Id));
+
         var pendingCommands = await _db.Commands.AsNoTracking()
             .Where(c => c.Status == "pending" || c.Status == "delivered")
             .GroupBy(c => c.DeviceId)
@@ -132,7 +134,10 @@ public class DevicesController : ControllerBase
                 SessionLabel = session == null ? null
                     : session.PackageId.HasValue && packageNames.TryGetValue(session.PackageId.Value, out var package) ? package
                     : session.TariffId.HasValue && tariffNames.TryGetValue(session.TariffId.Value, out var tariff) ? tariff : null,
-                SessionIsPackage = session?.PackageId != null
+                SessionIsPackage = session?.PackageId != null,
+                CurrentGame = games.TryGetValue(d.Id, out var game) ? game.Name : null,
+                CurrentGameColor = game?.Color,
+                CurrentGameStartedUtc = game?.StartUtc
             };
         }));
     }
@@ -211,9 +216,28 @@ public class DevicesController : ControllerBase
     }
 
     /// <summary>
-    /// Agent: reports what happened on the PC while the server could not see it. Today only
-    /// "staff_unlock" (the staff PIN on the lock screen, checked offline), written to the audit log
-    /// as device.emergency_unlock. The same event id is recorded once; at most 30 per PC and hour.
+    /// Agent: the game catalog of this PC (active entries of its zone) for the lock screen. Strong ETag:
+    /// with If-None-Match of the same catalog the answer is 304 without a body.
+    /// </summary>
+    [HttpGet("{deviceId:guid}/games")]
+    [Authorize(Policy = Policies.ApprovedDevice)]
+    public async Task<IActionResult> Games(Guid deviceId)
+    {
+        if (User.DeviceId() != deviceId) return Forbid();
+        var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId);
+        if (device == null) return NotFound();
+        var (json, etag) = Cms.Server.Devices.GameCatalog.Serialize(await Cms.Server.Devices.GameCatalog.ForZoneAsync(_db, device.ZoneId));
+        Response.Headers.ETag = etag;
+        Response.Headers.CacheControl = "no-cache";
+        if (Request.Headers.IfNoneMatch.Any(v => v != null && v.Split(',').Any(t => t.Trim() == etag)))
+            return StatusCode(StatusCodes.Status304NotModified);
+        return Content(json, "application/json");
+    }
+
+    /// <summary>
+    /// Agent: reports what happened on the PC. "staff_unlock" (the staff PIN on the lock screen, checked
+    /// offline) goes to the audit log as device.emergency_unlock (the same event id once, at most 30 per PC
+    /// and hour). "game_started" / "game_stopped" (GameId of a catalog entry) record the current game.
     /// </summary>
     [HttpPost("{deviceId:guid}/events")]
     [Authorize(Policy = Policies.ApprovedDevice)]
@@ -222,7 +246,7 @@ public class DevicesController : ControllerBase
         if (User.DeviceId() != deviceId) return Forbid();
         var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId);
         if (device == null) return NotFound();
-        var result = await DeviceEvents.RecordAsync(_db, _audit, device, request, _clock?.UtcNow ?? DateTimeOffset.UtcNow, _clock);
+        var result = await DeviceEvents.RecordAsync(_db, _audit, device, request, _clock?.UtcNow ?? DateTimeOffset.UtcNow, _clock, runtime: _runtime);
         return result switch
         {
             DeviceEvents.Result.Recorded or DeviceEvents.Result.Duplicate => Ok(new { recorded = result == DeviceEvents.Result.Recorded }),
@@ -323,10 +347,14 @@ public record DeviceDetailView(
     /// <summary>Package or tariff name of the active session.</summary>
     public string? SessionLabel { get; init; }
     public bool SessionIsPackage { get; init; }
+    /// <summary>Game that runs in the active session (reported by the lock screen), its tile colour and start.</summary>
+    public string? CurrentGame { get; init; }
+    public string? CurrentGameColor { get; init; }
+    public DateTimeOffset? CurrentGameStartedUtc { get; init; }
 }
 public record EnqueueCommandRequest(string Type, object? Payload);
 /// <summary>Event of the PC (Cms.Shared.LauncherEvent): Id (for de-duplication), Type staff_unlock, when, why the PC was locked.</summary>
-public record DeviceEventRequest(Guid Id, string? Type, DateTimeOffset OccurredUtc, string? LockReason = null, string? WindowsUser = null);
+public record DeviceEventRequest(Guid Id, string? Type, DateTimeOffset OccurredUtc, string? LockReason = null, string? WindowsUser = null, Guid? GameId = null);
 public record CommandView(Guid Id, string Type, object? Payload);
 public record AckCommandRequest(string Status, string? Result);
 public record AssignZoneRequest(Guid? ZoneId);

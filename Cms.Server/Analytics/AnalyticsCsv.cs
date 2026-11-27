@@ -94,6 +94,12 @@ public static class AnalyticsCsv
             csv.Row(t.T("Товар бару", "Bar product"), t.T("Категорія", "Category"), t.T("Кількість", "Quantity"), M("Сума", "Amount"));
             foreach (var item in a.Bar.Items) csv.Row(item.Name, item.Category, item.Quantity, item.Amount);
         }
+        if (a.TopGames.Count > 0)
+        {
+            csv.Blank();
+            csv.Row(t.T("Гра", "Game"), t.T("Категорія", "Category"), t.T("Запусків", "Plays"), t.T("Годин", "Hours"), t.T("Частка, %", "Share, %"));
+            foreach (var g in a.TopGames) csv.Row(g.Name, g.Category, g.Plays, g.Hours, g.Share);
+        }
         return csv.ToBytes();
     }
 }

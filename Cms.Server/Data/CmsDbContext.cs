@@ -26,6 +26,9 @@ public class CmsDbContext : DbContext
     public DbSet<StockMovementEntity> StockMovements => Set<StockMovementEntity>();
     public DbSet<SaleEntity> Sales => Set<SaleEntity>();
     public DbSet<SaleItemEntity> SaleItems => Set<SaleItemEntity>();
+    public DbSet<GameEntity> Games => Set<GameEntity>();
+    public DbSet<GameZoneEntity> GameZones => Set<GameZoneEntity>();
+    public DbSet<GamePlayEntity> GamePlays => Set<GamePlayEntity>();
 
     /// <summary>
     /// Cash and card rows of the ledger need an open shift (Shifts:RequireOpenShift, default true).
@@ -287,6 +290,45 @@ public class CmsDbContext : DbContext
             entity.HasOne<SaleEntity>().WithMany().HasForeignKey(e => e.SaleId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ProductEntity>().WithMany().HasForeignKey(e => e.ProductId).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.SaleId);
+        });
+
+        modelBuilder.Entity<GameEntity>(entity =>
+        {
+            entity.ToTable("Games");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Category).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.LaunchKind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.ExePath).HasMaxLength(260);
+            entity.Property(e => e.Arguments).HasMaxLength(500);
+            entity.Property(e => e.WorkingDirectory).HasMaxLength(260);
+            entity.Property(e => e.LaunchUrl).HasMaxLength(500);
+            entity.Property(e => e.ProcessName).HasMaxLength(100);
+            entity.Property(e => e.Color).HasMaxLength(7).IsRequired();
+            entity.HasIndex(e => new { e.SortOrder, e.Name });
+        });
+
+        modelBuilder.Entity<GameZoneEntity>(entity =>
+        {
+            entity.ToTable("GameZones");
+            entity.HasKey(e => new { e.GameId, e.ZoneId });
+            entity.HasOne<GameEntity>().WithMany().HasForeignKey(e => e.GameId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<ZoneEntity>().WithMany().HasForeignKey(e => e.ZoneId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.ZoneId);
+        });
+
+        modelBuilder.Entity<GamePlayEntity>(entity =>
+        {
+            entity.ToTable("GamePlays");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.EndReason).HasMaxLength(16);
+            entity.HasOne<DeviceEntity>().WithMany().HasForeignKey(e => e.DeviceId).OnDelete(DeleteBehavior.Cascade);
+            // Restrict: a game with play history is taken out of the catalog (inactive), never deleted
+            entity.HasOne<GameEntity>().WithMany().HasForeignKey(e => e.GameId).OnDelete(DeleteBehavior.Restrict);
+            // SessionId and UserId are plain ids (the demo reset truncates the table with the sessions)
+            entity.HasIndex(e => new { e.DeviceId, e.EndUtc });
+            entity.HasIndex(e => e.StartUtc);
+            entity.HasIndex(e => e.GameId);
         });
 
         modelBuilder.Entity<UserEntity>(entity =>
@@ -681,6 +723,68 @@ public class SaleItemEntity
     public decimal UnitPrice { get; set; }
     public int Quantity { get; set; }
     public decimal LineTotal { get; set; }
+}
+
+/// <summary>
+/// Entry of the game catalog (spec area 8). The lock screen of a PC shows the active entries of its zone
+/// (AllZones, or a GameZones row) and starts only these. Kind exe: ExePath, Arguments, WorkingDirectory;
+/// steam: SteamAppId; url: LaunchUrl with an allowed scheme (Cms.Shared.GameLaunchRules). Tile: initials
+/// on Color (no logos). A game with plays is taken out of the catalog (inactive), not deleted.
+/// </summary>
+public class GameEntity
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string LaunchKind { get; set; } = Cms.Shared.GameLaunchKinds.Exe;
+    public string? ExePath { get; set; }
+    public string? Arguments { get; set; }
+    public string? WorkingDirectory { get; set; }
+    public int? SteamAppId { get; set; }
+    public string? LaunchUrl { get; set; }
+    /// <summary>Process that shows the game runs (without .exe), for Steam and URL entries; empty = the exe name.</summary>
+    public string? ProcessName { get; set; }
+    /// <summary>On the lock screens of all zones; otherwise only the zones in GameZones.</summary>
+    public bool AllZones { get; set; } = true;
+    public string Color { get; set; } = "#6366f1";
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedUtc { get; set; }
+    public DateTimeOffset UpdatedUtc { get; set; }
+}
+
+/// <summary>A zone in which a catalog entry is shown (only for entries with AllZones = false).</summary>
+public class GameZoneEntity
+{
+    public Guid GameId { get; set; }
+    public Guid ZoneId { get; set; }
+}
+
+public static class GamePlayEndReasons
+{
+    /// <summary>The lock screen reported that the game stopped.</summary>
+    public const string Stopped = "stopped";
+    /// <summary>Another game started on the PC.</summary>
+    public const string Switched = "switched";
+    /// <summary>The session of the PC ended (teardown).</summary>
+    public const string SessionEnded = "session_end";
+}
+
+/// <summary>
+/// A game played on a PC (reported by the lock screen through the agent): the current game on the PC map
+/// and the "top games" of the analytics. An open play (EndUtc null) counts only while its session is the
+/// active session of the PC; the server closes it at the end of the session.
+/// </summary>
+public class GamePlayEntity
+{
+    public Guid Id { get; set; }
+    public Guid DeviceId { get; set; }
+    public Guid GameId { get; set; }
+    public Guid? SessionId { get; set; }
+    public Guid? UserId { get; set; }
+    public DateTimeOffset StartUtc { get; set; }
+    public DateTimeOffset? EndUtc { get; set; }
+    public string? EndReason { get; set; }
 }
 
 public class HeartbeatEntity

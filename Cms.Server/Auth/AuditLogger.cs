@@ -68,6 +68,10 @@ public static class AuditActions
     public const string ShiftClosed = "shift.closed";
     public const string ShiftCashPayout = "shift.cash_payout";
 
+    public const string GameCreated = "game.created";
+    public const string GameUpdated = "game.updated";
+    public const string GameDeleted = "game.deleted";
+
     public const string ProductCreated = "product.created";
     public const string ProductUpdated = "product.updated";
     public const string ProductPriceChanged = "product.price_changed";

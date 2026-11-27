@@ -204,6 +204,131 @@ namespace Cms.Server.Migrations
                     b.ToTable("Devices");
                 });
 
+            modelBuilder.Entity("Cms.Server.Data.GameEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AllZones")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Arguments")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExePath")
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LaunchKind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("LaunchUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ProcessName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SteamAppId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WorkingDirectory")
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SortOrder", "Name");
+
+                    b.ToTable("Games", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.GamePlayEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EndReason")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset?>("EndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GameId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("StartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GameId");
+
+                    b.HasIndex("StartUtc");
+
+                    b.HasIndex("DeviceId", "EndUtc");
+
+                    b.ToTable("GamePlays", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.GameZoneEntity", b =>
+                {
+                    b.Property<Guid>("GameId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ZoneId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("GameId", "ZoneId");
+
+                    b.HasIndex("ZoneId");
+
+                    b.ToTable("GameZones", (string)null);
+                });
+
             modelBuilder.Entity("Cms.Server.Data.HeartbeatEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -969,6 +1094,36 @@ namespace Cms.Server.Migrations
                         .WithMany()
                         .HasForeignKey("ZoneId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.GamePlayEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.DeviceEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cms.Server.Data.GameEntity", null)
+                        .WithMany()
+                        .HasForeignKey("GameId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.GameZoneEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.GameEntity", null)
+                        .WithMany()
+                        .HasForeignKey("GameId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Cms.Server.Data.ZoneEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ZoneId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Cms.Server.Data.HeartbeatEntity", b =>

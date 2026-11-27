@@ -77,7 +77,11 @@ public sealed record AnalyticsReport(
     AnalyticsRevenue Revenue, ZTime Time, ZBar Bar, ZCount TopUps, AnalyticsRefunds Refunds, ZBonus Bonus, ZDebt Debt,
     decimal Payouts, AnalyticsAverage AverageTicket, ZDesk Cash, ZDesk Card,
     string Granularity, IReadOnlyList<AnalyticsPoint> Series,
-    AnalyticsOccupancy Occupancy, AnalyticsHeatmap Heatmap, AnalyticsShifts Shifts, AnalyticsCheck Check);
+    AnalyticsOccupancy Occupancy, AnalyticsHeatmap Heatmap, AnalyticsShifts Shifts, AnalyticsCheck Check)
+{
+    /// <summary>Most played games of the period (hours inside the period), from the plays the lock screens report.</summary>
+    public IReadOnlyList<Cms.Server.Devices.GameStat> TopGames { get; init; } = Array.Empty<Cms.Server.Devices.GameStat>();
+}
 
 public static class AnalyticsService
 {
@@ -118,6 +122,7 @@ public static class AnalyticsService
         var items = await TopItemsAsync(db, rows, ct);
         var shifts = await ShiftsAsync(db, period, ct);
         var check = await CheckAsync(db, period, rows, total, clock.UtcNow, ct);
+        var games = await Cms.Server.Devices.GamePlays.TopAsync(db, period.FromUtc, period.EndUtc, clock.UtcNow, TopItems, ct);
 
         return new AnalyticsReport(
             period.Key, period.From, period.To, period.FromUtc, period.ToUtc, period.EndUtc,
@@ -135,7 +140,10 @@ public static class AnalyticsService
                 total.Receipts > 0 ? TariffCalculator.Round(total.BarSales.Total / total.Receipts) : null, total.Receipts),
             new ZDesk(total.CashIn, total.CashOut, total.CashNet), new ZDesk(total.CardIn, total.CardOut, total.CardNet),
             hourly ? "hour" : "day", series,
-            occupancy.Summary, occupancy.Heatmap, shifts, check);
+            occupancy.Summary, occupancy.Heatmap, shifts, check)
+        {
+            TopGames = games
+        };
     }
 
     /// <summary>Revenue (PC time + bar net) of today, the last 7 and the last 30 club days (dashboard tiles).</summary>

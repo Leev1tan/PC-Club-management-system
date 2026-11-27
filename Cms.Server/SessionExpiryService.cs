@@ -7,6 +7,7 @@ namespace Cms.Server;
 /// <summary>
 /// Every 5 s: ends prepaid and package sessions whose time ran out and locks their PCs. A paused
 /// session waits (its time stands still) unless its package cut-off (night pack 08:00) has passed.
+/// It also closes the game plays of sessions that ended.
 /// </summary>
 public sealed class SessionExpiryService : BackgroundService
 {
@@ -46,5 +47,9 @@ public sealed class SessionExpiryService : BackgroundService
         var closed = await new SessionService(db, devices, clock).CloseExpiredAsync(ct);
         if (closed > 0)
             _logger.LogInformation("Closed {Count} expired prepaid session(s)", closed);
+
+        // Games of ended sessions: the play ends with the session (the lock screen kills the game too)
+        db.ChangeTracker.Clear();
+        await Cms.Server.Devices.GamePlays.CloseStaleAsync(db, clock.UtcNow, ct);
     }
 }

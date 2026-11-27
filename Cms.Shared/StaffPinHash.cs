@@ -83,6 +83,8 @@ public static class AgentFiles
     public const string StaffPinFile = "staff-pin.json";
     /// <summary>Club settings for the lock screen: language and currency (Cms.Shared.ClientSettings).</summary>
     public const string ClientSettingsFile = "client-settings.json";
+    /// <summary>Game catalog of this PC (Cms.Shared.CatalogFile), written by the agent.</summary>
+    public const string CatalogFile = "games.json";
     public const string DeviceFile = "device.json";
     public const string EnrollmentTokenFile = "enrollment-token.txt";
     /// <summary>
@@ -109,6 +111,10 @@ public sealed class StaffPinFile
 public sealed class LauncherEvent
 {
     public const string StaffUnlock = "staff_unlock";
+    /// <summary>The lock screen started a catalog entry (GameId).</summary>
+    public const string GameStarted = "game_started";
+    /// <summary>The game of GameId stopped (closed by the player, or killed at the end of the session).</summary>
+    public const string GameStopped = "game_stopped";
     public const int MaxFileBytes = 4096;
 
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -118,6 +124,8 @@ public sealed class LauncherEvent
     public string? LockReason { get; set; }
     /// <summary>Windows account that ran the lock screen.</summary>
     public string? WindowsUser { get; set; }
+    /// <summary>Catalog entry of a game_started or game_stopped event.</summary>
+    public Guid? GameId { get; set; }
 
     public static string FileName(Guid id) => $"event-{id:N}.json";
 }
