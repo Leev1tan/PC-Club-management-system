@@ -79,6 +79,10 @@ else
         options.UseNpgsql(connectionString));
 }
 
+// Club time zone for tariff rules and packages (Club:TimeZone, default Europe/Kyiv)
+builder.Services.AddSingleton(sp => Cms.Server.Billing.ClubClock.FromConfiguration(
+    builder.Configuration, sp.GetRequiredService<ILoggerFactory>().CreateLogger("Cms.Server.Billing")));
+
 // Repositories
 builder.Services.AddSingleton<DeviceRuntimeState>();
 builder.Services.AddScoped<Cms.Server.Repositories.IDeviceRepository, Cms.Server.Repositories.EfDeviceRepository>();
