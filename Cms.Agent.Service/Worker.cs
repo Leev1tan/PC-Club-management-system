@@ -19,7 +19,7 @@ namespace Cms.Agent.Service;
 ///    private\device.json, private\enrollment-token.txt            - SYSTEM, Administrators, agent only
 ///    inbox\event-*.json - written by the launcher (emergency PIN unlock), sent to the server, then deleted
 /// </summary>
-public class Worker : BackgroundService
+public partial class Worker : BackgroundService
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
 
@@ -36,6 +36,7 @@ public class Worker : BackgroundService
     // Lock state, shared by the server loop (commands) and the local loop (state.json)
     private readonly object _gate = new();
     private DateTimeOffset? _sessionEndUtc;
+    private ClientSessionInfo? _session;
     private bool _manualLockRequested;
     private bool? _lastLocked;
     private DateTimeOffset _lockChangedUtc = DateTimeOffset.UtcNow;
@@ -74,6 +75,7 @@ public class Worker : BackgroundService
         LoadRuntimeState();
 
         var localLoop = RunLocalStateLoopAsync(stoppingToken);
+        var pipe = RunLauncherPipeAsync(stoppingToken);
         try
         {
             await RunServerLoopAsync(stoppingToken);
@@ -83,6 +85,7 @@ public class Worker : BackgroundService
             // service stops
         }
         await localLoop;
+        await pipe;
     }
 
     // ──── LOCAL STATE FOR THE LAUNCHER ────
@@ -131,7 +134,11 @@ public class Worker : BackgroundService
                     _lockChangedUtc = now;
                 }
                 var reason = _manualLockRequested ? "manual" : sessionExpired ? "session_expired" : "none";
-                state = new AgentState(locked, remaining, _sessionEndUtc, reason, _serverUrl, _lockChangedUtc, _enrollmentStatus);
+                state = new AgentState(locked, remaining, _sessionEndUtc, reason, _serverUrl, _lockChangedUtc, _enrollmentStatus)
+                {
+                    AgentPid = Environment.ProcessId,
+                    Session = _session
+                };
             }
 
             WriteAtomic(Path.Combine(AgentDir, AgentFiles.StateFile), JsonSerializer.Serialize(state, JsonOptions));
@@ -772,6 +779,11 @@ public class Worker : BackgroundService
                     UpdateStaffPin(pin.ValueKind == JsonValueKind.String ? pin.GetString() : null);
                 if (_enrollmentStatus == "approved" && root.TryGetProperty("client", out var client) && client.ValueKind == JsonValueKind.Object)
                     UpdateClientSettings(client.GetRawText());
+                if (_enrollmentStatus == "approved" && root.TryGetProperty("session", out var session))
+                {
+                    var info = session.ValueKind == JsonValueKind.Object ? session.Deserialize<ClientSessionInfo>(JsonOptions) : null;
+                    lock (_gate) _session = info;
+                }
             }
         }
         catch (JsonException ex)
@@ -1015,7 +1027,13 @@ public class Worker : BackgroundService
         string LockReason,
         string? ServerUrl,
         DateTimeOffset? LockChangedUtc,
-        string? Enrollment);
+        string? Enrollment)
+    {
+        /// <summary>Process id of the agent: the lock screen talks only to a pipe server with this id.</summary>
+        public int AgentPid { get; init; }
+        /// <summary>Active session from the last heartbeat (player, tariff, planned end), for display only.</summary>
+        public ClientSessionInfo? Session { get; init; }
+    }
 
     private sealed record LauncherConfig(string ServerUrl);
 

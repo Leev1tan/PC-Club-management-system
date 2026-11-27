@@ -29,11 +29,28 @@ public sealed class LauncherTexts
     public required string SecretLabel { get; init; }
     public required string LoginButton { get; init; }
     public required string LoginBusy { get; init; }
-    public required string GuestLink { get; init; }
     public required string EnterUsername { get; init; }
     public required string WrongLogin { get; init; }
     public required string ServerError { get; init; }
     public required string NoConnection { get; init; }
+    public required string EnterSecret { get; init; }
+    public required string LoginLocked { get; init; }
+    public required string LoginStarting { get; init; }
+    public required string InsufficientBalance { get; init; }
+    public required string PlayerHasDebt { get; init; }
+    public required string DeviceBusy { get; init; }
+    public required string PackageUnavailable { get; init; }
+    public required string NoTariff { get; init; }
+    public required string AgentUnavailable { get; init; }
+    public required string SessionGone { get; init; }
+
+    // How the player pays (offers of the PC's zone)
+    public required string OffersTitle { get; init; }
+    public required string OfferBalance { get; init; }
+    public required string OfferBalanceHint { get; init; }
+    public required string OfferMinutes { get; init; }
+    public required string OfferPackage { get; init; }
+    public required string OffersUnavailable { get; init; }
 
     // Session panel
     public required string SessionActive { get; init; }
@@ -44,6 +61,17 @@ public sealed class LauncherTexts
     public required string ExtendTitle { get; init; }
     public required string ExtendHint { get; init; }
     public required string LowTimeBanner { get; init; }
+    public required string LastMinuteBanner { get; init; }
+    public required string BalanceTimeLabel { get; init; }
+    public required string SessionPaused { get; init; }
+    public required string TariffLine { get; init; }
+    public required string PackageLine { get; init; }
+    public required string BonusLine { get; init; }
+    public required string EndSessionButton { get; init; }
+    public required string EndSessionTitle { get; init; }
+    public required string EndSessionPrepaid { get; init; }
+    public required string EndSessionBalance { get; init; }
+    public required string EndSessionFailed { get; init; }
 
     // Game grid (the catalog of the PC's zone, only during a session)
     public required string GamesTitle { get; init; }
@@ -87,11 +115,27 @@ public sealed class LauncherTexts
         SecretLabel = "> PIN АБО ПАРОЛЬ",
         LoginButton = "[ УВІЙТИ ]",
         LoginBusy = "Вхід...",
-        GuestLink = ">_ продовжити як гість",
         EnterUsername = "Введіть логін",
         WrongLogin = "Невірний логін або пароль",
         ServerError = "Помилка сервера ({0})",
         NoConnection = "Немає зв'язку з сервером: {0}",
+        EnterSecret = "Введіть PIN або пароль",
+        LoginLocked = "Забагато невдалих спроб. Спробуйте через {0} хв або зверніться до адміністратора.",
+        LoginStarting = "Вхід виконано. Сесія починається…",
+        InsufficientBalance = "Недостатньо коштів на балансі. Поповніть баланс на рецепції.",
+        PlayerHasDebt = "На вашому рахунку борг. Сплатіть його на рецепції або виберіть передоплачений час.",
+        DeviceBusy = "На цьому ПК вже йде сесія.",
+        PackageUnavailable = "Цей варіант зараз недоступний. Виберіть інший.",
+        NoTariff = "Для цього ПК не задано тариф. Зверніться до адміністратора.",
+        AgentUnavailable = "Агент ПК не відповідає. Вхід зараз неможливий, зверніться до адміністратора.",
+        SessionGone = "Сесію вже завершено.",
+
+        OffersTitle = "> ЯК ОПЛАТИТИ",
+        OfferBalance = "З балансу, поки вистачить коштів",
+        OfferBalanceHint = "Тариф «{0}»: {1}/год зараз",
+        OfferMinutes = "{0} год — {1}",
+        OfferPackage = "Пакет «{0}» — {1}, до {2}",
+        OffersUnavailable = "Ціни зараз недоступні (немає зв'язку з сервером).",
 
         SessionActive = "АКТИВНО",
         Guest = "Гість",
@@ -101,6 +145,17 @@ public sealed class LauncherTexts
         ExtendTitle = "Подовження сесії",
         ExtendHint = "Щоб подовжити сесію, зверніться до адміністратора або поповніть баланс.",
         LowTimeBanner = "⚠ Залишилось {0} хв! Поповніть баланс або подовжте сесію",
+        LastMinuteBanner = "⚠ Залишилась 1 хвилина! Збережіть гру: ПК зараз заблокується.",
+        BalanceTimeLabel = "> ЧАС З БАЛАНСУ (ЗА ПОТОЧНОЮ ЦІНОЮ)",
+        SessionPaused = "> СЕСІЮ ПРИЗУПИНЕНО — ЗВЕРНІТЬСЯ ДО АДМІНІСТРАТОРА",
+        TariffLine = "Тариф: {0}",
+        PackageLine = "Пакет: {0}",
+        BonusLine = "бонус {0}",
+        EndSessionButton = "⏹ ЗАВЕРШИТИ СЕСІЮ",
+        EndSessionTitle = "Завершення сесії",
+        EndSessionPrepaid = "Завершити сесію зараз? Невикористаний оплачений час не повертається.",
+        EndSessionBalance = "Завершити сесію зараз? Зіграний час буде списано з балансу.",
+        EndSessionFailed = "Не вдалося завершити сесію: {0}",
 
         GamesTitle = "// ІГРИ",
         GamesSearch = "Пошук гри",
@@ -143,11 +198,27 @@ public sealed class LauncherTexts
         SecretLabel = "> PIN OR PASSWORD",
         LoginButton = "[ LOG IN ]",
         LoginBusy = "Logging in...",
-        GuestLink = ">_ continue as a guest",
         EnterUsername = "Enter your username",
         WrongLogin = "Wrong username or password",
         ServerError = "Server error ({0})",
         NoConnection = "No connection to the server: {0}",
+        EnterSecret = "Enter your PIN or password",
+        LoginLocked = "Too many failed attempts. Try again in {0} min or ask the staff.",
+        LoginStarting = "Logged in. The session starts…",
+        InsufficientBalance = "There is not enough money on your balance. Top up at the desk.",
+        PlayerHasDebt = "Your account has a debt. Pay it at the desk or choose prepaid time.",
+        DeviceBusy = "This PC already has a session.",
+        PackageUnavailable = "This choice is not available now. Choose another one.",
+        NoTariff = "This PC has no tariff. Ask the staff.",
+        AgentUnavailable = "The PC agent does not answer. Login is not possible now; ask the staff.",
+        SessionGone = "The session has already ended.",
+
+        OffersTitle = "> HOW TO PAY",
+        OfferBalance = "From my balance while the money lasts",
+        OfferBalanceHint = "Tariff \"{0}\": {1}/h now",
+        OfferMinutes = "{0} h — {1}",
+        OfferPackage = "Package \"{0}\" — {1}, until {2}",
+        OffersUnavailable = "Prices are not available now (no connection to the server).",
 
         SessionActive = "ACTIVE",
         Guest = "Guest",
@@ -157,6 +228,17 @@ public sealed class LauncherTexts
         ExtendTitle = "Extend the session",
         ExtendHint = "To extend the session, ask the staff or top up your balance.",
         LowTimeBanner = "⚠ {0} min left! Top up your balance or extend the session",
+        LastMinuteBanner = "⚠ 1 minute left! Save your game: the PC locks soon.",
+        BalanceTimeLabel = "> TIME FROM THE BALANCE (AT THE CURRENT PRICE)",
+        SessionPaused = "> THE SESSION IS PAUSED — ASK THE STAFF",
+        TariffLine = "Tariff: {0}",
+        PackageLine = "Package: {0}",
+        BonusLine = "bonus {0}",
+        EndSessionButton = "⏹ END THE SESSION",
+        EndSessionTitle = "End the session",
+        EndSessionPrepaid = "End the session now? Unused paid time is not refunded.",
+        EndSessionBalance = "End the session now? The time played is paid from your balance.",
+        EndSessionFailed = "The session could not be ended: {0}",
 
         GamesTitle = "// GAMES",
         GamesSearch = "Search games",

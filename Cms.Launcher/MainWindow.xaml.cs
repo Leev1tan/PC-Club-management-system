@@ -1,7 +1,4 @@
 ﻿using System.IO;
-using System.Net.Http;
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -15,7 +12,6 @@ namespace Cms.Launcher;
 public partial class MainWindow : Window
 {
     private readonly System.Windows.Threading.DispatcherTimer _timer = new();
-    private readonly HttpClient _http = new();
     private Border? _lockOverlay;
     private TextBlock? _lockCountdown;
     private TextBlock? _lockReasonText;
@@ -42,16 +38,6 @@ public partial class MainWindow : Window
     // Kiosk mode
     private bool _kioskMode = false;
     private KioskKeyboardHook? _kioskHook;
-
-    // Session state
-    private Guid? _userId;
-    private string? _username;
-    private decimal _balance;
-    private bool _isGuest;
-
-
-    // Server URL from agent state
-    private string _serverUrl = "http://localhost:5081";
 
     public MainWindow()
     {
@@ -225,95 +211,10 @@ public partial class MainWindow : Window
         return reader.ReadToEnd();
     }
 
-    // ──── LOGIN ────
-    private async void OnLoginClick(object sender, RoutedEventArgs e)
-    {
-        var username = UsernameBox.Text.Trim();
-        var password = PasswordBox.Password;
-
-        if (string.IsNullOrWhiteSpace(username))
-        {
-            ShowLoginError(_texts.EnterUsername);
-            return;
-        }
-
-        LoginButton.IsEnabled = false;
-        LoginButton.Content = _texts.LoginBusy;
-        LoginError.Visibility = Visibility.Collapsed;
-
-        try
-        {
-            var resp = await _http.PostAsJsonAsync($"{_serverUrl}/api/users/login",
-                new { Username = username, Password = string.IsNullOrEmpty(password) ? null : password });
-
-            if (resp.IsSuccessStatusCode)
-            {
-                var user = await resp.Content.ReadFromJsonAsync<UserResponse>();
-                if (user != null)
-                {
-                    _userId = user.id;
-                    _username = user.username;
-                    _balance = user.balance;
-                    _isGuest = false;
-                    EnterSessionMode();
-                    return;
-                }
-            }
-
-            var status = (int)resp.StatusCode;
-            ShowLoginError(status == 401 ? _texts.WrongLogin : LauncherTexts.Format(_texts.ServerError, status));
-        }
-        catch (Exception ex)
-        {
-            ShowLoginError(LauncherTexts.Format(_texts.NoConnection, ex.Message));
-        }
-        finally
-        {
-            LoginButton.IsEnabled = true;
-            LoginButton.Content = _texts.LoginButton;
-        }
-    }
-
-    private void OnGuestClick(object sender, RoutedEventArgs e)
-    {
-        _userId = null;
-        _username = null;
-        _balance = 0;
-        _isGuest = true;
-        EnterSessionMode();
-    }
-
-    private void ShowLoginError(string msg)
-    {
-        LoginError.Text = msg;
-        LoginError.Visibility = Visibility.Visible;
-    }
-
-    // ──── SESSION MODE ────
-    private void EnterSessionMode()
-    {
-        LoginPanel.Visibility = Visibility.Collapsed;
-        SessionPanel.Visibility = Visibility.Visible;
-
-        UpdateSessionHeader();
-
-        try
-        {
-            SessionHostname.Text = Environment.MachineName;
-        }
-        catch { SessionHostname.Text = ""; }
-    }
-
     // ──── EXTEND SESSION ────
     private void OnExtendClick(object sender, RoutedEventArgs e)
     {
         MessageBox.Show(this, _texts.ExtendHint, _texts.ExtendTitle, MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
-    private void UpdateSessionHeader()
-    {
-        SessionUser.Text = _isGuest || _username == null ? "👤 " + _texts.Guest : $"👤 {_username}";
-        SessionBalance.Text = _isGuest ? "" : "💰 " + LauncherFormat.Money(_balance, _settings);
     }
 
     // ──── LANGUAGE ────
@@ -355,8 +256,9 @@ public partial class MainWindow : Window
         UsernameLabel.Text = _texts.UsernameLabel;
         SecretLabel.Text = _texts.SecretLabel;
         if (LoginButton.IsEnabled) LoginButton.Content = _texts.LoginButton;
-        GuestLinkText.Text = _texts.GuestLink;
-        LoginStaffHint.Text = _texts.StaffHint;
+        OffersTitleText.Text = _texts.OffersTitle;
+        EndSessionButton.Content = _texts.EndSessionButton;
+        RenderOffers();
         SessionActiveText.Text = _texts.SessionActive;
         SessionStaffHint.Text = _texts.StaffHint;
         ExtendButton.Content = _texts.ExtendButton;
@@ -484,21 +386,17 @@ public partial class MainWindow : Window
             Panel.SetZIndex(_lockOverlay, 9999);
         }
         _languageButton.Click += OnLanguageClick;
+
+        // The login form is part of the lock screen: a locked PC without a session asks for the player login
+        if (Content is Grid main && main.Children.Contains(LoginPanel) && _lockOverlay.Child is StackPanel lockStack)
+        {
+            main.Children.Remove(LoginPanel);
+            lockStack.Children.Insert(lockStack.Children.IndexOf(_lockStaffHint!), LoginPanel);
+        }
+        try { SessionHostname.Text = Environment.MachineName; } catch { SessionHostname.Text = string.Empty; }
+
         RefreshClientSettings();
         ApplyTexts();
-
-        // Read server URL from agent config
-        try
-        {
-            var configPath = Path.Combine(AgentFiles.Directory, AgentFiles.ConfigFile);
-            if (File.Exists(configPath))
-            {
-                var config = JsonSerializer.Deserialize<LauncherConfig>(File.ReadAllText(configPath), LauncherJson.Options);
-                if (!string.IsNullOrWhiteSpace(config?.ServerUrl))
-                    _serverUrl = config.ServerUrl.TrimEnd('/');
-            }
-        }
-        catch { }
 
         // Poll every 2 seconds
         _timer.Interval = TimeSpan.FromSeconds(2);
@@ -536,11 +434,10 @@ public partial class MainWindow : Window
             RefreshCatalog();
             TrackGames();
 
-            if (state != null && !string.IsNullOrWhiteSpace(state.ServerUrl))
-                _serverUrl = state.ServerUrl.TrimEnd('/');
-
+            UpdateSessionHeader();
             UpdateCountdowns(state?.RemainingSeconds ?? 0);
             UpdateLockReason(decision);
+            UpdateLoginPanel(decision);
 
             if (decision.Locked)
                 SetLocked();
@@ -604,6 +501,7 @@ public partial class MainWindow : Window
         {
             LockReason.AgentSilent => _texts.AgentNotResponding,
             LockReason.NoAgentState => _texts.NoAgentState,
+            LockReason.LockedByAgent when _lastState?.Session is { Paused: true } => _texts.SessionPaused,
             _ => string.Empty
         };
         _lockReasonText.Text = text;
@@ -627,24 +525,16 @@ public partial class MainWindow : Window
             }
         }
 
-        // Session panel countdown
-        if (SessionPanel.Visibility != Visibility.Visible) return;
+        // Session panel countdown and the warnings at 10, 5 and 1 minute left
+        var unlocked = _lastDecision is { Locked: false };
+        var session = _lastState?.Session;
         if (remaining > 0)
         {
             SessionCountdown.Text = LauncherFormat.Clock(remaining);
-            SessionTimeLabel.Text = _texts.TimeLeftLabel;
-
-            // 5-minute warning
-            if (remaining <= 300)
-            {
-                WarningBanner.Visibility = Visibility.Visible;
-                var mins = (int)Math.Ceiling(remaining / 60.0);
-                WarningText.Text = LauncherTexts.Format(_texts.LowTimeBanner, mins);
-            }
-            else
-            {
-                WarningBanner.Visibility = Visibility.Collapsed;
-            }
+            SessionTimeLabel.Text = session?.FromBalance == true ? _texts.BalanceTimeLabel : _texts.TimeLeftLabel;
+            var low = unlocked && remaining <= 600;
+            WarningBanner.Visibility = low ? Visibility.Visible : Visibility.Collapsed;
+            WarningText.Text = remaining <= 60 ? _texts.LastMinuteBanner : LauncherTexts.Format(_texts.LowTimeBanner, (int)Math.Ceiling(remaining / 60.0));
         }
         else
         {
@@ -652,11 +542,13 @@ public partial class MainWindow : Window
             SessionTimeLabel.Text = _texts.OpenEndedLabel;
             WarningBanner.Visibility = Visibility.Collapsed;
         }
+        if (unlocked) AnnounceLowTime();
     }
 
     private void SetLocked()
     {
         if (_lockOverlay != null) _lockOverlay.Visibility = Visibility.Visible;
+        SessionPanel.Visibility = Visibility.Collapsed; // nothing behind the lock screen takes keyboard focus
         this.Topmost = true;
         KeyboardBlocker.Enable();
     }
@@ -664,6 +556,7 @@ public partial class MainWindow : Window
     private void SetUnlocked()
     {
         if (_lockOverlay != null) _lockOverlay.Visibility = Visibility.Collapsed;
+        SessionPanel.Visibility = Visibility.Visible;
         this.Topmost = false;
         KeyboardBlocker.Disable();
     }
@@ -687,6 +580,10 @@ internal record LauncherState(
     string? LockReason,
     string? ServerUrl,
     DateTimeOffset? LockChangedUtc = null,
-    string? Enrollment = null);
-
-internal record UserResponse(Guid id, string username, string displayName, decimal balance, decimal bonusPoints);
+    string? Enrollment = null)
+{
+    /// <summary>Process id of the agent (the pipe server must be this process).</summary>
+    public int AgentPid { get; init; }
+    /// <summary>Active session from the server (player, tariff, planned end), for display.</summary>
+    public ClientSessionInfo? Session { get; init; }
+}
