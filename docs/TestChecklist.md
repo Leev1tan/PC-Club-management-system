@@ -535,7 +535,7 @@ PowerShell on the club PC (Ctrl+Alt+Del > Switch user > `ClubAdmin`, or the gues
 Bench as in Test 25 (kiosk mode, the agent as LocalService). The guard of the locked screen works every second, only
 while the PC is locked: in a running session it does nothing. Version: the release of the tag `v0.9.1-beta.1` shows
 `0.9.1.0` (file version, agent log, installer); a dry-run build (`dryrun-<commit>`) shows `0.0.0.0` on purpose.
-Prepare two catalog entries (zone of the club PC):
+Prepare these catalog entries (zone of the club PC):
 - "Calc" (`C:\Windows\System32\calc.exe`): on a PC without the Store Calculator it opens the Windows "Open with" dialog.
 - "Topmost test": as administrator copy `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` to
   `C:\Users\Public\explorer.exe` (a program of the player with the NAME of a Windows program). Exe
@@ -561,8 +561,8 @@ Prepare two catalog entries (zone of the club PC):
 2. In the session start "Topmost test" (the window "TOPMOST TEST" is above everything, also in the session: that is
    correct). Pause the session.
 - [ ] Within 3 s the window is no longer on the screen (pushed down: not top-most, minimized; in a pause the program
-      is closed only when it comes back above the locked screen): a program with the name of a Windows program is not
-      trusted (3aa3619 left it above the locked screen). The real Windows programs (`C:\Windows\explorer.exe`, the
+      is closed only when the push-down does not hold or when it comes back above the locked screen for the third
+      time): a program with the name of a Windows program is not trusted (3aa3619 left it above the locked screen). The real Windows programs (`C:\Windows\explorer.exe`, the
       touch keyboard, the IME) are never touched; this is in the unit tests (LockScreenGuardTests).
 - [ ] End the session: within 15 s after the end the process `explorer` of `C:\Users\Public` is ended (teardown, or the
       guard 10 s after the lock).
