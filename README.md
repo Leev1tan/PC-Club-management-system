@@ -38,9 +38,11 @@ The images below come from demo mode (30 days of simulated history; Ukrainian in
 | ![Owner analytics, 30 days](docs/screenshots/analytics-uk.png) | ![Owner analytics in English](docs/screenshots/analytics-en.png) |
 | **Owner analytics**: revenue by day (PC time and bar), payment methods, occupancy by zone, heatmap weekday × hour, cash variance of the shifts, check against the ledger and the Z-reports | **The same in English** (UA / EN switch in the top bar) |
 | ![PC map](docs/screenshots/pc-map.png) | ![Bar checkout](docs/screenshots/bar-checkout.png) |
-| **PC map**: the PCs by zone, free / busy / paused / offline, time left, packages | **Bar checkout**: product tiles with stock, receipt, cash / card / player balance |
+| **PC map**: the PCs by zone, free / busy / paused / offline, time left, packages, the game each busy PC plays | **Bar checkout**: product tiles with stock, receipt, cash / card / player balance |
 | ![Z-report of a shift](docs/screenshots/z-report.png) | ![Analytics on a phone](docs/screenshots/analytics-phone.png) |
 | **Z-report** of a closed shift: variance, reconciled with the ledger, audit anchor | **Analytics on a phone** (390 px wide) |
+| ![Game catalog](docs/screenshots/games.png) | |
+| **Game catalog**: what the lock screens start (Steam AppID, a program, a launcher link), per zone, generated tiles (no logos) | |
 
 ![Dashboard (demo mode)](docs/screenshots/dashboard.png)
 
