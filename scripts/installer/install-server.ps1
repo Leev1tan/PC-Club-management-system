@@ -259,7 +259,9 @@ try {
 
 $appsettings = Join-Path $InstallPath "appsettings.json"
 
-# Keep the enrollment token (the club PCs were installed with it) and the time zone of an earlier install
+# Keep the enrollment token (the club PCs were installed with it) and the time zone of an earlier install.
+# $tokenIsNew: this run made the token, so the end of the run shows it once (the staff do not know it yet).
+$tokenIsNew = $false
 if (Test-Path $appsettings) {
     try {
         $previous = Get-Content $appsettings -Raw | ConvertFrom-Json
@@ -272,6 +274,7 @@ if (-not $EnrollmentToken) {
     $bytes = New-Object byte[] 24
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     $EnrollmentToken = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    $tokenIsNew = $true
 }
 
 $serviceName = "ClubServer"
@@ -387,8 +390,16 @@ if (Test-Path $setupFile) {
 }
 Write-Host ""
 Write-Host "Install the club PCs with:" -ForegroundColor White
-Write-Host "  ClubClientSetup.exe -ServerUrl `"http://<this-server-or-router>:$HttpPort`" -EnrollmentToken `"$EnrollmentToken`"" -ForegroundColor Cyan
-Write-Host "  Keep the token secret. Without it a PC waits for approval in the admin UI (Devices)." -ForegroundColor Gray
+if ($tokenIsNew) {
+    Write-Host "  ClubClientSetup.exe -ServerUrl `"http://<this-server-or-router>:$HttpPort`" -EnrollmentToken `"$EnrollmentToken`"" -ForegroundColor Cyan
+    Write-Host "  This run made the enrollment token. Keep it secret. Without it a PC waits for approval in the admin UI (Devices)." -ForegroundColor Gray
+} else {
+    # Windows re-test 2026-11-27 late, LOW 7: an update printed -EnrollmentToken "" and staff could think that the token
+    # was empty. A token that staff know already (kept, or given with -EnrollmentToken) is never shown again.
+    Write-Host "  ClubClientSetup.exe -ServerUrl `"http://<this-server-or-router>:$HttpPort`" -EnrollmentToken `"<enrollment token>`"" -ForegroundColor Cyan
+    Write-Host "  The enrollment token did not change. It is Devices:EnrollmentToken in $appsettings (Administrators only)." -ForegroundColor Gray
+    Write-Host "  Keep it secret. Without it a PC waits for approval in the admin UI (Devices)." -ForegroundColor Gray
+}
 Write-Host "Then set the staff PIN for the lock screens in the admin UI (Settings)." -ForegroundColor White
 Write-Host "Firewall rules have been created for ports $HttpPort and $DiscoveryPort." -ForegroundColor White
 Write-Host ""
