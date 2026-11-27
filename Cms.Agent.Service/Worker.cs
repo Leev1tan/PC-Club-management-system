@@ -889,14 +889,17 @@ public partial class Worker : BackgroundService
 
     private string? _logoSynced = "(not checked)";
     private DateTimeOffset _logoRetryUtc;
+    private DateTimeOffset _logoCheckUtc;
 
     /// <summary>
     /// club-logo.img follows the logo hash of the heartbeat (Cms.Client.ClubLogoSync: HTTP 200 only, at most 512 KB, the
     /// SHA-256 must match, temporary file and move). A failed download keeps the old file and is tried again after 60 s.
+    /// The file is checked again every 60 s, so a deleted or changed file is repaired.
     /// </summary>
     private async Task SyncClubLogoAsync(HttpClient http, string? sha256, CancellationToken ct)
     {
-        if (sha256 == _logoSynced || DateTimeOffset.UtcNow < _logoRetryUtc) return;
+        var now = DateTimeOffset.UtcNow;
+        if ((sha256 == _logoSynced && now < _logoCheckUtc) || now < _logoRetryUtc) return;
         try
         {
             var result = await ClubLogoSync.SyncAsync(http, AgentDir, sha256, ct);
@@ -907,6 +910,7 @@ public partial class Worker : BackgroundService
                 return;
             }
             _logoSynced = sha256;
+            _logoCheckUtc = DateTimeOffset.UtcNow.AddSeconds(60);
             if (result != ClubLogoSync.Result.Unchanged)
                 _logger.LogInformation("Club logo {Result}: {Hash}", result, sha256?[..12] ?? "-");
         }
