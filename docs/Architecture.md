@@ -192,22 +192,37 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 4. **Session Enforcement**: Tracks session end time, manages lock state
 5. **State File Management**: Writes `state.json` for Launcher to read
 
+**Lock rule** ([AgentLock.cs](../Cms.Client/AgentLock.cs), tested in `Cms.Client.Tests`): a club PC is locked unless a
+session runs on it or staff unlocked it.
+
+| Case | Result |
+|------|--------|
+| New agent, no `state.json` | Locked (`no_session`) |
+| Agent start, the saved state has no active session (also after a staff unlock) | Locked (`no_session` or `manual`) |
+| Agent start during a session | Unlocked until the saved end time |
+| `session_set` + `unlock` (session start, resume, move) | Unlocked; locks at the end time, also offline (`session_expired`) |
+| `unlock` with `{"reason":"staff"}` (staff, no active session) | Unlocked, no time limit, until `lock` or the next agent start |
+| Heartbeat: no active session, PC unlocked for a session | Locked (`no_session`); a staff unlock stays |
+| `lock` (session end, pause, staff) | Locked (`manual`) |
+
+The server also sends `lock` when a PC registers with the enrollment token or staff approve it, and no session runs on it.
+
 **Supported Commands**:
 
 | Command | Action |
 |---------|--------|
 | `lock` | Lock the PC (write lock state to file) |
-| `unlock` | Unlock the PC |
+| `unlock` | Unlock the PC. No payload: for a session (its end time applies). `{"reason":"staff"}`: staff unlock of a PC without a session (set by the server) |
 | `restart` | Reboot in 5 seconds (`shutdown /r /t 5`; Owner, Manager, Tech) |
 | `shutdown` | Shut down in 5 seconds (`shutdown /s /t 5`; Owner, Manager, Tech; only through `/power`) |
 | `logoff` | Log off the player's Windows session. The agent is a service in session 0 (LocalService) and cannot do it; it puts a request into `state.json` for one minute, and the lock screen (in the player's session) logs the session off once (`ExitWindowsEx`, forced; `Cms.Client.LogoffTrigger`: only a fresh request made after this lock screen started) |
 | `message` | Log message (UI popup planned) |
-| `session_set` | Set the session end time; `{"endUtc": null}` = no end (open-ended or paused session) |
+| `session_set` | Set the session end time; `{"endUtc": null}` = no end (open-ended or paused session). It does not unlock |
 
 **Local State Communication** (written every second, also while the server is unreachable):
 ```
 %ProgramData%\ClubAgent\          # players: read only (installer ACL)
-├── state.json           # Lock state, remaining seconds, time of the last lock change, agent PID, active session, log off request
+├── state.json           # Lock state and reason, why unlocked (unlock: session, staff, none), remaining seconds, time of the last lock change, agent PID, active session, log off request
 ├── agent_heartbeat.txt  # Agent liveness marker (the launcher locks when it is older than 15 s)
 ├── staff-pin.json       # PBKDF2 hash of the staff PIN (from the server)
 ├── client-settings.json # club settings for the lock screen: language (uk, en), currency (from the heartbeat)

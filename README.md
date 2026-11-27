@@ -204,7 +204,7 @@ Games run on the club PCs, and these are Windows 10/11 machines. Each PC gets th
 ClubClientSetup.exe -ServerUrl "http://<server-ip-or-router>:5081" -EnrollmentToken "<token>"
 ```
 
-With the enrollment token the PC is approved at once. Without it, the PC appears as "pending" in the admin UI (Devices) and does nothing until staff approve it. Add `-KioskMode` for the lock-screen shell. This works the same for both server options. See [docs/ClubDeployment.md](docs/ClubDeployment.md) for the club network (switch isolation, MikroTik NAT, acceptance checks).
+With the enrollment token the PC is approved at once. Without it, the PC appears as "pending" in the admin UI (Devices) and does nothing until staff approve it. Add `-KioskMode` for the lock-screen shell of the player account `ClubUser` (its password is random, new on every install run and kept only as an LSA secret; run the installer again to reset it). A new PC stays locked until a session starts or staff unlock it. This works the same for both server options. See [docs/ClubDeployment.md](docs/ClubDeployment.md) for the club network (switch isolation, MikroTik NAT, acceptance checks).
 
 ## Demo mode
 

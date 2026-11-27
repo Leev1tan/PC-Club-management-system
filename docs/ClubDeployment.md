@@ -197,6 +197,10 @@ ClubClientSetup.exe -ServerUrl "http://10.3.3.1:5081" -EnrollmentToken "<token>"
   Manager or Tech). Reject unknown PCs.
 - A reinstalled PC with the same name keeps its record (zone, history) when it registers with the token;
   its old key stops working. Revoke a PC that leaves the club (Devices, revoke button).
+- A new PC is locked. A club PC is locked unless a session runs on it or staff unlocked it in the admin UI.
+  A staff unlock of a PC without a session ends when the agent or the PC restarts.
+- The installer works as Administrator and as SYSTEM (RMM tools, Intune, a VM guest agent). It asks no
+  question when it runs without a console.
 
 Check:
 
@@ -217,6 +221,32 @@ state.json is created after the agent starts
 staff-pin.json exists after the staff PIN is set (True)
 private: only SYSTEM, Administrators and LOCAL SERVICE have access
 ```
+
+### Kiosk mode (`-KioskMode`)
+
+- The players use the Windows account `ClubUser`. It signs in automatically, and the lock screen is its shell.
+- The password of `ClubUser` is random (32 characters). The installer makes a new one on every run, never
+  prints it and never writes it to a file. Windows keeps it for the automatic sign-in as the LSA secret
+  `DefaultPassword`, not as the registry value `DefaultPassword` (local users can read that value).
+- To reset the password of `ClubUser`, run the installer again with the same options. Nobody needs to know the
+  password: staff do not sign in as `ClubUser`.
+- The lock screen shell, "Task Manager off" and "no context menus in Start" apply to `ClubUser` only (its own
+  registry hive). `ClubAdmin` and the other administrators keep `explorer.exe` and Task Manager. The installer
+  removes the machine-wide values of older versions (shell, `DisableTaskMgr`, `DisableContextMenusInStart`).
+- If the installer cannot load the registry hive of `ClubUser`, it stops with exit code 1 and changes no
+  machine-wide setting. Sign out `ClubUser` or restart the PC, then run the installer again.
+- `ClubAdmin` is the recovery account of the staff (Administrators): Ctrl+Alt+Del > Switch user > `ClubAdmin`.
+  When it does not exist, the installer asks for its password in a console. For a run without a console, give
+  the password as a SecureString, for example from PowerShell:
+
+  ```powershell
+  .\install-client.ps1 -ServerUrl "http://10.3.3.1:5081" -EnrollmentToken "<token>" -KioskMode -AdminPassword (Read-Host -AsSecureString)
+  ```
+
+  Without `-AdminPassword` and without a console (SYSTEM), the installer creates no `ClubAdmin` and prints a
+  warning. Then create a local administrator for the staff yourself.
+- `uninstall-kiosk.ps1` removes the kiosk shell, the policies of `ClubUser`, the automatic sign-in and its LSA
+  secret.
 
 ## Session teardown
 
@@ -262,6 +292,10 @@ on each PC (only administrators can change the folder; the installer keeps the s
 - Admin UI opens at `http://10.3.3.1:5081` and asks for a login.
 - A Cashier account cannot open Finance, change tariffs or delete anything.
 - Client appears online and "approved" in the admin UI.
+- A newly installed PC shows the locked lock screen (no session, no game grid) after the first start.
+- A staff unlock of a PC without a session unlocks it; after `Restart-Service ClubAgent` the PC is locked again.
+- Kiosk mode: `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword` finds
+  no value; ClubUser signs in automatically after a restart; ClubAdmin gets `explorer.exe` and can open Task Manager.
 - Ctrl+Shift+U on a locked PC asks for the staff PIN; the correct PIN unlocks it.
 - Stopping the ClubAgent service (as admin) keeps the PC locked after 15 s; the staff PIN still unlocks it.
 - Unlocking a PC without a session appears in the audit log as `device.unlock_without_session`.
