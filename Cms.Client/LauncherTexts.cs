@@ -47,6 +47,14 @@ public sealed class LauncherTexts
     public required string PcReserved { get; init; }
     /// <summary>On the lock screen while the PC is held for a reservation: name, club time.</summary>
     public required string ReservedFor { get; init; }
+    /// <summary>A login on a PC booked for an event: event name, club time.</summary>
+    public required string PcEvent { get; init; }
+    /// <summary>On the lock screen before an event that books the PC: event name, start in club time.</summary>
+    public required string EventAt { get; init; }
+    /// <summary>On the lock screen while the event runs: event name, time left (hh:mm:ss).</summary>
+    public required string EventRunning { get; init; }
+    /// <summary>In the session panel of a player of an event: event name.</summary>
+    public required string EventLine { get; init; }
 
     // How the player pays (offers of the PC's zone)
     public required string OffersTitle { get; init; }
@@ -160,6 +168,10 @@ public sealed class LauncherTexts
         SessionGone = "Сесію вже завершено.",
         PcReserved = "Цей ПК заброньовано для {0} на {1}. Увійти може лише гравець броні; зверніться до адміністратора.",
         ReservedFor = "> ЗАБРОНЬОВАНО ДЛЯ {0} НА {1}",
+        PcEvent = "Цей ПК зайнятий для події «{0}» о {1}. Гравці події грають з початку події; зверніться до адміністратора.",
+        EventAt = "> ПОДІЯ «{0}» О {1}",
+        EventRunning = "> ПОДІЯ «{0}»: ЗАЛИШИЛОСЬ {1}",
+        EventLine = "🏆 Подія: {0}",
 
         OffersTitle = "> ЯК ОПЛАТИТИ",
         OfferBalance = "З балансу, поки вистачить коштів",
@@ -269,6 +281,10 @@ public sealed class LauncherTexts
         SessionGone = "The session has already ended.",
         PcReserved = "This PC is reserved for {0} at {1}. Only the player of the reservation can log in; ask the staff.",
         ReservedFor = "> RESERVED FOR {0} AT {1}",
+        PcEvent = "This PC is booked for the event «{0}» at {1}. The players of the event play from its start; ask the staff.",
+        EventAt = "> EVENT «{0}» AT {1}",
+        EventRunning = "> EVENT «{0}»: {1} LEFT",
+        EventLine = "🏆 Event: {0}",
 
         OffersTitle = "> HOW TO PAY",
         OfferBalance = "From my balance while the money lasts",

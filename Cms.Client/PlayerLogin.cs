@@ -33,6 +33,7 @@ public static class LoginMessages
             "player_has_debt" => t.PlayerHasDebt,
             "player_busy" => LauncherTexts.Format(t.PlayerBusy, r.FirstArg ?? "?"),
             "pc_reserved" => LauncherTexts.Format(t.PcReserved, ReservationNotice.CleanName(r.Arg(0)), r.Arg(1) ?? "?"),
+            "pc_event" => LauncherTexts.Format(t.PcEvent, EventNotice.CleanName(r.Arg(0)), r.Arg(1) ?? "?"),
             "device_busy" => t.DeviceBusy,
             "no_tariff" => t.NoTariff,
             "bad_offer" or "package_not_found" or "package_inactive" or "package_other_zone" or "package_outside_window"
@@ -91,10 +92,11 @@ public static class ReservationNotice
 {
     public const int MaxName = 20;
 
-    /// <summary>The text, or null when the PC is not held.</summary>
-    public static string? LockLine(ClientReservationInfo? info, LauncherTexts t)
+    /// <summary>The text, or null when the PC is not held. An event booking gives the event line (EventNotice).</summary>
+    public static string? LockLine(ClientReservationInfo? info, LauncherTexts t, DateTimeOffset? now = null)
     {
         if (info == null || string.IsNullOrWhiteSpace(info.StartLocal)) return null;
+        if (info.IsEvent) return EventNotice.LockLine(info, now ?? DateTimeOffset.UtcNow, t);
         return LauncherTexts.Format(t.ReservedFor, CleanName(info.Name), info.StartLocal.Trim());
     }
 
@@ -105,4 +107,35 @@ public static class ReservationNotice
         if (clean.Length == 0) return "?";
         return clean.Length > MaxName ? clean[..MaxName] : clean;
     }
+}
+
+/// <summary>
+/// Events (tournaments) on the lock screen: before the start "EVENT «Name» AT 18:00", while it runs "EVENT «Name»: 01:23:45
+/// LEFT" (the common end), and in the session panel of a player "Event: Name". The name comes from the staff, so it is
+/// cleaned (no control characters, at most 40 characters).
+/// </summary>
+public static class EventNotice
+{
+    public const int MaxName = 40;
+
+    public static string CleanName(string? name)
+    {
+        var clean = new string((name ?? string.Empty).Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (clean.Length == 0) return "?";
+        return clean.Length > MaxName ? clean[..MaxName] : clean;
+    }
+
+    /// <summary>The lock line of an event booking: the start before it, the time left while it runs (null when it is over).</summary>
+    public static string? LockLine(ClientReservationInfo info, DateTimeOffset now, LauncherTexts t)
+    {
+        var name = CleanName(info.Name);
+        if (now < info.StartUtc) return LauncherTexts.Format(t.EventAt, name, info.StartLocal.Trim());
+        if (info.EndUtc is not { } end) return LauncherTexts.Format(t.EventAt, name, info.StartLocal.Trim());
+        var left = (long)Math.Ceiling((end - now).TotalSeconds);
+        return left <= 0 ? null : LauncherTexts.Format(t.EventRunning, name, LauncherFormat.Clock(left));
+    }
+
+    /// <summary>The line of the session panel for a session of an event, or null for a normal session.</summary>
+    public static string? SessionLine(ClientSessionInfo? session, LauncherTexts t) =>
+        session?.Event is { } e ? LauncherTexts.Format(t.EventLine, CleanName(e.Name)) : null;
 }

@@ -202,8 +202,10 @@ public partial class MainWindow
         SessionBalance.Text = player && session!.Balance is { } balance
             ? "💰 " + LauncherFormat.Money(balance, _settings) + (session.Bonus is > 0 ? " · " + LauncherTexts.Format(_texts.BonusLine, LauncherFormat.Money(session.Bonus.Value, _settings)) : "")
             : string.Empty;
-        SessionTariff.Text = session?.Package is { } package ? LauncherTexts.Format(_texts.PackageLine, package)
-            : session?.Tariff is { } tariff ? LauncherTexts.Format(_texts.TariffLine, tariff) : string.Empty;
+        // A session of an event shows the event (the countdown is the common end of the event)
+        SessionTariff.Text = EventNotice.SessionLine(session, _texts)
+            ?? (session?.Package is { } package ? LauncherTexts.Format(_texts.PackageLine, package)
+            : session?.Tariff is { } tariff ? LauncherTexts.Format(_texts.TariffLine, tariff) : string.Empty);
         EndSessionButton.Visibility = player ? Visibility.Visible : Visibility.Collapsed;
         UpdateOrderStatus();
     }

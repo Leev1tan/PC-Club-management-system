@@ -524,8 +524,9 @@ public partial class MainWindow : Window
         _lockReasonText.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_lockReservedText != null)
         {
-            // "Reserved for <nickname or first name> at HH:MM" while the server holds the PC for a reservation
-            var reserved = ReservationNotice.LockLine(_lastState?.Reservation, _texts);
+            // "Reserved for <nickname or first name> at HH:MM" while the server holds the PC for a reservation;
+            // "Event «name» at HH:MM", then the time left of the event, while an event books the PC
+            var reserved = ReservationNotice.LockLine(_lastState?.Reservation, _texts, DateTimeOffset.UtcNow);
             _lockReservedText.Text = reserved ?? string.Empty;
             _lockReservedText.Visibility = reserved != null ? Visibility.Visible : Visibility.Collapsed;
         }
