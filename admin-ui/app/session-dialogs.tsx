@@ -41,7 +41,7 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
   device: { id: string; hostname: string; zoneId: string | null }; tariffs: Tariff[]; players: PlayerLite[];
   toast: ToastFn; onClose: () => void; onDone: () => void; canGiveFree?: boolean;
   /** The reservation that holds the PC (a start needs the override of a manager). */
-  reservation?: { name: string; startLocal: string; held: boolean } | null; canOverride?: boolean;
+  reservation?: { name: string; startLocal: string; held: boolean; isEvent?: boolean } | null; canOverride?: boolean;
 }) {
   const held = !!reservation?.held;
   const [override, setOverride] = useState(false);
@@ -104,7 +104,7 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
         <div className="modal-title">{fmt(t.session.startTitle, { host: device.hostname })}</div>
         {held && (
           <div className="resv-hold-box">
-            {fmt(t.resv.heldWarning, { name: reservation!.name, time: reservation!.startLocal })}
+            {fmt(reservation!.isEvent ? t.events.heldWarning : t.resv.heldWarning, { name: reservation!.name, time: reservation!.startLocal })}
             {canOverride && <label className="check-row"><input type="checkbox" checked={override} onChange={e => setOverride(e.target.checked)} /> {t.resv.override}</label>}
           </div>
         )}

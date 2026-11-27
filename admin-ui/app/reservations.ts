@@ -24,7 +24,7 @@ export type ReservationSettings = {
   publicBooking: boolean; eraseAfterDays: number; maxOpenPerPhone: number;
 };
 /** The next reservation of a PC on the PC map. */
-export type PcReservation = { id: number; name: string; startUtc: string; startLocal: string; endLocal: string; held: boolean };
+export type PcReservation = { id: number; name: string; startUtc: string; startLocal: string; endLocal: string; held: boolean; isEvent?: boolean };
 
 export const durationsMinutes = [30, 45, 60, 90, 120, 150, 180, 240, 300, 360, 480, 600, 720];
 

@@ -12,6 +12,7 @@ import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-
 import { GamesTab } from './games-tab';
 import { LoginLockouts } from './lockouts';
 import { CheckInDialog, ReservationsTab } from './reservations-tab';
+import { EventsTab, PcEvent } from './events-tab';
 import { PcReservation } from './reservations';
 import { OrderQueue, OrdersTab, orderChime } from './orders-tab';
 import { PowerAction, PowerDialog, PowerTarget } from './power-dialog';
@@ -34,6 +35,7 @@ type Device = {
   currentGame?: string | null; currentGameColor?: string | null; currentGameStartedUtc?: string | null;
   macAddress?: string | null;
   reservation?: PcReservation | null;
+  event?: PcEvent | null;
 };
 type Session = {
   id: string; deviceId: string; deviceHostname: string | null;
@@ -51,7 +53,7 @@ type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' }
 type DemoInfo = { enabled: boolean; resetIntervalHours: number | null; lastResetUtc: string | null; nextResetUtc: string | null };
 
 // ===== Tab IDs =====
-type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'reservations' | 'orders' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'games' | 'analytics' | 'audit' | 'staff' | 'settings';
+type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'reservations' | 'events' | 'orders' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'games' | 'analytics' | 'audit' | 'staff' | 'settings';
 type Need = 'any' | 'frontDesk' | 'management' | 'owner';
 
 // Each tab is shown only to the roles that may use it (the server checks every request again)
@@ -60,6 +62,7 @@ const allTabs: { id: Tab; label: string; icon: string; section?: string; need: N
   { id: 'map', label: t.nav.map, icon: '🗺️', need: 'any' },
   { id: 'sessions', label: t.nav.sessions, icon: '⏱️', need: 'frontDesk' },
   { id: 'reservations', label: t.nav.reservations, icon: '📅', need: 'frontDesk' },
+  { id: 'events', label: t.nav.events, icon: '🏆', need: 'frontDesk' },
   { id: 'pos', label: t.nav.pos, icon: '🛒', section: t.nav.sectionDesk, need: 'frontDesk' },
   { id: 'orders', label: t.nav.orders, icon: '🥤', need: 'frontDesk' },
   { id: 'shift', label: t.nav.shift, icon: '🧾', need: 'frontDesk' },
@@ -360,6 +363,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'devices': return <DevicesTab />;
       case 'sessions': return <SessionsTab />;
       case 'reservations': return <ReservationsTab players={users} toast={toast} management={can.management} onChanged={fetchAll} />;
+      case 'events': return <EventsTab players={users} zones={zones} devices={devices} toast={toast} management={can.management} onChanged={fetchAll} />;
       case 'orders': return <OrdersTab toast={toast} management={can.management} onChanged={fetchAll} />;
       case 'users': return <>{can.management && <LoginLockouts toast={toast} />}<UsersTab /></>;
       case 'tariffs': return <TariffsTab can={can} zones={zones} devices={devices} tariffs={tariffs} toast={toast}
@@ -531,6 +535,11 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                     {fmtText(t.resv.reservedAt, { time: d.reservation.startLocal })}{d.reservation.held ? ` · ${d.reservation.name}` : ''}
                   </div>
                 )}
+                {d.event && (
+                  <div className={`pc-card-event ${d.event.held ? 'held' : ''}`} title={fmtText(t.events.eventOn, { name: d.event.name, start: d.event.startLocal, end: d.event.endLocal })}>
+                    {fmtText(t.events.eventAt, { start: d.event.startLocal, end: d.event.endLocal })}
+                  </div>
+                )}
                 {d.currentGame && (
                   <div className="pc-card-game" title={`${t.map.currentGame}: ${d.currentGame}`}>
                     <span className="game-dot" style={{ background: d.currentGameColor || 'var(--neon-cyan)' }} aria-hidden="true" />
@@ -550,7 +559,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                       <button className="popover-item" onClick={() => { setPcPopover(null); setCheckInId(d.reservation!.id); }}>📅 {t.resv.checkIn}</button>
                     )}
                     {can.frontDesk && d.occupancyStatus === 'free' && d.enrollment !== 'pending' && (
-                      <button className="popover-item" onClick={() => { setPcPopover(null); setStartDialog({ id: d.id, hostname: d.hostname, zoneId: d.zoneId, reservation: d.reservation }); }}>
+                      <button className="popover-item" onClick={() => { setPcPopover(null); setStartDialog({ id: d.id, hostname: d.hostname, zoneId: d.zoneId,
+                        reservation: d.event?.held ? { id: d.event.id, name: d.event.name, startUtc: d.event.startUtc, startLocal: d.event.startLocal, endLocal: d.event.endLocal, held: true, isEvent: true } : d.reservation }); }}>
                         {t.map.start}
                       </button>
                     )}

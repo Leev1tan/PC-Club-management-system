@@ -1878,3 +1878,50 @@ body::after {
 .order-total strong { color: var(--text-primary); }
 .order-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .nav-badge-alert { background: var(--neon-yellow); color: #050508; }
+
+/* ===== Events and tournaments (phase 8) ===== */
+.badge-purple { background: rgba(191, 90, 242, 0.14); color: var(--neon-purple); border: 1px solid rgba(191, 90, 242, 0.35); }
+.event-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.event-card { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 12px; border-radius: 8px; cursor: pointer; font: inherit;
+  background: var(--bg-card); border: 1px solid var(--border-hard); border-left: 3px solid var(--neon-purple); color: var(--text-primary); }
+.event-card:hover, .event-card.active { border-color: var(--neon-cyan); }
+.event-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.event-card-when { font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
+.event-card-facts { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-secondary); }
+.event-name { font-weight: 700; font-size: 15px; color: var(--text-primary); overflow-wrap: anywhere; }
+.event-name-big { font-size: 18px; margin-bottom: 6px; }
+.event-facts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+.event-winner { font-size: 14px; color: var(--neon-yellow); margin-bottom: 8px; }
+.event-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+.event-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.event-subtitle { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin: 12px 0 6px; }
+.event-teams { display: flex; flex-direction: column; gap: 8px; }
+.event-team { border: 1px solid var(--border-hard); border-radius: 6px; padding: 8px 10px; background: var(--bg-elevated); }
+.event-team-head { display: flex; align-items: center; gap: 8px; }
+.event-team-head .btn { margin-left: auto; }
+.event-seed { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); min-width: 18px; }
+.event-team-name { font-weight: 600; }
+.event-team-player { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 2px 0 0 26px; color: var(--text-secondary); }
+.event-pc-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 2px 8px; max-height: 200px; overflow-y: auto;
+  border: 1px solid var(--border-hard); border-radius: 6px; padding: 6px 8px; }
+.event-player-row .check-row { margin-top: 4px; }
+.bracket { display: flex; gap: 18px; overflow-x: auto; padding-bottom: 8px; }
+.bracket-round { display: flex; flex-direction: column; gap: 6px; min-width: 190px; }
+.bracket-matches { display: flex; flex-direction: column; justify-content: space-around; gap: 10px; flex: 1; }
+.bracket-round-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.bracket-match { display: flex; flex-direction: column; border: 1px solid var(--border-hard); border-radius: 6px; background: var(--bg-elevated);
+  padding: 0; cursor: pointer; font: inherit; color: var(--text-primary); text-align: left; }
+.bracket-match:disabled { cursor: default; }
+.bracket-match:not(:disabled):hover { border-color: var(--neon-cyan); }
+.bracket-match.bye { opacity: 0.6; }
+.bracket-side { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; font-size: 13px; }
+.bracket-side + .bracket-side { border-top: 1px solid var(--border-hard); }
+.bracket-side.won { color: var(--neon-green); font-weight: 700; }
+.bracket-score { font-family: var(--font-mono); min-width: 20px; text-align: right; }
+.bracket-score-input { width: 72px; margin-left: auto; }
+.pc-card-event { font-size: 11px; font-family: var(--font-mono); color: var(--neon-purple); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-card-event.held { color: var(--neon-yellow); font-weight: 700; }
+@media (max-width: 760px) {
+  .event-columns { grid-template-columns: minmax(0, 1fr); }
+  .bracket-round { min-width: 160px; }
+}
