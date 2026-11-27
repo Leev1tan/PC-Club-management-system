@@ -5,7 +5,7 @@ import { Package, Quote, Tariff, TransferQuote, clockTime } from './billing';
 import { fmt, methodLabel, money, t } from './i18n';
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
-type PlayerLite = { id: string; username: string; displayName: string; balance: number; bonusPoints: number };
+type PlayerLite = { id: string; username: string; displayName: string; balance: number; bonusPoints: number; debt?: number };
 type DeviceLite = {
   id: string; hostname: string; zoneId: string | null; zoneName: string | null; status: string;
   occupancyStatus: string; enrollment?: string;
@@ -16,10 +16,10 @@ export type SessionLite = {
   currentCost?: number | null; tariffName: string | null; packageName?: string | null;
 };
 
-type Method = 'balance' | 'cash' | 'card';
+type Method = 'balance' | 'cash' | 'card' | 'free';
 
-function MethodPicker({ value, onChange, player }: { value: Method; onChange: (m: Method) => void; player: boolean }) {
-  const options: Method[] = player ? ['balance', 'cash', 'card'] : ['cash', 'card'];
+function MethodPicker({ value, onChange, player, free }: { value: Method; onChange: (m: Method) => void; player: boolean; free?: boolean }) {
+  const options: Method[] = [...(player ? ['balance', 'cash', 'card'] as Method[] : ['cash', 'card'] as Method[]), ...(free ? ['free'] as Method[] : [])];
   return (
     <div className="quick-select-grid" style={{ gridTemplateColumns: `repeat(${options.length}, 1fr)` }}>
       {options.map(m => (
@@ -32,14 +32,14 @@ function MethodPicker({ value, onChange, player }: { value: Method; onChange: (m
 }
 
 const durations = [
-  { min: 30, label: '30 хв' }, { min: 60, label: '1 год' }, { min: 120, label: '2 год' },
-  { min: 180, label: '3 год' }, { min: 300, label: '5 год' }, { min: null as number | null, label: t.session.open },
+  { min: 30, label: `30 ${t.minutesShort}` }, { min: 60, label: `1 ${t.hoursShort}` }, { min: 120, label: `2 ${t.hoursShort}` },
+  { min: 180, label: `3 ${t.hoursShort}` }, { min: 300, label: `5 ${t.hoursShort}` }, { min: null as number | null, label: t.session.open },
 ];
 
 /** Start a session on a free PC: tariff time (prepaid or open-ended) or a package of the PC's zone. */
-export function StartSessionDialog({ device, tariffs, players, toast, onClose, onDone }: {
+export function StartSessionDialog({ device, tariffs, players, toast, onClose, onDone, canGiveFree = false }: {
   device: { id: string; hostname: string; zoneId: string | null }; tariffs: Tariff[]; players: PlayerLite[];
-  toast: ToastFn; onClose: () => void; onDone: () => void;
+  toast: ToastFn; onClose: () => void; onDone: () => void; canGiveFree?: boolean;
 }) {
   const zoneTariffs = useMemo(() => tariffs.filter(x => !x.zoneId || x.zoneId === device.zoneId), [tariffs, device.zoneId]);
   const defaultTariff = zoneTariffs.find(x => x.zoneId === device.zoneId && x.isDefault) ?? zoneTariffs.find(x => x.zoneId === device.zoneId)
@@ -54,6 +54,7 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
   const [useBonus, setUseBonus] = useState(true);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState('');
   const player = players.find(p => p.id === playerId) ?? null;
 
   useEffect(() => {
@@ -78,12 +79,14 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
   const price = mode === 'package' ? pkg?.price ?? 0 : quote?.total ?? 0;
   const prepaid = mode === 'package' || duration !== null;
   const affordable = !player || method !== 'balance' || player.balance + (useBonus ? player.bonusPoints : 0) >= price;
+  const free = prepaid && method === 'free';
+  const debtBlocks = !prepaid && (player?.debt ?? 0) > 0;
 
   const start = async () => {
     setBusy(true);
     const body = mode === 'package'
-      ? { deviceId: device.id, userId: playerId || null, packageId, paymentMethod: method, useBonus }
-      : { deviceId: device.id, tariffId, userId: playerId || null, durationMinutes: duration, paymentMethod: prepaid ? method : null, useBonus };
+      ? { deviceId: device.id, userId: playerId || null, packageId, paymentMethod: method, useBonus, reason: free ? reason : null }
+      : { deviceId: device.id, tariffId, userId: playerId || null, durationMinutes: duration, paymentMethod: prepaid ? method : null, useBonus, reason: free ? reason : null };
     const res = await postJson('/api/sessions', body);
     setBusy(false);
     if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
@@ -150,7 +153,7 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
           <select className="form-select" value={playerId} onChange={e => setPlayerId(e.target.value)}>
             <option value="">{t.guest}</option>
             {players.map(u => (
-              <option key={u.id} value={u.id}>{u.displayName} (@{u.username}) — {money(u.balance)} {t.currency} + {money(u.bonusPoints)} бонус</option>
+              <option key={u.id} value={u.id}>{u.displayName} (@{u.username}) — {money(u.balance)} {t.currency} + {money(u.bonusPoints)} {t.player.bonus.toLowerCase()}{(u.debt ?? 0) > 0 ? ` · ${t.player.debtShort} ${money(u.debt)}` : ''}</option>
             ))}
           </select>
         </div>
@@ -158,13 +161,20 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
         {prepaid && (
           <div className="form-group">
             <label className="form-label">{t.pay.method}</label>
-            <MethodPicker value={method} onChange={setMethod} player={!!player} />
+            <MethodPicker value={method} onChange={setMethod} player={!!player} free={canGiveFree} />
             {player && method === 'balance' && (
               <label className="check-row"><input type="checkbox" checked={useBonus} onChange={e => setUseBonus(e.target.checked)} /> {t.pay.useBonus}</label>
             )}
-            {!player && <div className="auth-sub">{t.pay.guestAtDesk}</div>}
+            {!player && method !== 'free' && <div className="auth-sub">{t.pay.guestAtDesk}</div>}
+            {free && (
+              <>
+                <div className="auth-sub">{t.pay.freeHint}</div>
+                <input className="form-input" placeholder={t.pay.freeReason} value={reason} onChange={e => setReason(e.target.value)} />
+              </>
+            )}
           </div>
         )}
+        {debtBlocks && <div className="auth-error">{fmt(t.session.playerDebt, { amount: money(player?.debt) })}</div>}
 
         {prepaid && price > 0 && (
           <div className="cost-box">
@@ -183,7 +193,7 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
 
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>{t.cancel}</button>
-          <button className="btn btn-primary" disabled={busy || (mode === 'package' ? !packageId : !tariffId) || !affordable} onClick={start}>{t.session.start}</button>
+          <button className="btn btn-primary" disabled={busy || (mode === 'package' ? !packageId : !tariffId) || !affordable || debtBlocks || (free && reason.trim().length < 3)} onClick={start}>{t.session.start}</button>
         </div>
       </div>
     </div>
@@ -274,7 +284,7 @@ export function EndSessionDialog({ session, players, toast, onClose, onDone }: {
 }) {
   const player = players.find(p => p.id === session.userId) ?? null;
   const [method, setMethod] = useState<Method>(player ? 'balance' : 'cash');
-  const [deskMethod, setDeskMethod] = useState<'cash' | 'card'>('cash');
+  const [deskMethod, setDeskMethod] = useState<'cash' | 'card' | 'debt'>('cash');
   const [useBonus, setUseBonus] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -284,7 +294,8 @@ export function EndSessionDialog({ session, players, toast, onClose, onDone }: {
     setBusy(false);
     if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     const ended = await res.json();
-    toast(ended.amountDue > 0 ? fmt(t.session.endedDue, { amount: money(ended.amountDue) }) : t.session.ended, ended.amountDue > 0 ? 'info' : 'success');
+    if (ended.debtRecorded > 0) toast(fmt(t.session.endedDebt, { amount: money(ended.debtRecorded) }), 'info');
+    else toast(ended.amountDue > 0 ? fmt(t.session.endedDue, { amount: money(ended.amountDue) }) : t.session.ended, ended.amountDue > 0 ? 'info' : 'success');
     onDone();
   };
 
@@ -300,10 +311,17 @@ export function EndSessionDialog({ session, players, toast, onClose, onDone }: {
               <MethodPicker value={method} onChange={setMethod} player={!!player} />
               {player && method === 'balance' && (
                 <>
-                  <div className="auth-sub">{t.session.endOpenPlayer} ({money(player.balance)} {t.currency} + {money(player.bonusPoints)} бонус)</div>
+                  <div className="auth-sub">{t.session.endOpenPlayer} ({money(player.balance)} {t.currency} + {money(player.bonusPoints)} {t.player.bonus.toLowerCase()})</div>
                   <label className="check-row"><input type="checkbox" checked={useBonus} onChange={e => setUseBonus(e.target.checked)} /> {t.pay.useBonus}</label>
                   <label className="form-label">{t.session.deskMethod}</label>
-                  <MethodPicker value={deskMethod} onChange={m => setDeskMethod(m as 'cash' | 'card')} player={false} />
+                  <div className="quick-select-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                    {(['cash', 'card', 'debt'] as const).map(m => (
+                      <div key={m} className={`quick-select-item ${deskMethod === m ? 'selected' : ''}`} onClick={() => setDeskMethod(m)}>
+                        <div className="quick-select-label">{methodLabel(m)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {deskMethod === 'debt' && <div className="auth-sub">{t.session.debtHint}</div>}
                 </>
               )}
             </div>

@@ -317,7 +317,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'shift': return <ShiftTab can={can} toast={toast} onChanged={fetchAll} />;
       case 'stock': return <StockTab can={can} toast={toast} />;
       case 'finance': return <FinanceTab />;
-      case 'audit': return <AuditTab />;
+      case 'audit': return <AuditTab owner={can.owner} />;
       case 'staff': return <StaffTab me={me} toast={toast} />;
       case 'settings': return <SettingsTab toast={toast} />;
     }
@@ -955,7 +955,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <ZoneModal />
       <PlayerModal />
       {startDialog && (
-        <StartSessionDialog device={startDialog} tariffs={tariffs} players={users} toast={toast}
+        <StartSessionDialog device={startDialog} tariffs={tariffs} players={users} toast={toast} canGiveFree={can.management}
           onClose={() => setStartDialog(null)} onDone={() => { setStartDialog(null); fetchAll(); }} />
       )}
       {transferTarget && (

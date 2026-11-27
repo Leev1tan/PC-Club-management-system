@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Me, api, errorText, getJson, postJson } from './api';
 import { roleLabel } from './auth';
-import { t } from './i18n';
+import { fmt, t } from './i18n';
+import { AuditVerify } from './pos';
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
 
@@ -15,11 +16,19 @@ const fmtDateTime = (iso: string) => {
 type AuditEntry = {
   id: number; createdUtc: string; actorUsername: string | null; actorRole: string | null; action: string;
   targetType: string | null; targetId: string | null; summary: string | null; detailsJson: string | null; ip: string | null;
+  hash?: string | null; prevHash?: string | null;
 };
 
 const auditFilters: { prefix: string; label: string }[] = [
   { prefix: '', label: 'Всі / All' },
   { prefix: 'device.unlock_without_session', label: 'Розблок. без оплати / Unlock unpaid' },
+  { prefix: 'device.emergency_unlock', label: t.audit.emergency },
+  { prefix: 'session.free_time', label: t.audit.free },
+  { prefix: 'shift.', label: t.audit.shifts },
+  { prefix: 'sale.', label: t.audit.bar },
+  { prefix: 'stock.', label: '📦 ' + t.nav.stock },
+  { prefix: 'product.', label: '🛒 ' + t.stock.name },
+  { prefix: 'player.debt', label: t.audit.debt },
   { prefix: 'player.', label: 'Баланси / Balances' },
   { prefix: 'session.', label: 'Сесії / Sessions' },
   { prefix: 'tariff.', label: 'Тарифи / Tariffs' },
@@ -32,9 +41,36 @@ const auditFilters: { prefix: string; label: string }[] = [
 ];
 
 const alertActions = new Set(['device.unlock_without_session', 'auth.login_failed', 'player.balance_adjusted', 'player.bonus_adjusted',
-  'player.refund', 'settings.staff_pin_removed']);
+  'player.refund', 'settings.staff_pin_removed', 'device.emergency_unlock', 'session.free_time', 'stock.corrected', 'sale.refunded',
+  'shift.cash_payout', 'player.debt_written_off', 'product.price_changed']);
 
-export function AuditTab() {
+/** Owner: recomputes the hash chain of the whole audit log on the server. */
+function VerifyChain() {
+  const [result, setResult] = useState<AuditVerify | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    setResult(await getJson<AuditVerify>('/api/audit/verify'));
+    setBusy(false);
+  };
+  return (
+    <div className="section-card chain-box">
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button className="btn btn-primary btn-sm" disabled={busy} onClick={run}>{busy ? '...' : t.audit.verify}</button>
+        <span className="auth-sub" style={{ margin: 0 }}>{t.audit.verifyHint}</span>
+      </div>
+      {result && (
+        <div className={result.ok ? 'chain-ok' : 'auth-error'} role="status">
+          {result.ok
+            ? fmt(t.audit.verifyOk, { rows: result.rows, hash: (result.headHash ?? '').slice(0, 16), anchors: result.anchorsChecked })
+            : fmt(t.audit.verifyBroken, { id: result.firstBrokenId ?? '?', problem: t.audit.problem[result.problem ?? ''] ?? result.problem ?? '' })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AuditTab({ owner = false }: { owner?: boolean }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState('');
   const [actor, setActor] = useState('');
@@ -61,6 +97,7 @@ export function AuditTab() {
         <span className="page-title">Журнал дій / Audit log</span>
         <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Лише читання · записи не змінюються й не видаляються</span>
       </div>
+      {owner && <VerifyChain />}
       <div className="filter-bar">
         {auditFilters.map(f => (
           <button key={f.prefix} className={`filter-chip ${filter === f.prefix ? 'active' : ''}`} onClick={() => setFilter(f.prefix)}>{f.label}</button>
@@ -83,6 +120,7 @@ export function AuditTab() {
                 <td>
                   {e.summary}
                   {e.detailsJson && <div className="audit-details">{e.detailsJson}</div>}
+                  {e.hash && <div className="audit-hash" title={`${t.audit.hash}: ${e.hash}\nprev: ${e.prevHash ?? ''}`}>#{e.id} · {e.hash.slice(0, 12)}…</div>}
                 </td>
                 <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{e.ip || '—'}</td>
               </tr>

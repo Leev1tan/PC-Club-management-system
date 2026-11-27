@@ -2,22 +2,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Permissions, errorText, getJson, postJson } from './api';
 import { BillingSettings, LedgerCheck, LedgerEntry, cashbackFor } from './billing';
-import { fmt, ledgerTypeLabel, methodLabel, money, t } from './i18n';
+import { dateTime, fmt, ledgerTypeLabel, methodLabel, money, t } from './i18n';
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
-type Player = { id: string; username: string; displayName: string; balance: number; bonusPoints: number; createdUtc: string };
-type Form = 'topup' | 'refund' | 'adjust' | null;
+type Player = { id: string; username: string; displayName: string; balance: number; bonusPoints: number; createdUtc: string; debt?: number };
+type Form = 'topup' | 'refund' | 'adjust' | 'debt' | 'writeoff' | null;
 
-const fmtDateTime = (iso: string) => {
-  const d = new Date(iso);
-  return `${d.toLocaleDateString('uk-UA')} ${d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}`;
-};
+const fmtDateTime = (iso: string) => dateTime(iso);
 
 const signed = (n: number) => (n > 0 ? `+${money(n)}` : money(n));
 
 /**
- * Player card: real balance, bonus balance, ledger history (append-only), top-up (front desk),
- * refund and corrections (Owner, Manager). The server checks every role again.
+ * Player card: real balance, bonus balance, debt, ledger history (append-only), top-up and debt
+ * payment (front desk), refund, corrections and debt write-off (Owner, Manager). The server checks every role again.
  */
 export function PlayerCard({ player, can, toast, initialForm, onClose, onChanged }: {
   player: Player; can: Permissions; toast: ToastFn; initialForm?: Form; onClose: () => void; onChanged: () => void;
@@ -72,6 +69,13 @@ export function PlayerCard({ player, can, toast, initialForm, onClose, onChanged
             <div className="stat-card-value" style={{ color: 'var(--amber)' }}>{money(me.bonusPoints)} {t.currency}</div>
             <div className="stat-card-sub">{t.player.bonusHint}</div>
           </div>
+          {(me.debt ?? 0) > 0 && (
+            <div className="stat-card debt-card">
+              <div className="stat-card-label">{t.player.debt}</div>
+              <div className="stat-card-value" style={{ color: 'var(--red)' }}>{money(me.debt)} {t.currency}</div>
+              <div className="stat-card-sub">{t.player.debtHint}</div>
+            </div>
+          )}
         </div>
         {check && (
           <div className={check.ok ? 'user-chip' : 'auth-error'} style={{ marginBottom: 10 }}>
@@ -83,12 +87,15 @@ export function PlayerCard({ player, can, toast, initialForm, onClose, onChanged
           {can.frontDesk && <button className="btn btn-success btn-sm" onClick={() => setForm('topup')}>{t.player.topUp}</button>}
           {can.management && <button className="btn btn-sm" onClick={() => setForm('refund')}>{t.player.refund}</button>}
           {can.management && <button className="btn btn-sm" onClick={() => setForm('adjust')}>{t.player.adjust}</button>}
+          {can.frontDesk && (me.debt ?? 0) > 0 && <button className="btn btn-danger btn-sm" onClick={() => setForm('debt')}>{t.player.payDebt}</button>}
+          {can.management && (me.debt ?? 0) > 0 && <button className="btn btn-sm" onClick={() => setForm('writeoff')}>{t.player.writeOff}</button>}
           {!can.management && <span className="user-chip">{t.player.managerOnly}</span>}
         </div>
 
         {form === 'topup' && <TopUpForm player={me} settings={settings} toast={toast} onCancel={() => setForm(null)} onDone={done} />}
         {form === 'refund' && <RefundForm player={me} toast={toast} onCancel={() => setForm(null)} onDone={done} />}
         {form === 'adjust' && <AdjustForm player={me} toast={toast} onCancel={() => setForm(null)} onDone={done} />}
+        {(form === 'debt' || form === 'writeoff') && <DebtForm player={me} writeOff={form === 'writeoff'} toast={toast} onCancel={() => setForm(null)} onDone={done} />}
 
         <div className="form-label" style={{ marginTop: 8 }}>{t.player.history}</div>
         <div className="table-wrapper ledger-table">
@@ -106,8 +113,9 @@ export function PlayerCard({ player, can, toast, initialForm, onClose, onChanged
                   <td><span className={`badge ${r.balanceDelta + r.bonusDelta < 0 || r.deskAmount < 0 ? 'badge-red' : r.type === 'bonus_accrual' ? 'badge-amber' : 'badge-blue'}`}>{ledgerTypeLabel(r.type)}</span></td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {r.balanceDelta !== 0 && <div className={r.balanceDelta > 0 ? 'money-plus' : 'money-minus'}>{signed(r.balanceDelta)} {t.currency}</div>}
-                    {r.bonusDelta !== 0 && <div className={r.bonusDelta > 0 ? 'money-plus' : 'money-minus'}>{signed(r.bonusDelta)} бонус</div>}
-                    {r.balanceDelta === 0 && r.bonusDelta === 0 && <div>{money(r.amount)} {t.currency}</div>}
+                    {r.bonusDelta !== 0 && <div className={r.bonusDelta > 0 ? 'money-plus' : 'money-minus'}>{signed(r.bonusDelta)} {t.player.bonus.toLowerCase()}</div>}
+                    {(r.debtDelta ?? 0) !== 0 && <div className={(r.debtDelta ?? 0) > 0 ? 'money-minus' : 'money-plus'}>{signed(r.debtDelta ?? 0)} {t.player.debtShort}</div>}
+                    {r.balanceDelta === 0 && r.bonusDelta === 0 && !r.debtDelta && <div>{money(r.amount)} {t.currency}</div>}
                   </td>
                   <td>{r.balanceAfter !== null ? money(r.balanceAfter) : t.none}</td>
                   <td>{r.bonusAfter !== null ? money(r.bonusAfter) : t.none}</td>
@@ -247,6 +255,52 @@ function AdjustForm({ player, toast, onCancel, onDone }: { player: Player; toast
       <div className="modal-actions">
         <button className="btn btn-sm" onClick={onCancel}>{t.cancel}</button>
         <button className="btn btn-primary btn-sm" disabled={busy || value === 0 || reason.trim().length < 3} onClick={submit}>{t.save}</button>
+      </div>
+    </div>
+  );
+}
+
+/** Pay off the debt (front desk: cash, card or the balance) or write it off (Owner, Manager, with a reason). */
+function DebtForm({ player, writeOff, toast, onCancel, onDone }: {
+  player: Player; writeOff: boolean; toast: ToastFn; onCancel: () => void; onDone: (message: string) => void;
+}) {
+  const [amount, setAmount] = useState(money(player.debt ?? 0));
+  const [method, setMethod] = useState<'cash' | 'card' | 'balance'>('cash');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const value = parseFloat(amount.replace(',', '.')) || 0;
+
+  const submit = async () => {
+    setBusy(true);
+    const res = writeOff
+      ? await postJson(`/api/users/${player.id}/debt/writeoff`, { amount: value, reason })
+      : await postJson(`/api/users/${player.id}/debt/pay`, { amount: value, method });
+    setBusy(false);
+    if (!res.ok) { toast(`${await errorText(res)}`, 'error'); return; }
+    onDone(fmt(writeOff ? t.player.writeOffDone : t.player.payDebtDone, { amount: money(value) }));
+  };
+
+  return (
+    <div className="section-card">
+      <div className="section-card-title" style={{ marginBottom: 8 }}>{writeOff ? t.player.writeOffTitle : t.player.payDebtTitle}</div>
+      <div className="auth-sub">{writeOff ? t.player.writeOffHint : t.player.payDebtHint}</div>
+      <div className="form-grid">
+        <input className="form-input" type="number" min="0.01" max={player.debt} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} />
+        {!writeOff && (
+          <div className="quick-select-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 0 }}>
+            {(['cash', 'card', 'balance'] as const).map(m => (
+              <div key={m} className={`quick-select-item ${method === m ? 'selected' : ''}`} onClick={() => setMethod(m)}>
+                <div className="quick-select-label">{methodLabel(m)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {writeOff && <input className="form-input" placeholder={t.player.reason} value={reason} onChange={e => setReason(e.target.value)} style={{ marginTop: 8 }} />}
+      <div className="modal-actions">
+        <button className="btn btn-sm" onClick={onCancel}>{t.cancel}</button>
+        <button className={`btn btn-sm ${writeOff ? '' : 'btn-success'}`} disabled={busy || value <= 0 || value > (player.debt ?? 0) || (writeOff && reason.trim().length < 3)}
+          onClick={submit}>{writeOff ? t.player.writeOff : t.player.payDebt}</button>
       </div>
     </div>
   );
