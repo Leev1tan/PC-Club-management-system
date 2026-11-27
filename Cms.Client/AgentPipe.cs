@@ -274,15 +274,18 @@ public static class AgentPipeClient
 {
     /// <summary>
     /// The agent gives a club account only to the installed lock screen: the program of the pipe client must be the
-    /// configured launcher (full path, case-insensitive, \ and / the same). A player's own program gets 403.
+    /// configured launcher (full normalized local path, case-insensitive, \ and / the same; Cms.Client.LauncherPath).
+    /// A player's own program gets 403.
     /// </summary>
-    public static bool IsTrustedLauncher(string? clientImagePath, string? launcherPath)
-    {
-        static string? Norm(string? p) => string.IsNullOrWhiteSpace(p) ? null : p.Trim().Replace('/', '\\').TrimEnd('\\');
-        var client = Norm(clientImagePath);
-        var launcher = Norm(launcherPath);
-        return client != null && launcher != null && string.Equals(client, launcher, StringComparison.OrdinalIgnoreCase);
-    }
+    public static bool IsTrustedLauncher(string? clientImagePath, string? launcherPath) => LauncherPath.Same(clientImagePath, launcherPath);
+
+    /// <summary>
+    /// On Windows the lock screen lets the agent impersonate it for one check (the agent runs as LocalService and reads the
+    /// program of the client as the client). The agent is the pipe server only after VerifyAgentPipe; a pipe created by
+    /// another program could impersonate only the player's own account.
+    /// </summary>
+    private static System.Security.Principal.TokenImpersonationLevel ImpersonationLevel =>
+        OperatingSystem.IsWindows() ? System.Security.Principal.TokenImpersonationLevel.Impersonation : System.Security.Principal.TokenImpersonationLevel.None;
 
     /// <summary>
     /// Sends one request. 503 agent_unavailable when the agent does not answer in time; 503 agent_untrusted
@@ -295,7 +298,7 @@ public static class AgentPipeClient
         cts.CancelAfter(timeout);
         try
         {
-            await using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            await using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous, ImpersonationLevel);
             await client.ConnectAsync(cts.Token);
             if (verify != null && !verify(client)) return PipeResponse.Error(503, "agent_untrusted");
             await AgentPipe.WriteLineAsync(client, JsonSerializer.Serialize(request, AgentPipe.Json), cts.Token);

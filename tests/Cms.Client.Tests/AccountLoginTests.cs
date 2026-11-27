@@ -66,6 +66,55 @@ public sealed class AccountLoginTests
         Assert.False(AgentPipeClient.IsTrustedLauncher(launcher, null));
     }
 
+    /// <summary>
+    /// Windows test 2026-11-27, defect 3: the agent (LocalService) now reads the program with QueryFullProcessImageName while
+    /// it impersonates the client. The path is compared in one normalized form; anything doubtful is refused.
+    /// </summary>
+    [Theory]
+    [InlineData(@"C:\ClubLauncher\Cms.Launcher.exe", true)]
+    [InlineData(@"c:\CLUBLAUNCHER\cms.launcher.EXE", true)]
+    [InlineData(@"\\?\C:\ClubLauncher\Cms.Launcher.exe", true)]          // long-path form
+    [InlineData(@"\??\C:\ClubLauncher\Cms.Launcher.exe", true)]          // NT form
+    [InlineData(@"C:\ClubLauncher\\.\Cms.Launcher.exe", true)]
+    [InlineData(@"C:\Temp\..\ClubLauncher\Cms.Launcher.exe", true)]
+    [InlineData(@" C:/ClubLauncher/Cms.Launcher.exe ", true)]
+    [InlineData(@"C:\ClubLauncher\Cms.Launcher.exe\..\..\Users\ClubUser\Cms.Launcher.exe", false)]
+    [InlineData(@"D:\ClubLauncher\Cms.Launcher.exe", false)]
+    [InlineData(@"C:\ClubLauncher\Cms.Launcher.exe:evil", false)]          // alternate data stream
+    [InlineData(@"C:\ClubLauncher\Cms.Launcher", false)]
+    [InlineData(@"\\server\share\ClubLauncher\Cms.Launcher.exe", false)] // network path
+    [InlineData(@"\\?\UNC\server\share\Cms.Launcher.exe", false)]
+    [InlineData(@"ClubLauncher\Cms.Launcher.exe", false)]                 // relative
+    [InlineData(@"C:\..\ClubLauncher\Cms.Launcher.exe", false)]           // above the drive
+    [InlineData(@"C:\ClubLauncher\Cms.Launcher.exe" + "\n", true)]       // trimmed
+    [InlineData("C:\\ClubLauncher\\Cms\u0001Launcher.exe", false)]
+    [InlineData("", false)]
+    public void The_program_path_of_the_pipe_client_is_compared_in_a_normalized_form(string client, bool trusted)
+    {
+        Assert.Equal(trusted, LauncherPath.Same(client, @"C:\ClubLauncher\Cms.Launcher.exe"));
+        Assert.Equal(trusted, AgentPipeClient.IsTrustedLauncher(client, "c:/clublauncher/./Cms.Launcher.exe"));
+    }
+
+    [Fact]
+    public void A_club_account_goes_only_to_the_installed_lock_screen_in_the_console_session()
+    {
+        const string launcher = @"C:\ClubLauncher\Cms.Launcher.exe";
+        Assert.Equal(PipeClientVerdict.Trusted, PipeClientCheck.Decide(launcher, launcher, 1, 1, consoleOnly: true));
+        Assert.Equal(PipeClientVerdict.Trusted, PipeClientCheck.Decide(@"\\?\c:\clublauncher\cms.launcher.exe", launcher, 2, 2, true));
+        // The program could not be read (it ended, or the impersonation failed): fail closed
+        Assert.Equal(PipeClientVerdict.NoProgram, PipeClientCheck.Decide(null, launcher, 1, 1, true));
+        Assert.Equal(PipeClientVerdict.NoProgram, PipeClientCheck.Decide("", launcher, 1, 1, true));
+        Assert.Equal(PipeClientVerdict.OtherProgram, PipeClientCheck.Decide(@"C:\Users\ClubUser\Desktop\Cms.Launcher.exe", launcher, 1, 1, true));
+        Assert.Equal(PipeClientVerdict.OtherProgram, PipeClientCheck.Decide(launcher, "", 1, 1, true));
+        // Session 0 (services) or an unknown session
+        Assert.Equal(PipeClientVerdict.ServiceSession, PipeClientCheck.Decide(launcher, launcher, 0, 0, true));
+        Assert.Equal(PipeClientVerdict.ServiceSession, PipeClientCheck.Decide(launcher, launcher, null, 1, false));
+        // Another session than the console (for example a remote desktop session), or no console session (0xFFFFFFFF)
+        Assert.Equal(PipeClientVerdict.NotConsoleSession, PipeClientCheck.Decide(launcher, launcher, 3, 1, true));
+        Assert.Equal(PipeClientVerdict.NotConsoleSession, PipeClientCheck.Decide(launcher, launcher, 1, 0xFFFFFFFF, true));
+        Assert.Equal(PipeClientVerdict.Trusted, PipeClientCheck.Decide(launcher, launcher, 3, 1, consoleOnly: false));
+    }
+
     [Fact]
     public void Refused_account_requests_have_texts_in_both_languages()
     {

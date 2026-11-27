@@ -41,7 +41,7 @@ the game and lend them to the players for one session.
 | Staff API | No answer ever contains the login or the secret. Staff see the platform, the masked login, "secret stored: yes / no", on or off, and which PC uses the account. The secret is write-only. |
 | Roles | Only the Owner or a Manager can add an account, set a new secret, switch it off or remove it. A Cashier sees which PC uses which account (masked login) and can free a stuck account. The server answers 401 without a login and 403 for a Cashier. |
 | Delivery | Only the agent of the PC that has the lease can fetch the credentials, with its device key, while the session of the lease runs on that PC. The server gives them one time per lease; a second request gets 409 `credential_delivered`. The answer has `Cache-Control: no-store`. |
-| Lock screen | The agent gives the credentials only to the installed lock screen: it checks that the program of the pipe client is `AccountPool:LauncherPath` (default `C:\ClubLauncher\Cms.Launcher.exe`). Any other program gets 403 `pipe_client_untrusted`. The lock screen never shows the secret. |
+| Lock screen | The agent gives the credentials only to the installed lock screen: it checks that the program of the pipe client is `AccountPool:LauncherPath` (default `C:\ClubLauncher\Cms.Launcher.exe`, full path, case-insensitive) and that the client runs in the session of the console (`AccountPool:ConsoleSessionOnly`, default `true`). The agent runs as LocalService: it reads the program of the client while it impersonates the client (the player may query the own process), then reverts. Any other program, and any error of the check, gets 403 `pipe_client_untrusted`. The lock screen never shows the secret. |
 | Audit log | `game_account.added`, `.secret_rotated`, `.updated`, `.removed`, `.released`, `.leased` and `.delivered`, with the platform and the masked login only. The audit log, the server log, the error answers and the CSV exports never contain a login or a secret. |
 | Removal | A removed account loses its encrypted login and secret at once. The row stays for the history of the leases. |
 
@@ -73,6 +73,7 @@ never sends them, so nobody can change the program or its arguments over the net
 ```json
 "AccountPool": {
   "LauncherPath": "C:\\ClubLauncher\\Cms.Launcher.exe",
+  "ConsoleSessionOnly": true,
   "Platforms": {
     "steam": {
       "ClientPath": "C:\\Program Files (x86)\\Steam\\steam.exe",
@@ -82,6 +83,8 @@ never sends them, so nobody can change the program or its arguments over the net
 }
 ```
 
+- `ConsoleSessionOnly`: `true` (default) gives a club account only to the lock screen of the player at the PC (the
+  console session). Set `false` only for a test over Remote Desktop.
 - `ClientPath` must be an absolute path to an `.exe` file (`C:\...` or `%ProgramFiles%\...`).
 - `LoginArguments` must contain `{login}`; `{secret}` is optional. Each part between spaces becomes one argument, so a
   login or a secret with spaces or quotes stays one argument.

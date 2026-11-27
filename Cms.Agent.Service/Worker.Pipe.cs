@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO.Pipes;
 using System.Net;
 using System.Net.Http.Json;
@@ -28,6 +27,26 @@ public partial class Worker
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetNamedPipeClientProcessId(SafePipeHandle pipe, out uint clientProcessId);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeClientSessionId(SafePipeHandle pipe, out uint clientSessionId);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool ImpersonateNamedPipeClient(SafePipeHandle pipe);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool RevertToSelf();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern SafeProcessHandle OpenProcess(uint desiredAccess, bool inheritHandle, uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "QueryFullProcessImageNameW")]
+    private static extern bool QueryFullProcessImageName(SafeProcessHandle process, uint flags, char[] exeName, ref uint size);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint WTSGetActiveConsoleSessionId();
+
+    private const uint ProcessQueryLimitedInformation = 0x1000;
+
     /// <summary>An error of the pipe server goes to ExecuteAsync, which logs it and starts the pipe again after 5 s.</summary>
     private Task RunLauncherPipeAsync(CancellationToken ct) =>
         new AgentPipeServer(CreatePipe, HandlePipeAsync, ex => _logger.LogDebug(ex, "Launcher pipe"), AuthorizePipeClient).RunAsync(ct);
@@ -52,29 +71,53 @@ public partial class Worker
 
     /// <summary>
     /// A club account request must come from the installed lock screen: the program of the pipe client (its process id from
-    /// the pipe) must be AccountPool:LauncherPath. Every other request is allowed (the players may use the pipe).
+    /// the pipe) must be AccountPool:LauncherPath, in the session of the player at the console (AccountPool:ConsoleSessionOnly,
+    /// default true). Every other request is allowed (the players may use the pipe). Fails closed: any error refuses.
     /// </summary>
     private bool AuthorizePipeClient(NamedPipeServerStream stream, PipeRequest req)
     {
         if (req.Op != PipeOps.Account) return true;
         var launcher = _config["AccountPool:LauncherPath"];
         if (string.IsNullOrWhiteSpace(launcher)) launcher = DefaultLauncherPath;
-        string? path = null;
-        if (GetNamedPipeClientProcessId(stream.SafePipeHandle, out var pid))
+        var consoleOnly = _config.GetValue("AccountPool:ConsoleSessionOnly", true);
+
+        uint? pid = GetNamedPipeClientProcessId(stream.SafePipeHandle, out var p) ? p : null;
+        uint? session = GetNamedPipeClientSessionId(stream.SafePipeHandle, out var s) ? s : null;
+        var path = pid is { } id ? ReadClientImagePath(stream, id) : null;
+        var console = WTSGetActiveConsoleSessionId();
+        var verdict = PipeClientCheck.Decide(path, launcher, session, console, consoleOnly);
+        if (verdict != PipeClientVerdict.Trusted)
+            _logger.LogWarning("Lock screen pipe: a club account request from {Path} (process {Pid}, session {Session}, console {Console}) refused: {Verdict} " +
+                               "(only {Launcher} in the console session may ask)", path ?? "?", pid?.ToString() ?? "?", session?.ToString() ?? "?", console, verdict, launcher);
+        return verdict == PipeClientVerdict.Trusted;
+    }
+
+    /// <summary>
+    /// The full path of the program of the pipe client, or null. The agent runs as LocalService and has no access to a
+    /// process of the player (Process.MainModule is empty, Windows test 2026-11-27, defect 3), so it opens the process with
+    /// PROCESS_QUERY_LIMITED_INFORMATION while it impersonates the client (the player may query the own process). The
+    /// agent stays LocalService. RevertToSelf runs in finally; if it fails, the agent ends at once (FailFast) rather than go
+    /// on as the player, and Windows starts the service again (restart actions of the installer).
+    /// </summary>
+    private string? ReadClientImagePath(NamedPipeServerStream stream, uint pid)
+    {
+        if (!ImpersonateNamedPipeClient(stream.SafePipeHandle))
         {
-            try
-            {
-                using var process = Process.GetProcessById((int)pid);
-                path = process.MainModule?.FileName;
-            }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
-            {
-                path = null; // the client went away, or its program cannot be read: refused
-            }
+            _logger.LogWarning("Lock screen pipe: cannot impersonate the client (error {Error})", Marshal.GetLastWin32Error());
+            return null;
         }
-        var ok = AgentPipeClient.IsTrustedLauncher(path, launcher);
-        if (!ok) _logger.LogWarning("Lock screen pipe: a club account request from {Path} refused (only {Launcher} may ask)", path ?? "?", launcher);
-        return ok;
+        try
+        {
+            using var process = OpenProcess(ProcessQueryLimitedInformation, false, pid);
+            if (process.IsInvalid) return null;
+            var buffer = new char[1024];
+            var size = (uint)buffer.Length;
+            return QueryFullProcessImageName(process, 0, buffer, ref size) ? new string(buffer, 0, (int)size) : null;
+        }
+        finally
+        {
+            if (!RevertToSelf()) Environment.FailFast("ClubAgent: RevertToSelf failed after the check of a pipe client");
+        }
     }
 
     private sealed record LeaseAnswer(long LeaseId, string Platform, string LoginMask, bool Delivered);
