@@ -312,6 +312,21 @@ Prepare: Wake-on-LAN on in the BIOS and in Windows (see ClubDeployment.md, Wake-
       back within an hour; after an hour it expires and never runs
 - [ ] UA / EN: the dialog, the buttons and the toasts are in the selected language
 
+### Test 19: Log Off and Login Lockouts (phase 7)
+Prepare: a player with a PIN; the PC locked without a session; a second Windows user is not signed in.
+- [ ] Sign in to Windows as the player account, start a session, open Notepad with unsaved text
+- [ ] Admin UI → PC map → the PC → 🚪 Log off: within 5 s Windows signs the player out (Notepad closes without a
+      question); the command shows "Sent to the lock screen" in the command result; after the next sign-in the lock
+      screen does not log off again
+- [ ] Stop the launcher (staff PIN, then close it) and send Log off: nothing happens (the agent alone cannot log off);
+      start the launcher within a minute: it does not log off either (the request is older than the lock screen)
+- [ ] Five wrong PINs for the player: the lock screen says "Too many failed attempts"; Manager → Players →
+      "Login lockouts on the PCs" lists @player; "Clear the lockout" → the player logs in at once; the audit log has
+      `player.login_lockout_cleared` for the account
+- [ ] Ten wrong logins with invented names on one PC: the list shows the PC and "unknown name (no account)" rows
+      (never the typed text); clear the PC → logins work on it again
+- [ ] A cashier has no lockout list (and the API answers 403)
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`
