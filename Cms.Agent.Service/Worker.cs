@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using Cms.Client;
 using Cms.Shared;
 
 namespace Cms.Agent.Service;
@@ -71,6 +72,7 @@ public partial class Worker : BackgroundService
         EnsurePrivateDirectory();
         EnsureInboxDirectory();
         MigrateLegacyCredentials();
+        WriteTeardownSettings();
         InitializeCounters();
         LoadRuntimeState();
 
@@ -847,6 +849,37 @@ public partial class Worker : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to update {Path}", path);
+        }
+    }
+
+    /// <summary>
+    /// teardown.json for the lock screen, from the section "Teardown" of appsettings.json on this PC (only
+    /// administrators can change it; the server never sends it). Without the section: the defaults
+    /// (launchers, chat and browsers are closed; cleanup off).
+    /// </summary>
+    private void WriteTeardownSettings()
+    {
+        var path = Path.Combine(AgentDir, AgentFiles.TeardownFile);
+        try
+        {
+            var section = _config.GetSection("Teardown");
+            var settings = new TeardownSettings
+            {
+                KillProcessNames = section.GetSection("KillProcessNames").Get<string[]>() ?? TeardownSettings.DefaultKillProcessNames.ToArray(),
+                Cleanup = new CleanupSettings
+                {
+                    Enabled = section.GetValue("Cleanup:Enabled", false),
+                    AllowedRoots = section.GetSection("Cleanup:AllowedRoots").Get<string[]>() ?? TeardownSettings.DefaultAllowedRoots.ToArray(),
+                    Paths = section.GetSection("Cleanup:Paths").Get<string[]>() ?? Array.Empty<string>()
+                }
+            };
+            WriteAtomic(path, settings.ToJson());
+            _logger.LogInformation("Session teardown: {Count} process names; cleanup {Cleanup} ({Paths} paths)",
+                settings.KillProcessNames.Count, settings.Cleanup.Enabled ? "on" : "off", settings.Cleanup.Paths.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write {Path}; the lock screen uses the defaults", path);
         }
     }
 

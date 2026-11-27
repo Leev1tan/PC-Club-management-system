@@ -422,14 +422,10 @@ public partial class MainWindow : Window
                 heartbeat, now);
             _lastDecision = decision;
 
-            // A new lock ends the session on this PC: the player's language choice and the games
-            if (decision.Locked && !_wasLocked)
-            {
-                _languageOverride = null;
-                ReportGameEvents(_gameTracker.StopAll(now));
-                GameNowText.Text = string.Empty;
-            }
+            // A new lock ends the player's language choice; the teardown runs when the session is over
+            if (decision.Locked && !_wasLocked) _languageOverride = null;
             _wasLocked = decision.Locked;
+            CheckTeardown(decision, state);
             RefreshClientSettings();
             RefreshCatalog();
             TrackGames();

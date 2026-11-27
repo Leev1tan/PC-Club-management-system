@@ -139,10 +139,12 @@ public partial class MainWindow
             if (plan.WorkingDirectory != null && Directory.Exists(plan.WorkingDirectory)) psi.WorkingDirectory = plan.WorkingDirectory;
             using var process = Process.Start(psi);
             int? pid = null;
+            string? processName = null;
             if (!plan.UseShellExecute && process != null)
             {
-                try { pid = process.Id; } catch (InvalidOperationException) { /* exited at once */ }
+                try { pid = process.Id; processName = process.ProcessName; } catch (InvalidOperationException) { /* exited at once */ }
             }
+            RememberStarted(game, pid, processName);
             ReportGameEvents(new[] { _gameTracker.Started(game, pid, DateTimeOffset.UtcNow) });
             GameNowText.Text = LauncherTexts.Format(_texts.GameNow, game.Name);
         }

@@ -40,9 +40,9 @@ public sealed class SystemProcessTable : IProcessTable
                     try { start = p.StartTime; } catch { /* access denied for processes of other users */ }
                     list.Add(new ProcessInfo(p.Id, p.ProcessName, p.SessionId, 0, start));
                 }
-                catch (InvalidOperationException)
+                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
                 {
-                    // exited meanwhile
+                    // exited meanwhile, or no access
                 }
             }
         }
