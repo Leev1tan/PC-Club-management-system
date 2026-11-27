@@ -352,4 +352,17 @@ public sealed class TeardownTriggerTests
         free.Update(false, true, "none", null); // unlocked by staff without a session
         Assert.True(free.Update(true, true, "manual", null));
     }
+
+    [Fact]
+    public void The_trigger_says_whether_a_session_ended_or_a_staff_unlock_without_a_session()
+    {
+        // Windows re-test 2026-11-27 late, LOW 9: agent.log said "the ended session" also after a staff PIN unlock
+        var t = new TeardownTrigger();
+        t.Update(false, true, "none", null);              // staff unlock, no session
+        Assert.True(t.Update(true, true, "manual", null));
+        Assert.True(t.LastWithoutSession);
+        t.Update(false, true, "none", S);                 // then a session
+        Assert.True(t.Update(true, true, "manual", null));
+        Assert.False(t.LastWithoutSession);
+    }
 }

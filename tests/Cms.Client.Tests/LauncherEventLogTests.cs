@@ -23,6 +23,26 @@ public sealed class LauncherEventLogTests
     }
 
     [Fact]
+    public void A_teardown_after_a_staff_unlock_without_a_session_says_so()
+    {
+        // Windows re-test 2026-11-27 late, LOW 9: no session ended, so the log must not say "the ended session"
+        var text = LauncherEventLog.Describe(new LauncherEvent { Type = LauncherEvent.SessionTeardown, OccurredUtc = At, WithoutSession = true });
+        Assert.Equal("the teardown at the end of a staff unlock without a session at 2026-11-27T17:23:49.0000000+00:00 (0 program(s) closed)", text);
+        Assert.Contains("the ended session",
+            LauncherEventLog.Describe(new LauncherEvent { Type = LauncherEvent.SessionTeardown, OccurredUtc = At, WithoutSession = false }));
+        Assert.Contains("the ended session",
+            LauncherEventLog.Describe(new LauncherEvent { Type = LauncherEvent.SessionTeardown, OccurredUtc = At }));   // an older lock screen
+    }
+
+    [Fact]
+    public void The_note_of_the_lock_screen_keeps_the_new_field_in_the_inbox_file()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new LauncherEvent { Type = LauncherEvent.SessionTeardown, WithoutSession = true });
+        var back = System.Text.Json.JsonSerializer.Deserialize<LauncherEvent>(json, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        Assert.True(back!.WithoutSession);
+    }
+
+    [Fact]
     public void Only_a_staff_unlock_is_logged_as_an_emergency_unlock()
     {
         foreach (var type in new[] { LauncherEvent.GameStarted, LauncherEvent.GameStopped, LauncherEvent.SessionTeardown, "other" })

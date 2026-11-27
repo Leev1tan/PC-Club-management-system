@@ -31,7 +31,7 @@ public partial class MainWindow
     {
         var agentAlive = state != null && decision.Reason is not (LockReason.AgentSilent or LockReason.NoAgentState);
         if (_teardownTrigger.Update(decision.Locked && !decision.StaffOverride, agentAlive, state?.LockReason, state?.Session?.Id))
-            RunTeardown();
+            RunTeardown(_teardownTrigger.LastWithoutSession);
     }
 
     private TeardownSettings ReadTeardownSettings()
@@ -48,7 +48,8 @@ public partial class MainWindow
         return TeardownSettings.Default;
     }
 
-    private void RunTeardown()
+    /// <param name="withoutSession">The PC was unlocked without a session (a staff unlock): no session ended.</param>
+    private void RunTeardown(bool withoutSession)
     {
         if (_teardownRunning) return;
         _teardownRunning = true;
@@ -83,7 +84,8 @@ public partial class MainWindow
                 RemovedFiles = r.Cleanup.RemovedFiles,
                 RemovedDirectories = r.Cleanup.RemovedDirectories,
                 RemovedPaths = r.Cleanup.RemovedPaths.Take(15).ToArray(),
-                CleanupErrors = r.Cleanup.Errors.Count
+                CleanupErrors = r.Cleanup.Errors.Count,
+                WithoutSession = withoutSession ? true : null
             });
         }));
     }

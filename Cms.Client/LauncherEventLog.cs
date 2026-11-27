@@ -21,6 +21,8 @@ public static class LauncherEventLog
             LauncherEvent.StaffUnlock => $"the emergency unlock with the staff PIN at {at}",
             LauncherEvent.GameStarted => $"the start of game {e.GameId?.ToString() ?? "?"} at {at}",
             LauncherEvent.GameStopped => $"the stop of game {e.GameId?.ToString() ?? "?"} at {at}",
+            LauncherEvent.SessionTeardown when e.WithoutSession == true =>
+                $"the teardown at the end of a staff unlock without a session at {at} ({e.Killed?.Length ?? 0} program(s) closed)",
             LauncherEvent.SessionTeardown => $"the teardown of the ended session at {at} ({e.Killed?.Length ?? 0} program(s) closed)",
             _ => $"the lock screen note \"{Clean(e.Type)}\" at {at}"
         };

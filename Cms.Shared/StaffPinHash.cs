@@ -145,6 +145,11 @@ public sealed class LauncherEvent
     public int? RemovedDirectories { get; set; }
     public string[]? RemovedPaths { get; set; }
     public int? CleanupErrors { get; set; }
+    /// <summary>
+    /// session_teardown: true when the PC was unlocked without a session (a staff unlock) and is locked again, so no
+    /// session ended (Windows re-test 2026-11-27 late, LOW 9). Null from an older lock screen.
+    /// </summary>
+    public bool? WithoutSession { get; set; }
 
     public static string FileName(Guid id) => $"event-{id:N}.json";
 }

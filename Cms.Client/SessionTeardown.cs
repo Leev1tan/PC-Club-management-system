@@ -287,6 +287,9 @@ public sealed class TeardownTrigger
 {
     private Guid? _seen; // the session seen while unlocked; Guid.Empty = unlocked without a session
 
+    /// <summary>The last teardown of Update followed an unlock without a session (a staff unlock): no session ended.</summary>
+    public bool LastWithoutSession { get; private set; }
+
     /// <summary>Call on every state read. Returns true when the teardown must run now.</summary>
     public bool Update(bool locked, bool agentAlive, string? agentLockReason, Guid? activeSessionId)
     {
@@ -299,6 +302,7 @@ public sealed class TeardownTrigger
         if (_seen is not { } seen) return false;
         if (seen != Guid.Empty && activeSessionId == seen && agentLockReason != "session_expired") return false;
         _seen = null;
+        LastWithoutSession = seen == Guid.Empty;
         return true;
     }
 }
