@@ -749,6 +749,11 @@ public class Worker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// {"endUtc": "..."} sets the session end; {"endUtc": null} clears it (open-ended session, or a
+    /// paused one: the countdown stops). Both clear a manual lock; the server sends "lock" after it
+    /// when the PC must stay locked (pause).
+    /// </summary>
     private void HandleSessionSet(object? payload)
     {
         try
@@ -760,7 +765,7 @@ public class Worker : BackgroundService
                     _sessionEndUtc = endUtc;
                     _manualLockRequested = false;
                 }
-                _logger.LogInformation("Session end set to {End}", endUtc);
+                _logger.LogInformation("Session end set to {End}", endUtc?.ToString("O") ?? "none (open-ended or paused)");
             }
         }
         catch (Exception ex)
@@ -769,33 +774,36 @@ public class Worker : BackgroundService
         }
     }
 
-    private static bool TryReadEndUtc(object? payload, out DateTimeOffset endUtc)
+    /// <summary>True when the payload has "endUtc": a time, or null (no end time).</summary>
+    private static bool TryReadEndUtc(object? payload, out DateTimeOffset? endUtc)
     {
-        endUtc = default;
-
-        if (payload is JsonElement element)
-        {
-            return element.ValueKind == JsonValueKind.Object &&
-                   element.TryGetProperty("endUtc", out var endProperty) &&
-                   endProperty.ValueKind == JsonValueKind.String &&
-                   DateTimeOffset.TryParse(endProperty.GetString(), out endUtc);
-        }
+        endUtc = null;
+        if (payload is JsonElement element) return TryReadEndUtc(element, out endUtc);
 
         var json = payload?.ToString();
         if (string.IsNullOrWhiteSpace(json)) return false;
-
         try
         {
             using var doc = JsonDocument.Parse(json);
-            return doc.RootElement.ValueKind == JsonValueKind.Object &&
-                   doc.RootElement.TryGetProperty("endUtc", out var endProperty) &&
-                   endProperty.ValueKind == JsonValueKind.String &&
-                   DateTimeOffset.TryParse(endProperty.GetString(), out endUtc);
+            return TryReadEndUtc(doc.RootElement, out endUtc);
         }
         catch (JsonException)
         {
             return false;
         }
+    }
+
+    private static bool TryReadEndUtc(JsonElement element, out DateTimeOffset? endUtc)
+    {
+        endUtc = null;
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty("endUtc", out var end)) return false;
+        if (end.ValueKind == JsonValueKind.Null) return true;
+        if (end.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(end.GetString(), out var parsed))
+        {
+            endUtc = parsed;
+            return true;
+        }
+        return false;
     }
 
     private void ExecuteRestart()
