@@ -6,6 +6,7 @@ using Cms.Server.Data;
 using Cms.Server.Devices;
 using Cms.Server.Pos;
 using Cms.Server.Repositories;
+using Cms.Server.Reservations;
 using Cms.Server.Shifts;
 using Cms.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -63,9 +64,16 @@ public sealed class DemoSimulator
     // Games use their own random numbers too
     private readonly Random _games = new();
     private DateTimeOffset _nextGamesUtc;
+    // Reservations: who arrives when (null = a no-show), and new bookings now and then
+    private readonly Random _resv;
+    private readonly Dictionary<long, DateTimeOffset?> _arrivals = new();
+    private DateTimeOffset _nextReservationsUtc;
+    private DateTimeOffset _nextBookingUtc;
 
-    public DemoSimulator(ILogger<DemoSimulator> logger, DeviceRuntimeState runtime, Random? rng = null, ClubClock? clock = null, Random? posRng = null)
+    public DemoSimulator(ILogger<DemoSimulator> logger, DeviceRuntimeState runtime, Random? rng = null, ClubClock? clock = null, Random? posRng = null,
+        Random? reservationRng = null)
     {
+        _resv = reservationRng ?? new Random();
         _logger = logger;
         _runtime = runtime;
         _rng = rng ?? new Random();
@@ -103,6 +111,9 @@ public sealed class DemoSimulator
         _noShiftSinceUtc = null;
         _nextUnlockUtc = now.AddMinutes(_pos.Next(40, 90));
         _nextGamesUtc = now.AddSeconds(_games.Next(15, 30));
+        _arrivals.Clear();
+        _nextReservationsUtc = now.AddSeconds(10);
+        _nextBookingUtc = now.AddMinutes(_resv.Next(8, 15));
     }
 
     /// <summary>A Wake-on-LAN of the admin UI (any thread): handled in the next tick.</summary>
@@ -158,6 +169,16 @@ public sealed class DemoSimulator
         {
             _nextGamesUtc = now.AddSeconds(_games.Next(20, 45));
             await PlayGamesAsync(db, now, ct);
+        }
+        if (now >= _nextReservationsUtc)
+        {
+            _nextReservationsUtc = now.AddSeconds(_resv.Next(15, 25));
+            await CheckInArrivalsAsync(db, repo, now, ct);
+        }
+        if (now >= _nextBookingUtc)
+        {
+            _nextBookingUtc = now.AddMinutes(_resv.Next(8, 15));
+            await BookAsync(db, repo, now, ct);
         }
         if (now >= _nextUnlockUtc)
         {
@@ -278,7 +299,11 @@ public sealed class DemoSimulator
 
         var online = _pcs.Values.Where(p => p.IsUp(now)).ToList();
         if (online.Count == 0) return;
-        var free = online.Where(p => !busy.Contains(p.Info.Id)).ToList();
+        // A cashier sees "reserved at HH:MM" on the map and sells time only until the hold of the reservation
+        var reserved = await ReservationMap.NextByPcAsync(db, ClockAt(now), ct);
+        var hold = (await ReservationSettings.LoadAsync(db, ct)).HoldMinutes;
+        double Room(Guid pc) => reserved.TryGetValue(pc, out var r) ? (r.StartUtc.AddMinutes(-hold) - now).TotalMinutes : double.MaxValue;
+        var free = online.Where(p => !busy.Contains(p.Info.Id) && Room(p.Info.Id) >= 30).ToList();
         var occupancy = (double)(online.Count - free.Count) / online.Count;
         if (free.Count == 0 || occupancy >= TargetOccupancy) return;
 
@@ -288,7 +313,8 @@ public sealed class DemoSimulator
 
         Guid? packageId = null;
         string? packageName = null;
-        if (_rng.NextDouble() < 0.35 && device.ZoneId.HasValue)
+        var room = Room(pc.Info.Id);
+        if (_rng.NextDouble() < 0.35 && device.ZoneId.HasValue && room == double.MaxValue)
         {
             var onSale = (await db.Packages.AsNoTracking().Where(p => p.ZoneId == device.ZoneId && p.IsActive).ToListAsync(ct))
                 .Where(p => PackageWindows.Evaluate(p, now, _zone).Available).ToList();
@@ -299,6 +325,7 @@ public sealed class DemoSimulator
             }
         }
         var minutes = new[] { 30, 60, 60, 90, 120, 180 }[_rng.Next(6)];
+        if (minutes > room) minutes = (int)(room / 30) * 30; // until the hold of the next reservation
         UserEntity? player = null;
         if (_rng.NextDouble() < 0.25)
         {
@@ -465,6 +492,73 @@ public sealed class DemoSimulator
                 _logger.LogDebug("Demo: {Game} started on {Device}", pick.Name, session.DeviceId);
             db.ChangeTracker.Clear();
         }
+    }
+
+    /// <summary>
+    /// Held reservations: most guests arrive between 10 minutes before and 8 minutes after the start and the cashier
+    /// on duty checks them in (a player from the balance, a walk-in in cash or by card); about one in four never comes
+    /// and the reservation job cancels it after the grace period.
+    /// </summary>
+    private async Task CheckInArrivalsAsync(CmsDbContext db, IDeviceRepository repo, DateTimeOffset now, CancellationToken ct)
+    {
+        var clock = ClockAt(now);
+        var settings = await ReservationSettings.LoadAsync(db, ct);
+        var today = ReservationService.DayOf(now, clock);
+        var held = (await db.Reservations.AsNoTracking()
+                .Where(r => r.Status == ReservationStatuses.Confirmed && r.StartDay >= today - 1 && r.StartDay <= today + 1).ToListAsync(ct))
+            .Where(r => ReservationHolds.IsHeld(r, now, settings)).ToList();
+        if (held.Count == 0) return;
+        var shift = await ShiftService.OpenShiftAsync(db, ct);
+        var deskOpen = shift != null || !db.RequireOpenShift;
+        var openerId = shift?.OpenedById;
+        var cashier = (openerId.HasValue ? await db.StaffUsers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == openerId, ct) : null)
+                      ?? await db.StaffUsers.AsNoTracking().FirstOrDefaultAsync(s => s.Role == StaffRoles.Cashier, ct);
+        foreach (var r in held)
+        {
+            if (!_arrivals.TryGetValue(r.Id, out var at))
+            {
+                at = _resv.NextDouble() < 0.75 ? r.StartUtc.AddMinutes(_resv.Next(-10, 9)) : null;
+                _arrivals[r.Id] = at;
+            }
+            if (at == null || at > now) continue;
+            var method = r.UserId.HasValue ? PaymentMethods.Balance : deskOpen ? (_resv.NextDouble() < 0.6 ? PaymentMethods.Cash : PaymentMethods.Card) : null;
+            if (method == null) continue;
+            var service = new ReservationService(db, repo, clock, new AuditLogger(db, new HttpContextAccessor()), auditActor: cashier);
+            var result = await service.CheckInAsync(r.Id, new CheckInRequest(PaymentMethod: method));
+            db.ChangeTracker.Clear();
+            if (!result.Ok && r.UserId.HasValue && deskOpen)
+            {
+                result = await service.CheckInAsync(r.Id, new CheckInRequest(PaymentMethod: PaymentMethods.Cash)); // the balance is too low
+                db.ChangeTracker.Clear();
+            }
+            if (result.Ok) _logger.LogInformation("Demo: reservation #{Id} checked in", r.Id);
+            else _logger.LogDebug("Demo: reservation #{Id} not checked in: {Error}", r.Id, result.Error!.Code);
+        }
+    }
+
+    /// <summary>A call to the desk: a reservation in 1 to 4 hours for a player (sometimes with a deposit) or a walk-in name.</summary>
+    private async Task BookAsync(CmsDbContext db, IDeviceRepository repo, DateTimeOffset now, CancellationToken ct)
+    {
+        var clock = ClockAt(now);
+        var local = clock.ToLocal(now);
+        var start = now.AddMinutes(_resv.Next(4, 16) * 15 - local.Minute % 15).AddSeconds(-local.Second);
+        var minutes = new[] { 60, 90, 120, 180 }[_resv.Next(4)];
+        var pc = await DemoReservations.FreePcAsync(db, clock, start, minutes, _resv, ct);
+        if (pc == null) return;
+        var cashier = await db.StaffUsers.AsNoTracking().FirstOrDefaultAsync(s => s.Role == StaffRoles.Cashier, ct);
+        UserEntity? player = null;
+        if (_resv.NextDouble() < 0.6)
+        {
+            var players = await db.Users.AsNoTracking().Where(u => u.Balance >= 100m && u.Username != DemoOptions.PlayerLogin).ToListAsync(ct);
+            if (players.Count > 0) player = players[_resv.Next(players.Count)];
+        }
+        var startLocal = clock.ToLocal(start);
+        var result = await new ReservationService(db, repo, clock, new AuditLogger(db, new HttpContextAccessor()), auditActor: cashier)
+            .CreateAsync(new CreateReservationRequest(pc, null, startLocal.ToString("yyyy-MM-dd"), startLocal.ToString("HH:mm"), minutes,
+                player?.Id, player == null ? DemoReservations.WalkInNames[_resv.Next(DemoReservations.WalkInNames.Length)] : null,
+                player != null && _resv.NextDouble() < 0.5 ? 50m : 0m));
+        db.ChangeTracker.Clear();
+        if (result.Ok) _logger.LogInformation("Demo: reservation #{Id} booked for {Start:HH:mm}", result.Value!.Id, startLocal);
     }
 
     /// <summary>Somebody on staff used the PIN on the lock screen of a PC; the agent reports it.</summary>

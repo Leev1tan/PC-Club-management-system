@@ -99,7 +99,7 @@ public static partial class DemoSeeder
 
     /// <summary>Tables with many rows: PostgreSQL empties them with one TRUNCATE.</summary>
     private static readonly string[] BigTables =
-        { "Commands", "Heartbeats", "Transactions", "GamePlays", "SessionSegments", "Sessions", "SaleItems", "Sales", "StockMovements", "Shifts", "LedgerEntries", "AuditLog" };
+        { "Commands", "Heartbeats", "Transactions", "GamePlays", "SessionSegments", "Sessions", "SaleItems", "Sales", "StockMovements", "Shifts", "LedgerEntries", "AuditLog", "Reservations" };
 
     /// <summary>Tables of the bulk insert whose foreign keys PostgreSQL checks once at the end.</summary>
     private static readonly string[] BulkTables = { "Sessions", "SessionSegments", "GamePlays", "Sales", "SaleItems", "StockMovements", "LedgerEntries" };
@@ -107,7 +107,7 @@ public static partial class DemoSeeder
     private sealed record ForeignKeyDefinition(string Table, string Name, string Definition);
 
     /// <summary>Tables with ids from a sequence that the seed fills with explicit ids in date order.</summary>
-    private static readonly string[] SequenceTables = { "Shifts", "Sales", "SaleItems", "StockMovements", "LedgerEntries", "AuditLog" };
+    private static readonly string[] SequenceTables = { "Shifts", "Sales", "SaleItems", "StockMovements", "LedgerEntries", "AuditLog", "Reservations" };
 
     /// <summary>
     /// True when the database is empty or was seeded by demo mode. Demo mode refuses to
@@ -126,6 +126,7 @@ public static partial class DemoSeeder
                && !await db.Games.AnyAsync(ct)
                && !await db.Sessions.AnyAsync(ct)
                && !await db.Ledger.AnyAsync(ct)
+               && !await db.Reservations.AnyAsync(ct)
                && !await db.StaffUsers.AnyAsync(ct);
     }
 
@@ -170,6 +171,7 @@ public static partial class DemoSeeder
         else
         {
             // Children first (foreign key order); the append-only tables are cleared the demo way
+            await db.Reservations.ExecuteDeleteAsync(ct);
             await db.Commands.ExecuteDeleteAsync(ct);
             await db.Heartbeats.ExecuteDeleteAsync(ct);
             await LedgerGuard.ClearForDemoResetAsync(db, ct);
@@ -218,6 +220,10 @@ public static partial class DemoSeeder
                     $"SELECT setval(pg_get_serial_sequence('\"{table}\"', 'Id'), COALESCE((SELECT MAX(\"Id\") FROM \"{table}\"), 0) + 1, false)", ct);
         }
         await tx.CommitAsync(ct);
+        db.ChangeTracker.Clear();
+
+        // Reservations of today and tomorrow, through the real service (deposits in the ledger, audit rows)
+        await DemoReservations.SeedAsync(db, now, zone, rng, ct);
         db.ChangeTracker.Clear();
         return result;
     }
