@@ -81,6 +81,14 @@ public static partial class DemoSeeder
         }),
     };
 
+    /// <summary>Demo loyalty tiers: real money spent in the last 30 days (the seeded regulars spread over them).</summary>
+    public static readonly LoyaltySettings LoyaltyTiers = new(30, new[]
+    {
+        new LoyaltyTier("Bronze", 0m, 0m, 0m),
+        new LoyaltyTier("Silver", 2000m, 2m, 5m),
+        new LoyaltyTier("Gold", 6000m, 5m, 10m),
+    });
+
     public static readonly IReadOnlyList<BonusTier> BonusTiers = new[]
     {
         new BonusTier(200m, 5m), new BonusTier(500m, 10m), new BonusTier(1000m, 15m)
@@ -219,6 +227,7 @@ public static partial class DemoSeeder
             await db.Database.ExecuteSqlRawAsync($"ALTER TABLE {fk.Table} ADD CONSTRAINT \"{fk.Name}\" {fk.Definition}", ct);
 
         await BonusRules.SaveAsync(db, BonusTiers, "demo", now, ct);
+        await Loyalty.SaveAsync(db, LoyaltyTiers, "demo", now, ct);
         db.ClubSettings.Add(new ClubSettingEntity { Key = ClubSettingKeys.LedgerBackfilled, Value = "demo", UpdatedUtc = now, UpdatedBy = "demo" });
         db.ClubSettings.Add(new ClubSettingEntity { Key = ClubSettingKeys.AuditChainSealed, Value = "demo", UpdatedUtc = now, UpdatedBy = "demo" });
         await db.SaveChangesAsync(ct);
@@ -463,6 +472,24 @@ public static partial class DemoSeeder
             _playerEvents.Add((adjustAt, 2, () => Adjust(taras, 50m, "Компенсація: збій ПК STD-04 під час гри", adjustAt)));
         }
 
+        /// <summary>
+        /// How often each regular comes, by the position in the player list: some play every evening, some now and then,
+        /// so the players spread over the loyalty tiers (Bronze, Silver, Gold of the demo).
+        /// </summary>
+        private static readonly double[] Activity = { 0.1, 0.15, 0.5, 0.6, 1.6, 2.5 };
+
+        private UserEntity PickWeighted(IReadOnlyList<UserEntity> users)
+        {
+            double Weight(UserEntity u) => Activity[Math.Max(0, Array.FindIndex(Players, p => p.Username == u.Username)) % Activity.Length];
+            var roll = _rng.NextDouble() * users.Sum(Weight);
+            foreach (var u in users)
+            {
+                roll -= Weight(u);
+                if (roll <= 0) return u;
+            }
+            return users[^1];
+        }
+
         private void Reserve(PcInfo pc, DateTimeOffset start, DateTimeOffset end)
         {
             if (!_reserved.TryGetValue(pc.Device.Id, out var list)) _reserved[pc.Device.Id] = list = new();
@@ -533,7 +560,7 @@ public static partial class DemoSeeder
                     var free = _regulars.Where(u => IsFree(u, plan.Start, plan.End)).ToList();
                     if (free.Count > 0)
                     {
-                        user = free[_rng.Next(free.Count)];
+                        user = PickWeighted(free);
                         Playing(user, plan.Start, plan.End);
                     }
                 }
