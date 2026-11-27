@@ -1,0 +1,25 @@
+PC Club Management System {VERSION} - club server for Windows (win-x64)
+=======================================================================
+
+This package installs the club server as the Windows service "ClubServer". The server serves
+the admin UI and the API on http://<server-ip>:5081. No .NET installation is needed.
+
+Install
+1. Check the file: compare the SHA-256 of this zip with the line in SHA256SUMS of the release
+   (PowerShell: Get-FileHash .\ccms-server-{VERSION}-win-x64.zip).
+2. Extract the zip to a temporary folder.
+3. Run Install.cmd as Administrator (or: powershell -ExecutionPolicy Bypass -File install-server.ps1).
+   Options: -HttpPort 5081 -DataPath C:\ProgramData\PCClub -EnrollmentToken <token> -TimeZone Europe/Kyiv
+            -PostgresConnectionString "Host=...;Database=cms;Username=...;Password=..."
+   Default database: SQLite in C:\ProgramData\PCClub\cms.db.
+4. At the end the installer shows the one-time setup code and the enrollment token for the club PCs.
+5. Open http://localhost:5081, enter the setup code and create the Owner account.
+   Then set the staff PIN for the lock screens (Settings).
+
+Update: run Install.cmd of the new version. The data, the enrollment token and the time zone stay.
+Guide: docs/ClubDeployment.md in the source repository.
+
+Українською: розпакуйте архів, запустіть Install.cmd від імені адміністратора, відкрийте
+http://localhost:5081 і створіть власника за одноразовим кодом, який показав інсталятор.
+
+License: AGPL-3.0-or-later (LICENSE). Author and contact: NOTICE.md.

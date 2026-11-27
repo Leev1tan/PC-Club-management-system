@@ -1,0 +1,26 @@
+PC Club Management System {VERSION} - agent for the club PCs (Windows 10/11, win-x64)
+=====================================================================================
+
+The agent is the Windows service "ClubAgent" on every gaming PC. It registers the PC with the
+club server, sends heartbeats and runs the commands from the admin UI. The lock screen is in the
+launcher package (ccms-launcher-{VERSION}-win-x64.zip). No .NET installation is needed.
+
+Install (on every gaming PC, as Administrator)
+1. Check the files: compare the SHA-256 of both zips with SHA256SUMS of the release
+   (PowerShell: Get-FileHash .\ccms-agent-{VERSION}-win-x64.zip).
+2. Extract this zip AND the launcher zip into the same folder. The folder then has agent\,
+   launcher\, install-client.ps1 and Install.cmd.
+3. Run as Administrator:
+     Install.cmd -ServerUrl "http://<server-or-router>:5081" -EnrollmentToken "<token>" -KioskMode
+   The enrollment token is printed by the server installer (Docker: CMS_ENROLLMENT_TOKEN).
+   Without the token the PC waits for approval in the admin UI (Devices).
+   -KioskMode makes the lock screen the shell of the player account.
+4. Check: Get-Service ClubAgent shows Running; the PC is online in the admin UI.
+
+Update: extract the new zips into a new folder and run Install.cmd again with the same options.
+Remove the kiosk shell: uninstall-kiosk.ps1. Guide: docs/ClubDeployment.md in the source repository.
+
+Українською: розпакуйте цей архів і архів launcher в одну папку та запустіть від імені адміністратора
+Install.cmd -ServerUrl "http://<сервер>:5081" -EnrollmentToken "<токен>" -KioskMode.
+
+License: AGPL-3.0-or-later (LICENSE). Author and contact: NOTICE.md.

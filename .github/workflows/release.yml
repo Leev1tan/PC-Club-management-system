@@ -1,0 +1,126 @@
+name: Release
+
+# A pushed tag v1.2.3 builds the Windows packages and creates the GitHub release with them.
+# "Run workflow" (workflow_dispatch) is a dry run: it builds and uploads the same files as a
+# workflow artifact, but creates no release and no tag.
+#   ccms-server-<tag>-win-x64.zip, ccms-agent-<tag>-win-x64.zip, ccms-launcher-<tag>-win-x64.zip, SHA256SUMS
+# The packages come from scripts/release/build-release.ps1 (also usable on a Windows build PC).
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+# Least privilege: read-only by default; only the release job may write (create the release).
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+# Actions are pinned to full commit SHAs (version in the comment), checked against the upstream tags.
+# Dependabot (.github/dependabot.yml) keeps the pins up to date.
+
+jobs:
+  build:
+    name: Build the Windows packages
+    runs-on: windows-latest
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.name }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin-ui/package-lock.json
+
+      - name: Version (tag, or dryrun-<commit> for a manual run)
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          if ($env:REF_TYPE -eq 'tag') {
+            if ($env:REF_NAME -notmatch '^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "Tag must look like v1.2.3: $env:REF_NAME" }
+            $name = $env:REF_NAME
+          } else {
+            $name = 'dryrun-' + $env:SHA.Substring(0, 7)
+          }
+          "name=$name" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $name"
+
+      - name: Test the server (SQLite)
+        run: dotnet test tests/Cms.Server.Tests/Cms.Server.Tests.csproj -c Release
+
+      - name: Build the admin UI (static files for the Windows server)
+        working-directory: admin-ui
+        run: |
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+
+      - name: Publish and package (server, agent, launcher, SHA256SUMS)
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+        run: ./scripts/release/build-release.ps1 -Version $env:VERSION -OutDir dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ steps.version.outputs.name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Create the GitHub release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Check the files against SHA256SUMS
+        working-directory: dist
+        run: |
+          ls -l
+          test "$(ls *.zip | wc -l)" = 3
+          sha256sum -c SHA256SUMS
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.build.outputs.version }}
+        run: |
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$TAG" dist/*.zip dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --verify-tag $prerelease \
+            --title "PC Club Management System $TAG" \
+            --generate-notes \
+            --notes "Windows packages (win-x64, self-contained, no .NET needed): ccms-server (club server with the admin UI), ccms-agent and ccms-launcher (club PCs; extract both into one folder). Check the files with SHA256SUMS. Install: see INSTALL.txt in each zip and README, section \"Install from a release\". Docker images: ghcr.io (CI workflow)."

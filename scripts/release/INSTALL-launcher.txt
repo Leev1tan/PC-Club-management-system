@@ -1,0 +1,19 @@
+PC Club Management System {VERSION} - lock screen / launcher for the club PCs (Windows 10/11, win-x64)
+=====================================================================================================
+
+The launcher is the full-screen lock screen of the gaming PCs: player login, session time,
+game grid and the staff PIN unlock (Ctrl+Shift+U). It works together with the agent
+(ccms-agent-{VERSION}-win-x64.zip), which has the installer script. No .NET installation is needed.
+
+Install
+1. Check the file: compare the SHA-256 of this zip with SHA256SUMS of the release.
+2. Extract this zip into the same folder as the agent zip (the folder then has agent\ and launcher\).
+3. Run Install.cmd of the agent package as Administrator, see INSTALL.txt of the agent package.
+   The installer copies launcher\ to C:\ClubLauncher and starts the launcher at every login.
+
+The launcher alone (without the agent) stays locked: it fails closed when the agent does not answer.
+
+Українською: розпакуйте цей архів в ту саму папку, що й архів агента, і запустіть Install.cmd агента
+від імені адміністратора.
+
+License: AGPL-3.0-or-later (LICENSE). Author and contact: NOTICE.md.
