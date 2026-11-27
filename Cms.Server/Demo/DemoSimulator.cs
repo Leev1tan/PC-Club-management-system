@@ -29,7 +29,8 @@ namespace Cms.Server.Demo;
 ///    sold-out product gets a delivery; desk payments happen only while a shift is open, and when a
 ///    visitor closes the shift the demo cashier opens a new one a few minutes later;
 ///  - once in a while a PC reports an emergency staff PIN unlock (audit log);
-///  - players start games of the catalog in running sessions and sometimes switch (current game, top games).
+///  - players start games of the catalog in running sessions and sometimes switch (current game, top games);
+///  - players and guests order from the bar on the lock screen; the cashier prepares and delivers the orders.
 /// Sessions, sales and shifts go through the real services, so prices, ledger rows and commands follow the real rules.
 /// Not thread-safe: called from one background loop only.
 /// </summary>
@@ -69,11 +70,16 @@ public sealed class DemoSimulator
     private readonly Dictionary<long, DateTimeOffset?> _arrivals = new();
     private DateTimeOffset _nextReservationsUtc;
     private DateTimeOffset _nextBookingUtc;
+    // Bar orders from the lock screens: placed now and then, handled by the cashier on duty a few minutes later
+    private readonly Random _ord;
+    private DateTimeOffset _nextOrderUtc;
+    private DateTimeOffset _nextOrderDeskUtc;
 
     public DemoSimulator(ILogger<DemoSimulator> logger, DeviceRuntimeState runtime, Random? rng = null, ClubClock? clock = null, Random? posRng = null,
-        Random? reservationRng = null)
+        Random? reservationRng = null, Random? orderRng = null)
     {
         _resv = reservationRng ?? new Random();
+        _ord = orderRng ?? new Random();
         _logger = logger;
         _runtime = runtime;
         _rng = rng ?? new Random();
@@ -114,6 +120,8 @@ public sealed class DemoSimulator
         _arrivals.Clear();
         _nextReservationsUtc = now.AddSeconds(10);
         _nextBookingUtc = now.AddMinutes(_resv.Next(8, 15));
+        _nextOrderUtc = now.AddSeconds(_ord.Next(30, 90));
+        _nextOrderDeskUtc = now.AddSeconds(45);
     }
 
     /// <summary>A Wake-on-LAN of the admin UI (any thread): handled in the next tick.</summary>
@@ -174,6 +182,16 @@ public sealed class DemoSimulator
         {
             _nextReservationsUtc = now.AddSeconds(_resv.Next(15, 25));
             await CheckInArrivalsAsync(db, repo, now, ct);
+        }
+        if (now >= _nextOrderUtc)
+        {
+            _nextOrderUtc = now.AddSeconds(_ord.Next(120, 240));
+            await PlaceOrderAsync(db, now, ct);
+        }
+        if (now >= _nextOrderDeskUtc)
+        {
+            _nextOrderDeskUtc = now.AddSeconds(30);
+            await HandleOrdersAsync(db, now, ct);
         }
         if (now >= _nextBookingUtc)
         {
@@ -559,6 +577,59 @@ public sealed class DemoSimulator
                 player != null && _resv.NextDouble() < 0.5 ? 50m : 0m));
         db.ChangeTracker.Clear();
         if (result.Ok) _logger.LogInformation("Demo: reservation #{Id} booked for {Start:HH:mm}", result.Value!.Id, startLocal);
+    }
+
+    /// <summary>
+    /// A player or a guest in a running session orders one or two things from the lock screen: a player pays from the
+    /// real balance when it is enough, else at the desk; a guest at the desk. One open order per PC.
+    /// </summary>
+    private async Task PlaceOrderAsync(CmsDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var withOrder = (await db.BarOrders.AsNoTracking().Where(o => o.Status == BarOrderStatuses.New || o.Status == BarOrderStatuses.Preparing)
+            .Select(o => o.DeviceId).ToListAsync(ct)).ToHashSet();
+        var sessions = (await db.Sessions.AsNoTracking().Where(s => s.Status == "active" && s.PausedUtc == null).ToListAsync(ct))
+            .Where(s => IsOnline(s.DeviceId, now) && !SessionService.IsDue(s, now) && !withOrder.Contains(s.DeviceId)).ToList();
+        if (sessions.Count == 0) return;
+        var session = sessions[_ord.Next(sessions.Count)];
+        var service = new BarOrderService(db, ClockAt(now), new AuditLogger(db, new HttpContextAccessor()));
+        var menu = await service.MenuAsync(session.DeviceId);
+        if (!menu.Available || menu.Products.Count == 0) return;
+        var lines = Enumerable.Range(0, _ord.Next(1, 3)).Select(_ => menu.Products[_ord.Next(menu.Products.Count)]).DistinctBy(p => p.Id)
+            .Select(p => new OrderLine(p.Id, 1)).ToList();
+        var total = lines.Sum(l => menu.Products.First(p => p.Id == l.ProductId).Price);
+        var payment = menu.CanPayFromBalance && menu.Balance >= total + 30m && _ord.NextDouble() < 0.7 ? BarOrderPayments.Balance : BarOrderPayments.Desk;
+        var result = await service.PlaceAsync(session.DeviceId, lines, payment);
+        db.ChangeTracker.Clear();
+        if (result.Ok) _logger.LogInformation("Demo: bar order #{Id} from a PC ({Payment})", result.Value!.Id, payment);
+    }
+
+    /// <summary>The cashier on duty: an order older than 2 minutes is prepared, older than 4 minutes delivered (one in ten is cancelled).</summary>
+    private async Task HandleOrdersAsync(CmsDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var open = await db.BarOrders.AsNoTracking().Where(o => o.Status == BarOrderStatuses.New || o.Status == BarOrderStatuses.Preparing).ToListAsync(ct);
+        if (open.Count == 0) return;
+        var shift = await ShiftService.OpenShiftAsync(db, ct);
+        var deskOpen = shift != null || !db.RequireOpenShift;
+        var openerId = shift?.OpenedById;
+        var cashier = (openerId.HasValue ? await db.StaffUsers.AsNoTracking().FirstOrDefaultAsync(s => s.Id == openerId, ct) : null)
+                      ?? await db.StaffUsers.AsNoTracking().FirstOrDefaultAsync(s => s.Role == StaffRoles.Cashier, ct);
+        var service = new BarOrderService(db, ClockAt(now), new AuditLogger(db, new HttpContextAccessor()), auditActor: cashier);
+        foreach (var order in open)
+        {
+            var age = now - order.CreatedUtc;
+            BillingResult<BarOrderEntity> result;
+            if (order.Status == BarOrderStatuses.New && age >= TimeSpan.FromMinutes(2)) result = await service.PrepareAsync(order.Id);
+            else if (order.Status == BarOrderStatuses.Preparing && age >= TimeSpan.FromMinutes(4))
+            {
+                if (_ord.NextDouble() < 0.1) result = await service.CancelAsync(order.Id, "Закінчилося на складі");
+                else if (order.Payment == BarOrderPayments.Desk && !deskOpen) continue;
+                else result = await service.DeliverAsync(order.Id, _ord.NextDouble() < 0.6 ? PaymentMethods.Cash : PaymentMethods.Card);
+                if (!result.Ok) { db.ChangeTracker.Clear(); result = await service.CancelAsync(order.Id, "Немає в наявності"); }
+            }
+            else continue;
+            db.ChangeTracker.Clear();
+            if (result.Ok) _logger.LogInformation("Demo: bar order #{Id} is {Status}", order.Id, result.Value!.Status);
+        }
     }
 
     /// <summary>Somebody on staff used the PIN on the lock screen of a PC; the agent reports it.</summary>

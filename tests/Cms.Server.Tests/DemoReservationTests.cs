@@ -2,6 +2,7 @@ using Cms.Server.Auth;
 using Cms.Server.Billing;
 using Cms.Server.Data;
 using Cms.Server.Demo;
+using Cms.Server.Pos;
 using Cms.Server.Repositories;
 using Cms.Server.Reservations;
 using Microsoft.AspNetCore.Http;
@@ -11,7 +12,10 @@ using Xunit;
 
 namespace Cms.Server.Tests;
 
-/// <summary>Demo reservations: seeded for today and tomorrow at any club time; the simulator checks most in and some become no-shows.</summary>
+/// <summary>
+/// Demo reservations and bar orders: reservations seeded for today and tomorrow at any club time; the simulator checks
+/// most in and some become no-shows; it places bar orders from the PCs and the cashier handles them.
+/// </summary>
 public sealed class DemoReservationTests
 {
     [Theory]
@@ -50,7 +54,7 @@ public sealed class DemoReservationTests
         }
 
         // Four hours of the club: the simulator ticks every minute, the reservation job runs too
-        var sim = new DemoSimulator(NullLogger<DemoSimulator>.Instance, runtime, new Random(7), clock, posRng: new Random(11), reservationRng: new Random(5));
+        var sim = new DemoSimulator(NullLogger<DemoSimulator>.Instance, runtime, new Random(7), clock, posRng: new Random(11), reservationRng: new Random(5), orderRng: new Random(3));
         sim.Load(seed, now);
         for (var minute = 1; minute <= 240; minute++)
         {
@@ -73,6 +77,15 @@ public sealed class DemoReservationTests
             Assert.True((await Holds.DepositsAsync(db)).Ok);
             Assert.Empty(await Ledger.ReconcileAsync(db));
             Assert.True((await AuditChain.VerifyAsync(db)).Ok);
+
+            // Bar orders from the PCs: placed, prepared and delivered (some cancelled), every one reconciled
+            var orders = await db.BarOrders.AsNoTracking().ToListAsync();
+            Assert.True(orders.Count >= 20, $"{orders.Count} orders");
+            Assert.Contains(orders, o => o.Status == BarOrderStatuses.Delivered && o.Payment == BarOrderPayments.Balance);
+            Assert.Contains(orders, o => o.Status == BarOrderStatuses.Delivered && o.Payment == BarOrderPayments.Desk);
+            Assert.All(orders.Where(o => o.Status == BarOrderStatuses.Delivered), o => Assert.NotNull(o.SaleId));
+            Assert.True((await Holds.OrdersAsync(db)).Ok);
+            Assert.Empty(await Stock.ReconcileAsync(db));
         }
     }
 }

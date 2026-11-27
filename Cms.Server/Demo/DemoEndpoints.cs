@@ -27,6 +27,7 @@ public static class DemoEndpoints
                 (write && request.Path.StartsWithSegments("/api/settings") && !request.Path.StartsWithSegments("/api/settings/currency")
                     && !request.Path.StartsWithSegments("/api/settings/language")) ||
                 (write && request.Path.StartsWithSegments("/api/reservations/settings")) ||
+                (write && request.Path.StartsWithSegments("/api/orders/settings")) ||
                 (write && request.Path.StartsWithSegments("/api/auth/password")) ||
                 (write && request.Path.StartsWithSegments("/api/auth/setup"));
             if (blocked)
