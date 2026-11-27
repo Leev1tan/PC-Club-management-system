@@ -34,10 +34,17 @@ public sealed class DemoBarTests : IDisposable
         await sim.TickAsync(db, new EfDeviceRepository(db, _runtime), now);
     }
 
-    [Fact]
-    public async Task Seed_has_a_bar_shifts_with_a_variance_and_everything_reconciles()
+    [Theory]
+    [InlineData("now")]
+    [InlineData("09:01")] // a minute after the day shift opened
+    [InlineData("21:01")] // a minute after the night shift opened
+    [InlineData("00:01")] // a minute into the club day
+    [InlineData("10:00")] // an hour after the day shift opened
+    [InlineData("22:00")] // an hour after the night shift opened
+    [InlineData("14:00")]
+    public async Task Seed_has_a_bar_shifts_with_a_variance_and_everything_reconciles(string clubTime)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = ClubTimePoints.At(clubTime);
         await SeedAsync(now);
         await using var db = _testDb.NewContext();
 
@@ -57,7 +64,9 @@ public sealed class DemoBarTests : IDisposable
         Assert.Equal(open.Id, shifts[^1].Id);
         Assert.All(shifts.Zip(shifts.Skip(1)), pair => Assert.Equal(pair.First.ClosedUtc, pair.Second.OpenedUtc));
         Assert.Contains(shifts, s => s.Variance == -15m && s.CloseNote != null && (now - s.ClosedUtc!.Value).TotalHours < 48);
-        Assert.True(await db.Sales.CountAsync(s => s.ShiftId == open.Id) >= 3);
+        // A minute after 09:00 or 21:00 the new shift can have no receipt yet; after an hour it has some
+        if (now - open.OpenedUtc >= TimeSpan.FromHours(1))
+            Assert.True(await db.Sales.CountAsync(s => s.ShiftId == open.Id) >= 3);
 
         // Every desk amount belongs to a shift; expected cash and the Z-reports reconcile with the ledger
         Assert.False(await db.Ledger.AnyAsync(l => l.ShiftId == null && (l.Method == PaymentMethods.Cash || l.Method == PaymentMethods.Card)));
@@ -71,7 +80,7 @@ public sealed class DemoBarTests : IDisposable
         }
         var ledger = await db.Ledger.AsNoTracking().ToListAsync();
         foreach (var type in new[] { LedgerTypes.BarSale, LedgerTypes.BarRefund, LedgerTypes.CashPayout, LedgerTypes.DebtPayment })
-            Assert.Contains(ledger, l => l.Type == type);
+            Assert.True(ledger.Any(l => l.Type == type), $"no {type} row in the seed");
         Assert.Contains(ledger, l => l.Type == LedgerTypes.BarSale && l.Method == PaymentMethods.Balance && l.BonusDelta == 0 && l.BalanceDelta < 0);
         Assert.All(ledger.Where(l => l.Type is LedgerTypes.BarSale or LedgerTypes.BarRefund), l => Assert.NotNull(l.SaleId));
 

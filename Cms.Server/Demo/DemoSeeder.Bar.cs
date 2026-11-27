@@ -161,8 +161,13 @@ public static partial class DemoSeeder
             var stock = OpeningStock(receipts);
             var correctionAt = LocalTime(Today.AddDays(-1), 10, 20);
             var corrected = false;
+            // The showcase refund: the first cash receipt in the middle of yesterday's day shift. A day shift has only
+            // about 6-12 bar receipts, so yesterday can have no cash receipt; then the last one of an earlier day shift.
             SaleEntity? refundable = null;
+            SaleEntity? earlierRefundable = null;
             var yesterdayDay = _windows.FirstOrDefault(w => w.Day && w.End != null && TimeZoneInfo.ConvertTime(w.Start, _zone).Date == Today.AddDays(-1));
+            Window? MidDayShift(DateTimeOffset at) =>
+                _windows.FirstOrDefault(w => w.Day && w.End != null && at >= w.Start.AddHours(2) && at < w.End.Value.AddHours(-1));
             var lays = _products.Single(p => p.Name.StartsWith("Lay's"));
 
             foreach (var r in receipts)
@@ -189,11 +194,14 @@ public static partial class DemoSeeder
                 }
                 var sale = Sell(r.At, r.Lines, r.Method, r.Player, opener);
                 foreach (var line in r.Lines.Where(l => l.Product.TrackStock)) stock[line.Product.Id] -= line.Quantity;
-                if (refundable == null && yesterdayDay != null && r.Method == PaymentMethods.Cash && r.At >= yesterdayDay.Start.AddHours(2) &&
-                    r.At < yesterdayDay.End!.Value.AddHours(-1) && r.Lines.All(l => _specs[l.Product.Id].FinalStock == null))
-                    refundable = sale;
+                if (r.Method == PaymentMethods.Cash && r.Lines.All(l => _specs[l.Product.Id].FinalStock == null) && MidDayShift(r.At) is { } window)
+                {
+                    if (window == yesterdayDay) refundable ??= sale;
+                    else if (yesterdayDay == null || window.Start < yesterdayDay.Start) earlierRefundable = sale;
+                }
             }
 
+            refundable ??= earlierRefundable;
             if (refundable != null) RefundSale(refundable, refundable.CreatedUtc.AddMinutes(25), "Банка пошкоджена — повернення коштів");
             SeedPayout();
             SeedAuditOnly();

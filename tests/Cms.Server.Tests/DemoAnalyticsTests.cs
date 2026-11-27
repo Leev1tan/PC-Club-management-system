@@ -82,7 +82,9 @@ public sealed class DemoAnalyticsTests : IDisposable
         Assert.True(report.Check.ShiftsAddUp);
         Assert.True(report.Check.ShiftsInside >= 2 * DemoSeeder.HistoryDays - 4, $"{report.Check.ShiftsInside} shifts inside");
         Assert.Equal(30, report.Series.Count);
-        Assert.All(report.Series, p => Assert.True(p.Total > 0, p.Label));
+        // Every day has revenue; in its first hour the current club day can still be empty
+        var days = clock.ToLocal(now).TimeOfDay < TimeSpan.FromHours(1) ? report.Series.Take(report.Series.Count - 1) : report.Series;
+        Assert.All(days, p => Assert.True(p.Total > 0, p.Label));
         Assert.True(report.Revenue.Time > report.Revenue.Bar && report.Revenue.Bar > 0);
         Assert.True(report.Revenue.ByMethod.Cash > 0 && report.Revenue.ByMethod.Card > 0 && report.Revenue.ByMethod.Balance > 0 && report.Revenue.ByMethod.Bonus > 0);
         Assert.True(report.Bonus.Issued > 0 && report.Bonus.Spent > 0);
@@ -97,10 +99,16 @@ public sealed class DemoAnalyticsTests : IDisposable
                           $"(20:00 {evening:0.0}%, 07:00 {morning:0.0}%)");
     }
 
-    [Fact]
-    public async Task Seed_has_30_days_anchored_shifts_and_analytics_that_reconcile_on_sqlite()
+    [Theory]
+    [InlineData("now")]
+    [InlineData("09:01")] // a minute after the day shift opened
+    [InlineData("21:01")] // a minute after the night shift opened
+    [InlineData("00:01")] // a minute into the club day
+    [InlineData("01:00")] // an hour into the club day
+    [InlineData("14:00")]
+    public async Task Seed_has_30_days_anchored_shifts_and_analytics_that_reconcile_on_sqlite(string clubTime)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = ClubTimePoints.At(clubTime);
         var first = await ResetAsync(_testDb.NewShiftContext, now, 42);
         var second = await ResetAsync(_testDb.NewShiftContext, now, 43);
         _output.WriteLine($"SQLite reset: {first.TotalMilliseconds:0} ms, again {second.TotalMilliseconds:0} ms");
