@@ -98,7 +98,7 @@ export function PlayerTier({ playerId, refresh }: { playerId: string; refresh: n
   return (
     <div className="stat-card">
       <div className="stat-card-label">{t.loyalty.tier}</div>
-      <div className="stat-card-value" style={{ color: 'var(--neon-purple)' }}>{p.tier ? <span className="data">{p.tier.name}</span> : t.loyalty.noTier}</div>
+      <div className="stat-card-value" style={{ color: 'var(--event)' }}>{p.tier ? <span className="data">{p.tier.name}</span> : t.loyalty.noTier}</div>
       <div className="stat-card-sub tier-line">
         {fmt(t.loyalty.spent, { amount: cash(p.spend), days: p.periodDays })}
         {p.tier && (p.tier.topUpBonusPercent > 0 || p.tier.pcDiscountPercent > 0) && <> · {fmt(t.loyalty.perks, { bonus: p.tier.topUpBonusPercent, discount: p.tier.pcDiscountPercent })}</>}

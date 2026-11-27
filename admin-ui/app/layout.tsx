@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Orbitron, Rajdhani } from "next/font/google";
+import "./themes.css";
 import "./globals.css";
 
 // next/font downloads the fonts at build time and serves them from this app,
@@ -34,7 +35,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="uk" className={`${display.variable} ${mono.variable} ${body.variable}`}>
+    <html lang="uk" data-theme="cyber" data-mode="dark" className={`${display.variable} ${mono.variable} ${body.variable}`}>
       <body className="antialiased">
         {children}
       </body>

@@ -131,7 +131,7 @@ export function ShiftTab({ can, toast, onChanged }: { can: Permissions; toast: T
             </div>
             <div className="stat-card">
               <div className="stat-card-label">{t.shift.expected}</div>
-              <div className="stat-card-value" style={{ color: 'var(--green)' }}>{current?.expectedCash != null ? `${money(current.expectedCash)} ${t.currency}` : '🙈'}</div>
+              <div className="stat-card-value" style={{ color: 'var(--ok)' }}>{current?.expectedCash != null ? `${money(current.expectedCash)} ${t.currency}` : '🙈'}</div>
               {current?.blind && <div className="stat-card-sub">{t.shift.blind}</div>}
             </div>
           </div>

@@ -1,0 +1,88 @@
+/* ═══════════════════════════════════════════════════════════════
+   CLUB THEMES — the only file with literal colours (scripts/check-tokens.mjs)
+   One block per theme and mode: <html data-theme="cyber|pro-dark|light|arcade" data-mode="dark|light">.
+   Every block defines the same tokens (tests/Cms.Client.Tests/ThemeTokensParityTests.cs);
+   --bg-panel of each block equals Cms.Shared.ClubThemes.SurfaceHex(theme, mode).
+   An owner accent replaces --accent (and --accent-contrast) inline on <html>; the shades follow by color-mix().
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Values that do not depend on the theme */
+:root {
+  --speed: 0.15s;
+  /* Absolute colours: paper print-out, shadows under text on coloured tiles */
+  --paper: #ffffff;
+  --ink: #000000;
+  --print-rule: #888888;
+  /* Soft fills of the status colours (derived, so they follow every theme) */
+  --ok-soft: color-mix(in srgb, var(--ok) 12%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 12%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 12%, transparent);
+}
+
+/* ── Cyber, dark: the original look (neon cyan and magenta, cut corners, glow, scan lines) ── */
+:root,
+:root[data-theme="cyber"][data-mode="dark"] {
+  --bg-abyss: #050508;
+  --bg-dark: #0a0a10;
+  --bg-panel: #0d0d15;
+  --bg-card: #111119;
+  --bg-elevated: #16161f;
+  --bg-hover: #1c1c28;
+  --bg-glass: #1a1a28;
+  /* Faint lines of the reservation timeline */
+  --grid-faint: rgba(255, 255, 255, 0.03);
+  --border: #222235;
+  --border-strong: #5e5e80;
+  --text-primary: #e8e8f0;
+  --text-secondary: #8888a8;
+  --text-muted: #555570;
+  --accent: #00f0ff;
+  --accent-2: #ff2d78;
+  --accent-contrast: #050508;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --ok: #39ff14;
+  --warn: #ffe019;
+  --danger: #ff2d78;
+  --info: #00f0ff;
+  --event: #bf5af2;
+  --on-status: #050508;
+  --on-data: #ffffff;
+  --glow-strength: 1;
+  --scanlines: 1;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+  --label-case: uppercase;
+  --tracking: 1;
+  --font-display: var(--font-orbitron), 'Orbitron', monospace;
+  --font-body: var(--font-rajdhani), 'Rajdhani', sans-serif;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --shape-chip: polygon(0 0, calc(100% - 3px) 0, 100% 3px, 100% 100%, 3px 100%, 0 calc(100% - 3px));
+  --shape-control: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 4px 100%, 0 calc(100% - 4px));
+  --shape-tile: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 5px 100%, 0 calc(100% - 5px));
+  --shape-card-sm: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px));
+  --shape-card: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+  --shape-dialog: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  --shape-dot: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  /* Charts (owner analytics): categorical slots and the occupancy ramp, checked on --bg-card */
+  --chart-time: #3987e5;
+  --chart-bar: #d95926;
+  --chart-cash: #3987e5;
+  --chart-card: #d95926;
+  --chart-balance: #199e70;
+  --chart-bonus: #c98500;
+  --chart-debt: #d55181;
+  --ramp-0: #0d366b;
+  --ramp-1: #104281;
+  --ramp-2: #184f95;
+  --ramp-3: #1c5cab;
+  --ramp-4: #256abf;
+  --ramp-5: #2a78d6;
+  --ramp-6: #3987e5;
+  --ramp-7: #5598e7;
+  --ramp-8: #86b6ef;
+  --ramp-9: #cde2fb;
+  --ramp-ink-low: #e8e8f0;
+  --ramp-ink-high: #0a0a10;
+}

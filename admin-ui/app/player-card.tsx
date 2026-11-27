@@ -63,18 +63,18 @@ export function PlayerCard({ player, can, toast, initialForm, onClose, onChanged
         <div className="stats-grid" style={{ marginBottom: 12 }}>
           <div className="stat-card">
             <div className="stat-card-label">{t.player.balance}</div>
-            <div className="stat-card-value" style={{ color: 'var(--green)' }}>{money(me.balance)} {t.currency}</div>
+            <div className="stat-card-value" style={{ color: 'var(--ok)' }}>{money(me.balance)} {t.currency}</div>
           </div>
           <div className="stat-card">
             <div className="stat-card-label">{t.player.bonus}</div>
-            <div className="stat-card-value" style={{ color: 'var(--amber)' }}>{money(me.bonusPoints)} {t.currency}</div>
+            <div className="stat-card-value" style={{ color: 'var(--warn)' }}>{money(me.bonusPoints)} {t.currency}</div>
             <div className="stat-card-sub">{t.player.bonusHint}</div>
           </div>
           <PlayerTier playerId={me.id} refresh={rows.length + (rows[0]?.id ?? 0)} />
           {(me.debt ?? 0) > 0 && (
             <div className="stat-card debt-card">
               <div className="stat-card-label">{t.player.debt}</div>
-              <div className="stat-card-value" style={{ color: 'var(--red)' }}>{money(me.debt)} {t.currency}</div>
+              <div className="stat-card-value" style={{ color: 'var(--danger)' }}>{money(me.debt)} {t.currency}</div>
               <div className="stat-card-sub">{t.player.debtHint}</div>
             </div>
           )}
@@ -177,7 +177,7 @@ function TopUpForm({ player, settings, toast, onCancel, onDone }: {
           ))}
         </div>
       </div>
-      {bonus > 0 && <div className="auth-sub" style={{ color: 'var(--amber)' }}>{fmt(t.bonus.preview, { bonus: money(bonus) })}</div>}
+      {bonus > 0 && <div className="auth-sub" style={{ color: 'var(--warn)' }}>{fmt(t.bonus.preview, { bonus: money(bonus) })}</div>}
       <div className="modal-actions">
         <button className="btn btn-sm" onClick={onCancel}>{t.cancel}</button>
         <button className="btn btn-success btn-sm" disabled={busy || value <= 0} onClick={submit}>{t.player.topUp} {money(value)} {t.currency}</button>

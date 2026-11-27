@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, errorText, getJson, postJson } from './api';
 import { fmt, t } from './i18n';
 import { accountPlatforms, platformName } from './accounts-tab';
+import { GAME_PALETTE } from './palettes';
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
 type Zone = { id: string; name: string; color: string };
@@ -13,8 +14,6 @@ export type Game = {
   color: string; initials: string; sortOrder: number; isActive: boolean; updatedUtc: string; plays: number; accountPlatform?: string | null;
 };
 
-// The same palette as the server (Cms.Shared.GameTile.Palette); new entries get a colour from the name
-const PALETTE = ['#e11d48', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#a855f7', '#d946ef', '#64748b', '#84cc16'];
 const URL_SCHEMES = 'steam, com.epicgames.launcher, uplay, battlenet, origin2, eadesktop, goggalaxy, riotclient, roblox-player';
 
 /** A generated tile: initials on the entry colour (the lock screen draws the same). */
@@ -193,7 +192,7 @@ function GameDialog({ game, zones, categories, toast, onClose, onDone }: {
         <div className="form-grid">
           <div className="form-group"><span className="form-label">{t.games.color}</span>
             <div className="game-palette" role="radiogroup" aria-label={t.games.color}>
-              {PALETTE.map(c => (
+              {GAME_PALETTE.map(c => (
                 <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={c} className={`game-swatch ${color === c ? 'active' : ''}`}
                   style={{ background: c }} onClick={() => setColor(c)} />
               ))}

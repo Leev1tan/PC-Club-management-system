@@ -129,7 +129,7 @@ export function AuditTab({ owner = false }: { owner?: boolean }) {
                   {e.detailsJson && <div className="audit-details">{e.detailsJson}</div>}
                   {e.hash && <div className="audit-hash" title={`${t.audit.hash}: ${e.hash}\nprev: ${e.prevHash ?? ''}`}>#{e.id} · {e.hash.slice(0, 12)}…</div>}
                 </td>
-                <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{e.ip || t.none}</td>
+                <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{e.ip || t.none}</td>
               </tr>
             ))}
           </tbody>

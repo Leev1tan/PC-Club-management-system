@@ -124,7 +124,7 @@ export function TariffsTab({ can, zones, devices, tariffs, toast, onChanged, onA
                   <tr key={p.id} style={p.isActive ? undefined : { opacity: 0.5 }}>
                     <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</td>
                     <td>{p.zoneName ?? t.none}</td>
-                    <td style={{ fontWeight: 600, color: 'var(--green)' }}>{money(p.price)} {t.currency}</td>
+                    <td style={{ fontWeight: 600, color: 'var(--ok)' }}>{money(p.price)} {t.currency}</td>
                     <td>{p.durationMinutes ? `${p.durationMinutes / 60 >= 1 && p.durationMinutes % 60 === 0 ? `${p.durationMinutes / 60} ${t.hoursShort}` : `${p.durationMinutes} ${t.minutesShort}`}` : t.none}</td>
                     <td>{p.windowStart && p.windowEnd ? `${p.windowStart}–${p.windowEnd}` : t.packages.anyTime}</td>
                     <td>{daysLabel(p.days)}</td>
@@ -179,7 +179,7 @@ function TariffRow({ tariff, open, onToggle, canEdit, onEdit, onDelete }: {
         </td>
         <td>{tariff.zoneName || t.tariffs.allZones}</td>
         <td>{money(tariff.pricePerHour)} {t.perHour}</td>
-        <td style={{ fontWeight: 600, color: 'var(--green)' }} title={tariff.ruleNow ?? ''}>{money(tariff.priceNow)} {t.perHour}</td>
+        <td style={{ fontWeight: 600, color: 'var(--ok)' }} title={tariff.ruleNow ?? ''}>{money(tariff.priceNow)} {t.perHour}</td>
         <td>
           <button className="btn btn-sm" onClick={onToggle}>{tariff.rules.length} {open ? '▲' : '▼'}</button>
         </td>
@@ -205,7 +205,7 @@ function TariffRow({ tariff, open, onToggle, canEdit, onEdit, onDelete }: {
                     <strong>{r.name}</strong>
                     <span>{daysLabel(r.days)}</span>
                     <span>{r.start}–{r.end}</span>
-                    <span style={{ color: 'var(--green)' }}>{money(r.pricePerHour)} {t.perHour}</span>
+                    <span style={{ color: 'var(--ok)' }}>{money(r.pricePerHour)} {t.perHour}</span>
                   </div>
                 ))}
               </div>

@@ -38,11 +38,11 @@ type GameStat = { gameId: string; name: string; category: string; color: string;
 
 type Period = 'today' | '7d' | '30d';
 
-// Categorical slots (dark surface #111119): validated with the dataviz palette checks (all pass)
-const SERIES = { time: '#3987e5', bar: '#d95926' };
-const METHOD_COLORS: Record<string, string> = { cash: '#3987e5', card: '#d95926', balance: '#199e70', bonus: '#c98500', debt: '#d55181' };
-// Sequential blue ramp, low -> high occupancy (dark surface)
-const RAMP = ['#0d366b', '#104281', '#184f95', '#1c5cab', '#256abf', '#2a78d6', '#3987e5', '#5598e7', '#86b6ef', '#cde2fb'];
+// Categorical slots and the sequential occupancy ramp (low -> high) are design tokens of every theme and mode
+// (app/themes.css, checked on --bg-card)
+const SERIES = { time: 'var(--chart-time)', bar: 'var(--chart-bar)' };
+const METHOD_COLORS: Record<string, string> = { cash: 'var(--chart-cash)', card: 'var(--chart-card)', balance: 'var(--chart-balance)', bonus: 'var(--chart-bonus)', debt: 'var(--chart-debt)' };
+const RAMP = Array.from({ length: 10 }, (_, i) => `var(--ramp-${i})`);
 const rampColor = (percent: number) => RAMP[Math.min(RAMP.length - 1, Math.floor(percent / 10))];
 
 /** Amount with grouped digits in the UI language: 514 771,96 / 514,771.96. */
@@ -121,9 +121,9 @@ function RevenueChart({ points, granularity }: { points: Point[]; granularity: '
             <g key={pt.label}>
               {active === i && <rect x={m.left + i * band} y={m.top} width={band} height={plotH} className="viz-hover-band" />}
               {pt.time > 0 && (barH > 0
-                ? <rect x={x} y={base - timeH} width={barW} height={timeH} fill={SERIES.time} />
-                : <path d={topRounded(x, base - timeH, barW, timeH, 4)} fill={SERIES.time} />)}
-              {barH > 0 && <path d={topRounded(x, base - timeH - gap - barH, barW, barH, 4)} fill={SERIES.bar} />}
+                ? <rect x={x} y={base - timeH} width={barW} height={timeH} style={{ fill: SERIES.time }} />
+                : <path d={topRounded(x, base - timeH, barW, timeH, 4)} style={{ fill: SERIES.time }} />)}
+              {barH > 0 && <path d={topRounded(x, base - timeH - gap - barH, barW, barH, 4)} style={{ fill: SERIES.bar }} />}
               {i % every === 0 && (
                 <text x={m.left + i * band + band / 2} y={height - 8} textAnchor="middle" className="viz-axis">
                   {granularity === 'hour' ? pt.label.slice(0, 2) : pt.label.slice(8, 10) + '.' + pt.label.slice(5, 7)}
@@ -185,7 +185,7 @@ function PaymentSplit({ sums }: { sums: MethodSums }) {
 
 function ZoneBars({ a }: { a: Analytics }) {
   const rows = [
-    { key: 'all', name: t.analytics.allPcs, color: '#e8e8f0', pcs: a.occupancy.pcs, percent: a.occupancy.percent, busy: a.occupancy.busyHours },
+    { key: 'all', name: t.analytics.allPcs, color: 'var(--text-primary)', pcs: a.occupancy.pcs, percent: a.occupancy.percent, busy: a.occupancy.busyHours },
     ...a.occupancy.zones.map(z => ({ key: z.zoneId ?? 'none', name: z.zoneId ? z.name : t.analytics.noZone, color: z.color, pcs: z.pcs, percent: z.percent, busy: z.busyHours })),
   ];
   return (
@@ -246,7 +246,7 @@ function Heatmap({ a }: { a: Analytics }) {
               <span role="rowheader" className="viz-heat-day">{t.days[d]}</span>
               {row.map((v, h) => (
                 <span key={h} role="cell" className={`viz-heat-cell ${v == null ? 'empty' : ''}`}
-                  style={v == null ? undefined : { background: rampColor(v), color: v >= 70 ? '#0a0a10' : '#e8e8f0' }}
+                  style={v == null ? undefined : { background: rampColor(v), color: v >= 70 ? 'var(--ramp-ink-high)' : 'var(--ramp-ink-low)' }}
                   title={fmt(t.analytics.cell, { day: t.days[d], hour: String(h).padStart(2, '0'), value: pct(v) })}>
                   {numbers && v != null ? Math.round(v) : ''}
                 </span>
@@ -321,20 +321,20 @@ export function AnalyticsTab() {
         <>
           <div className="auth-sub">{fmt(t.analytics.periodLine, { range, zone: a.timeZone })}</div>
           <div className="stats-grid analytics-tiles">
-            <Tile icon="💰" glow="var(--green-glow)" label={t.analytics.revenue} value={cur(a.revenue.total, 0)} sub={t.analytics.revenueHint} />
-            <Tile icon="🎮" glow="var(--blue-glow)" label={t.analytics.time} value={cur(a.revenue.time, 0)}
+            <Tile icon="💰" glow="var(--ok-soft)" label={t.analytics.revenue} value={cur(a.revenue.total, 0)} sub={t.analytics.revenueHint} />
+            <Tile icon="🎮" glow="var(--info-soft)" label={t.analytics.time} value={cur(a.revenue.time, 0)}
               sub={fmt(t.analytics.sessions, { n: a.averageTicket.sessions })} />
-            <Tile icon="🥤" glow="var(--amber-glow)" label={t.analytics.bar} value={cur(a.revenue.bar, 0)}
+            <Tile icon="🥤" glow="var(--warn-soft)" label={t.analytics.bar} value={cur(a.revenue.bar, 0)}
               sub={fmt(t.analytics.receipts, { n: a.bar.receipts })} />
-            <Tile icon="🧾" glow="var(--accent-glow)" label={t.analytics.avgTicket} value={a.averageTicket.session != null ? cur(a.averageTicket.session) : t.none}
+            <Tile icon="🧾" glow="var(--accent-soft)" label={t.analytics.avgTicket} value={a.averageTicket.session != null ? cur(a.averageTicket.session) : t.none}
               sub={fmt(t.analytics.avgReceipt, { amount: a.averageTicket.receipt != null ? cur(a.averageTicket.receipt) : t.none })} />
-            <Tile icon="🖥️" glow="var(--blue-glow)" label={t.analytics.occupancy} value={pct(a.occupancy.percent)}
+            <Tile icon="🖥️" glow="var(--info-soft)" label={t.analytics.occupancy} value={pct(a.occupancy.percent)}
               sub={fmt(t.analytics.occupancyHint, { busy: amount(a.occupancy.busyHours, 0), capacity: amount(a.occupancy.capacityHours, 0) })} />
-            <Tile icon="↩️" glow="var(--amber-glow)" label={t.analytics.refunds} value={cur(a.refunds.total, 0)}
+            <Tile icon="↩️" glow="var(--warn-soft)" label={t.analytics.refunds} value={cur(a.refunds.total, 0)}
               sub={fmt(t.analytics.refundsHint, { bar: cur(a.refunds.bar, 0), balance: cur(a.refunds.balance, 0) })} />
-            <Tile icon="🎁" glow="var(--accent-glow)" label={t.analytics.bonus} value={cur(a.bonus.issued, 0)}
+            <Tile icon="🎁" glow="var(--accent-soft)" label={t.analytics.bonus} value={cur(a.bonus.issued, 0)}
               sub={fmt(t.analytics.bonusHint, { spent: cur(a.bonus.spent, 0) })} />
-            <Tile icon="💳" glow="var(--green-glow)" label={t.analytics.topUps} value={cur(a.topUps.total, 0)}
+            <Tile icon="💳" glow="var(--ok-soft)" label={t.analytics.topUps} value={cur(a.topUps.total, 0)}
               sub={fmt(t.analytics.cashDesk, { cash: cur(a.cash.net, 0), card: cur(a.card.net, 0) })} />
           </div>
 

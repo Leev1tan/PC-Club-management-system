@@ -9,6 +9,7 @@ import { cash, fmt as fmtText, lang, locale, methodLabel, money, setClubZone, se
 import { PlayerCard } from './player-card';
 import { PosTab } from './pos-tab';
 import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-dialogs';
+import { ZONE_COLORS } from './palettes';
 import { GamesTab } from './games-tab';
 import { LoginLockouts } from './lockouts';
 import { CheckInDialog, ReservationsTab } from './reservations-tab';
@@ -344,8 +345,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     : <span className="badge badge-blue">{s.tariffName || '—'}</span>;
   // A session from the balance (player login) ends when the balance is used up: its planned end
   const sessionLeft = (s: Session) => s.pausedUtc
-    ? <span style={{ color: 'var(--amber)' }}>⏸ {t.session.paused} · {timeRemaining(s.endUtc ?? s.balanceEndUtc ?? null, s.pausedUtc)}</span>
-    : <span style={{ color: 'var(--blue)' }}>{timeRemaining(s.endUtc ?? s.balanceEndUtc ?? null)}
+    ? <span style={{ color: 'var(--warn)' }}>⏸ {t.session.paused} · {timeRemaining(s.endUtc ?? s.balanceEndUtc ?? null, s.pausedUtc)}</span>
+    : <span style={{ color: 'var(--info)' }}>{timeRemaining(s.endUtc ?? s.balanceEndUtc ?? null)}
         {s.limitToBalance && <span className="badge badge-green" style={{ marginLeft: 6 }} title={t.session.fromBalanceHint}>{t.session.fromBalance}</span>}</span>;
   const sessionCost = (s: Session) => s.status === 'active' && !s.isPrepaid
     ? <span title={t.session.current}>{cash(s.currentCost ?? 0)} …</span>
@@ -389,7 +390,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-card-header">
-              <div className="stat-card-icon" style={{ background: 'var(--accent-glow)' }}>🖥️</div>
+              <div className="stat-card-icon" style={{ background: 'var(--accent-soft)' }}>🖥️</div>
               <span className="stat-card-label">{t.dashboard.totalPcs}</span>
             </div>
             <div className="stat-card-value">{devices.length}</div>
@@ -397,7 +398,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
           </div>
           <div className="stat-card">
             <div className="stat-card-header">
-              <div className="stat-card-icon" style={{ background: 'var(--green-glow)' }}>✅</div>
+              <div className="stat-card-icon" style={{ background: 'var(--ok-soft)' }}>✅</div>
               <span className="stat-card-label">{t.dashboard.free}</span>
             </div>
             <div className="stat-card-value">{freeDevices.length}</div>
@@ -405,7 +406,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
           </div>
           <div className="stat-card">
             <div className="stat-card-header">
-              <div className="stat-card-icon" style={{ background: 'var(--blue-glow)' }}>🎮</div>
+              <div className="stat-card-icon" style={{ background: 'var(--info-soft)' }}>🎮</div>
               <span className="stat-card-label">{t.dashboard.active}</span>
             </div>
             <div className="stat-card-value">{activeSessions.length}</div>
@@ -413,7 +414,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
           </div>
           <div className="stat-card">
             <div className="stat-card-header">
-              <div className="stat-card-icon" style={{ background: 'var(--amber-glow)' }}>💰</div>
+              <div className="stat-card-icon" style={{ background: 'var(--warn-soft)' }}>💰</div>
               <span className="stat-card-label">{t.dashboard.revenueToday}</span>
             </div>
             <div className="stat-card-value">{revenue ? cash(revenue.today) : t.none}</div>
@@ -545,7 +546,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 )}
                 {d.currentGame && (
                   <div className="pc-card-game" title={`${t.map.currentGame}: ${d.currentGame}`}>
-                    <span className="game-dot" style={{ background: d.currentGameColor || 'var(--neon-cyan)' }} aria-hidden="true" />
+                    <span className="game-dot" style={{ background: d.currentGameColor || 'var(--accent)' }} aria-hidden="true" />
                     <span>🎮 {d.currentGame}</span>
                   </div>
                 )}
@@ -652,8 +653,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                         {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
                       </select>
                     </td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{d.lastIp || '—'}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{d.macAddress || '—'}</td>
+                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{d.lastIp || '—'}</td>
+                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{d.macAddress || '—'}</td>
                     <td style={{ fontSize: 12 }}>{d.osVersion || '—'}</td>
                     <td>{timeAgo(d.lastSeenUtc)}</td>
                     <td>
@@ -714,7 +715,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   <td>{s.username || t.guest}</td>
                   <td>{sessionLabel(s)}</td>
                   <td>{fmtDateTime(s.startUtc)}</td>
-                  <td style={{ color: s.status === 'active' ? 'var(--blue)' : 'var(--text-muted)' }}>
+                  <td style={{ color: s.status === 'active' ? 'var(--info)' : 'var(--text-muted)' }}>
                     {s.status === 'active' ? sessionLeft(s) : s.endUtc ? fmtTime(s.endUtc) : '—'}
                   </td>
                   <td style={{ fontWeight: 600 }}>{sessionCost(s)}</td>
@@ -763,8 +764,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   <tr key={u.id}>
                     <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>@{u.username}</td>
                     <td>{u.displayName}</td>
-                    <td style={{ fontWeight: 600, color: u.balance > 0 ? 'var(--green)' : 'var(--text-muted)' }}>{cash(u.balance)}</td>
-                    <td style={{ color: u.bonusPoints > 0 ? 'var(--amber)' : 'var(--text-muted)' }}>
+                    <td style={{ fontWeight: 600, color: u.balance > 0 ? 'var(--ok)' : 'var(--text-muted)' }}>{cash(u.balance)}</td>
+                    <td style={{ color: u.bonusPoints > 0 ? 'var(--warn)' : 'var(--text-muted)' }}>
                       {cash(u.bonusPoints)} 🎁
                       {(u.debt ?? 0) > 0 && <div><span className="badge badge-red">{t.player.debt}: {cash(u.debt)}</span></div>}
                     </td>
@@ -793,8 +794,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   function ZoneModal() {
     if (!zoneModal) return null;
     const [name, setName] = useState('');
-    const [color, setColor] = useState('#6366f1');
-    const colors = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#3b82f6', '#a855f7', '#06b6d4', '#ec4899'];
+    const [color, setColor] = useState(ZONE_COLORS[0]);
+    const colors = ZONE_COLORS;
 
     return (
       <div className="modal-overlay" onClick={() => setZoneModal(false)}>

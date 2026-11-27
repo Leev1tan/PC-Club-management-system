@@ -437,7 +437,7 @@ function RegisterDialog({ detail, players, toast, onClose, onDone }: {
               ))}
             </select>
             {e.teamSize > 1 && <label className="check-row"><input type="radio" name="captain" checked={captain === i} onChange={() => setCaptain(i)} /> {t.events.captain}</label>}
-            {value && short(value) && <div className="form-hint" style={{ color: 'var(--red)' }}>{t.events.feeTooLow}</div>}
+            {value && short(value) && <div className="form-hint" style={{ color: 'var(--danger)' }}>{t.events.feeTooLow}</div>}
           </div>
         ))}
         <div className="modal-actions">
