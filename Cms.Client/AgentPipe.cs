@@ -44,10 +44,12 @@ public sealed record PipeOrderItem(Guid ProductId, int Quantity);
 
 /// <summary>
 /// Items and Payment (balance or desk): a bar order. GameId: the game that needs a club account. Locked and StaffUnlock:
-/// the state of the lock screen in a "status" report.
+/// the state of the lock screen in a "status" report; LockGeneration: the lock generation of state.json that this state
+/// comes from (null from an older lock screen), so the agent ignores a report from before its newest lock.
 /// </summary>
 public sealed record PipeRequest(string Op, string? Username = null, string? Secret = null, string? Offer = null, int? Minutes = null, Guid? PackageId = null,
-    IReadOnlyList<PipeOrderItem>? Items = null, string? Payment = null, Guid? GameId = null, bool? Locked = null, bool? StaffUnlock = null);
+    IReadOnlyList<PipeOrderItem>? Items = null, string? Payment = null, Guid? GameId = null, bool? Locked = null, bool? StaffUnlock = null,
+    long? LockGeneration = null);
 
 /// <summary>Status: the HTTP status of the server, or 503 when the agent or the server cannot answer. Body: the JSON of the server.</summary>
 public sealed record PipeResponse(int Status, string? Body)

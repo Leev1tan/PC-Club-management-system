@@ -440,7 +440,7 @@ public partial class MainWindow : Window
             var heartbeat = ReadAgentHeartbeat();
             var decision = _lock.Evaluate(Snapshot(state), heartbeat, now);
             _lastDecision = decision;
-            ReportStatus(decision);
+            ReportStatus(decision, state?.LockGeneration);
             EnsureWatchdog();
 
             // A new lock ends the player's language choice; the teardown runs when the session is over

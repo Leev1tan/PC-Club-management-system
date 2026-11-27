@@ -110,6 +110,50 @@ public sealed class LockScreenSupervisorTests
         var req = AgentPipe.ParseRequest("{\"op\":\"status\",\"locked\":false,\"staffUnlock\":true}");
         Assert.NotNull(req);
         Assert.Equal((PipeOps.Status, (bool?)false, (bool?)true), (req!.Op, req.Locked, req.StaffUnlock));
+        Assert.Null(req.LockGeneration);                                                        // an older lock screen
         Assert.Contains(PipeOps.Status, PipeOps.All);
+        Assert.Equal(7L, AgentPipe.ParseRequest("{\"op\":\"status\",\"locked\":true,\"staffUnlock\":false,\"lockGeneration\":7}")!.LockGeneration);
+    }
+
+    /// <summary>Windows test 2026-11-27 night, defect 5: for about 5 s after the lock the admin API showed "unlocked" again.</summary>
+    [Fact]
+    public void The_newest_lock_wins_over_an_older_staff_unlock_report()
+    {
+        var watch = new LockScreenWatch(Now);
+        watch.LockGeneration(1);                                                                 // state.json at the agent start
+        Assert.True(watch.Report(Now, locked: false, staffUnlock: true, lockGeneration: 1));      // staff PIN unlock on the screen
+        Assert.False(watch.ReportedLocked(agentLocked: true, Now.AddSeconds(1)));
+
+        // The admin locks: generation 2. The report of the staff unlock ends at once
+        watch.LockGeneration(2);
+        Assert.Equal(2, watch.Generation);
+        Assert.True(watch.ReportedLocked(agentLocked: true, Now.AddSeconds(2)));
+        Assert.Equal(LockScreenStates.Ok, watch.State(Now.AddSeconds(2)));
+
+        // A report made before the lock screen read the new state.json: a sign of life only
+        Assert.False(watch.Report(Now.AddSeconds(3), locked: false, staffUnlock: true, lockGeneration: 1));
+        Assert.True(watch.ReportedLocked(agentLocked: true, Now.AddSeconds(4)));
+        Assert.Equal(Now.AddSeconds(3), watch.LastReportUtc);
+
+        // The report of the new state, and a new staff unlock after this lock (it counts again)
+        Assert.True(watch.Report(Now.AddSeconds(5), locked: true, staffUnlock: false, lockGeneration: 2));
+        Assert.True(watch.Report(Now.AddSeconds(30), locked: false, staffUnlock: true, lockGeneration: 2));
+        Assert.False(watch.ReportedLocked(agentLocked: true, Now.AddSeconds(31)));
+
+        // An older generation never lowers the known one; a report without a generation (older lock screen) is used
+        watch.LockGeneration(1);
+        Assert.Equal(2, watch.Generation);
+        Assert.True(watch.Report(Now.AddSeconds(40), locked: false, staffUnlock: true));
+        Assert.Equal(LockScreenStates.StaffUnlock, watch.State(Now.AddSeconds(41)));
+    }
+
+    [Fact]
+    public void An_old_report_still_ends_the_silent_warning()
+    {
+        var watch = new LockScreenWatch(Now);
+        watch.LockGeneration(3);
+        Assert.Equal(LockScreenEvent.SilentWhileLocked, watch.Check(Now.AddMinutes(3), mustBeLocked: true));
+        Assert.False(watch.Report(Now.AddMinutes(3).AddSeconds(1), locked: true, staffUnlock: false, lockGeneration: 2));
+        Assert.Equal(LockScreenEvent.Back, watch.Check(Now.AddMinutes(3).AddSeconds(1), true));
     }
 }

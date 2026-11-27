@@ -26,6 +26,9 @@ public enum LockScreenEvent
 /// The agent's view of the lock screen. The lock screen reports its state over the pipe every 5 s ("status"). When the
 /// PC must be locked and no report came for 20 s, the agent logs it (Windows test 2026-11-27, defect 5: a killed lock
 /// screen left the PC open and nobody knew). No clock and no I/O, so it is tested on any OS.
+/// The newest lock wins (Windows test 2026-11-27 night, defect 5): a lock command ends the staff PIN unlock of the last
+/// report at once, and a report made from an older lock generation (sent before the lock screen read the new state.json)
+/// counts only as a sign of life, so the admin view does not show "unlocked" again for a few seconds after the lock.
 /// </summary>
 public sealed class LockScreenWatch
 {
@@ -38,6 +41,7 @@ public sealed class LockScreenWatch
     private DateTimeOffset? _lastReportUtc;
     private DateTimeOffset? _warnedUtc;
     private bool _back;
+    private long _generation;
 
     public LockScreenWatch(DateTimeOffset agentStartUtc) => _startUtc = agentStartUtc;
 
@@ -47,17 +51,38 @@ public sealed class LockScreenWatch
     public bool ScreenStaffUnlock { get; private set; }
     public DateTimeOffset? LastReportUtc => _lastReportUtc;
 
-    /// <summary>A status report of the lock screen.</summary>
-    public void Report(DateTimeOffset now, bool locked, bool staffUnlock)
+    /// <summary>The lock generation of the agent (AgentLock.Generation): the newest lock command.</summary>
+    public long Generation => _generation;
+
+    /// <summary>
+    /// The agent has this lock generation now (at the start from state.json, and after every lock command). A higher one is
+    /// a new lock: a staff PIN unlock of the last report ends here, before the lock screen reports again.
+    /// </summary>
+    public void LockGeneration(long generation)
+    {
+        if (generation <= _generation) return;
+        _generation = generation;
+        ScreenLocked = true;
+        ScreenStaffUnlock = false;
+    }
+
+    /// <summary>
+    /// A status report of the lock screen. lockGeneration: the generation of the state that the report comes from (null from
+    /// an older lock screen: taken as current). Returns false for a report from before the newest lock: it shows that the
+    /// lock screen answers, but its lock state is not used.
+    /// </summary>
+    public bool Report(DateTimeOffset now, bool locked, bool staffUnlock, long? lockGeneration = null)
     {
         _lastReportUtc = now;
-        ScreenLocked = locked;
-        ScreenStaffUnlock = staffUnlock;
         if (_warnedUtc != null)
         {
             _warnedUtc = null;
             _back = true;
         }
+        if (lockGeneration is { } g && g < _generation) return false;
+        ScreenLocked = locked;
+        ScreenStaffUnlock = staffUnlock;
+        return true;
     }
 
     /// <summary>"ok", "staff_unlock", "silent" or "unknown" (LockScreenStates).</summary>

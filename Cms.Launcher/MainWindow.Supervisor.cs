@@ -44,15 +44,19 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>The state of this lock screen for the agent (best effort, every second tick of the 2 s timer).</summary>
-    private async void ReportStatus(LockDecision decision)
+    /// <summary>
+    /// The state of this lock screen for the agent (best effort, every second tick of the 2 s timer), with the lock generation
+    /// of the state.json it comes from: the agent ignores a report from before its newest lock.
+    /// </summary>
+    private async void ReportStatus(LockDecision decision, long? lockGeneration)
     {
         if (_statusBusy || ++_statusTicks % 2 != 0) return;
         _statusBusy = true;
         try
         {
             await AgentPipeClient.SendAsync(AgentPipe.Name,
-                new PipeRequest(PipeOps.Status, Locked: decision.Locked, StaffUnlock: decision.StaffOverride), StatusTimeout, VerifyAgentPipe);
+                new PipeRequest(PipeOps.Status, Locked: decision.Locked, StaffUnlock: decision.StaffOverride, LockGeneration: lockGeneration),
+                StatusTimeout, VerifyAgentPipe);
         }
         catch (Exception)
         {

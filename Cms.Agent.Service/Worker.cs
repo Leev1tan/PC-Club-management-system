@@ -226,6 +226,7 @@ public partial class Worker : BackgroundService
             {
                 _lock = AgentLock.Restore(new SavedAgentLock(state.IsLocked, state.LockReason, state.Unlock, state.SessionEndUtc, state.Session != null,
                     state.LockGeneration));
+                _screen.LockGeneration(_lock.Generation);
                 _serverUrl = state.ServerUrl;
             }
             _logger.LogInformation("Saved state restored: {State}", _lock.Unlock == AgentLock.UnlockSession
@@ -1215,6 +1216,7 @@ public partial class Worker : BackgroundService
         {
             _lock = _lock.Lock();
             generation = _lock.Generation;
+            _screen.LockGeneration(generation); // the newest lock wins: a staff PIN unlock of the last status report ends now
         }
         _logger.LogInformation("Locked by the server (lock {Generation}; a staff PIN unlock on the lock screen ends)", generation);
     }

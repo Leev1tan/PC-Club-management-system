@@ -166,8 +166,8 @@ public partial class Worker
     {
         if (req.Op == PipeOps.Status)
         {
-            // Answered here, also while the server is down
-            lock (_gate) _screen.Report(DateTimeOffset.UtcNow, req.Locked ?? true, req.StaffUnlock ?? false);
+            // Answered here, also while the server is down; a report from before the newest lock is only a sign of life
+            lock (_gate) _screen.Report(DateTimeOffset.UtcNow, req.Locked ?? true, req.StaffUnlock ?? false, req.LockGeneration);
             return new PipeResponse(200, null);
         }
         string? serverUrl;
