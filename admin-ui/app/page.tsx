@@ -10,6 +10,7 @@ import { PlayerCard } from './player-card';
 import { PosTab } from './pos-tab';
 import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-dialogs';
 import { GamesTab } from './games-tab';
+import { PowerAction, PowerDialog, PowerTarget } from './power-dialog';
 import { ShiftTab } from './shift-tab';
 import { StockTab } from './stock-tab';
 import { TariffsTab } from './tariffs-tab';
@@ -27,6 +28,7 @@ type Device = {
   enrollment?: string; // pending (waits for approval), approved, revoked
   sessionPausedUtc?: string | null; sessionCutoffUtc?: string | null; sessionLabel?: string | null; sessionIsPackage?: boolean;
   currentGame?: string | null; currentGameColor?: string | null; currentGameStartedUtc?: string | null;
+  macAddress?: string | null;
 };
 type Session = {
   id: string; deviceId: string; deviceHostname: string | null;
@@ -162,6 +164,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [endTarget, setEndTarget] = useState<Session | null>(null);
   const [playerCard, setPlayerCard] = useState<{ user: User; form?: 'topup' } | null>(null);
   const [pcPopover, setPcPopover] = useState<string | null>(null);
+  const [power, setPower] = useState<{ target: PowerTarget; action: PowerAction } | null>(null);
 
   const toast = useCallback((message: string, type: Toast['type'] = 'info') => {
     const id = Date.now();
@@ -215,6 +218,18 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     toast(fmtText(t.map.commandSent, { type }), 'success');
     fetchAll();
     setTimeout(fetchAll, 2500); // the agent usually confirms within 1-2 s
+  };
+
+  // Shutdown, reboot, Wake-on-LAN (Owner, Manager, Tech) after a confirmation
+  const openPower = (d: Device, action: PowerAction) => {
+    const player = d.activeUserId ? users.find(u => u.id === d.activeUserId) : null;
+    setPower({
+      action,
+      target: {
+        id: d.id, hostname: d.hostname, macAddress: d.macAddress, online: d.status === 'online',
+        sessionOf: d.activeSessionId ? (player ? `@${player.username}` : d.activeUserId ? t.power.player : t.power.guest) : null,
+      },
+    });
   };
 
   const sendMessage = (deviceId: string, hostname: string) => {
@@ -532,7 +547,15 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                     )}
                     <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'lock'); }}>{t.map.lock}</button>
                     <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'unlock'); }}>{t.map.unlock}</button>
-                    <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'restart'); }}>{t.map.restart}</button>
+                    {can.deviceAdmin && d.status === 'online' && (
+                      <button className="popover-item" onClick={() => { setPcPopover(null); openPower(d, 'reboot'); }}>{t.power.reboot.menu}</button>
+                    )}
+                    {can.deviceAdmin && d.status === 'online' && (
+                      <button className="popover-item" onClick={() => { setPcPopover(null); openPower(d, 'shutdown'); }}>{t.power.shutdown.menu}</button>
+                    )}
+                    {can.deviceAdmin && d.status !== 'online' && d.macAddress && (
+                      <button className="popover-item" onClick={() => { setPcPopover(null); openPower(d, 'wake'); }}>{t.power.wake.menu}</button>
+                    )}
                     <button className="popover-item" onClick={() => { setPcPopover(null); sendMessage(d.id, d.hostname); }}>{t.map.message}</button>
                     <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'logoff'); }}>{t.map.logoff}</button>
                   </div>
@@ -564,7 +587,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <div className="table-wrapper">
             <table className="data-table">
               <thead><tr>
-                <th>{t.devices.col.name}</th><th>{t.devices.col.status}</th><th>{t.devices.col.enrollment}</th><th>{t.devices.col.zone}</th><th>{t.devices.col.ip}</th><th>{t.devices.col.os}</th><th>{t.devices.col.lastSeen}</th><th>{t.devices.col.actions}</th>
+                <th>{t.devices.col.name}</th><th>{t.devices.col.status}</th><th>{t.devices.col.enrollment}</th><th>{t.devices.col.zone}</th><th>{t.devices.col.ip}</th><th>{t.devices.col.mac}</th><th>{t.devices.col.os}</th><th>{t.devices.col.lastSeen}</th><th>{t.devices.col.actions}</th>
               </tr></thead>
               <tbody>
                 {devices.map(d => (
@@ -588,6 +611,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                       </select>
                     </td>
                     <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{d.lastIp || '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{d.macAddress || '—'}</td>
                     <td style={{ fontSize: 12 }}>{d.osVersion || '—'}</td>
                     <td>{timeAgo(d.lastSeenUtc)}</td>
                     <td>
@@ -596,7 +620,9 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                           <button className="btn btn-success btn-sm" onClick={() => deviceAction(d.id, 'approve', d.hostname)}>{t.devices.approve}</button>
                           <button className="btn btn-danger btn-sm" onClick={() => deviceAction(d.id, 'reject', d.hostname)}>{t.devices.reject}</button>
                         </>) : d.enrollment === 'revoked' ? null : <>
-                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'restart')} title={t.devices.restart}>🔄</button>
+                          {can.deviceAdmin && <button className="btn btn-sm" onClick={() => openPower(d, 'reboot')} title={t.power.reboot.menu} aria-label={t.power.reboot.menu}>🔄</button>}
+                          {can.deviceAdmin && <button className="btn btn-sm" onClick={() => openPower(d, 'shutdown')} title={t.power.shutdown.menu} aria-label={t.power.shutdown.menu}>⏻</button>}
+                          {can.deviceAdmin && d.macAddress && <button className="btn btn-sm" onClick={() => openPower(d, 'wake')} title={t.power.wake.menu} aria-label={t.power.wake.menu}>⚡</button>}
                           <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'lock')} title={t.devices.lock}>🔒</button>
                           <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'logoff')} title={t.devices.logoff}>🚪</button>
                           {can.deviceAdmin && <button className="btn btn-danger btn-sm" onClick={() => deviceAction(d.id, 'revoke', d.hostname)} title={t.devices.revoke}>⛔</button>}
@@ -876,6 +902,10 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       {endTarget && (
         <EndSessionDialog session={endTarget} players={users} toast={toast}
           onClose={() => setEndTarget(null)} onDone={() => { setEndTarget(null); fetchAll(); }} />
+      )}
+      {power && (
+        <PowerDialog target={power.target} action={power.action} toast={toast}
+          onClose={() => setPower(null)} onDone={() => { setPower(null); fetchAll(); setTimeout(fetchAll, 2500); }} />
       )}
       {playerCard && (
         <PlayerCard key={playerCard.user.id} player={playerCard.user} can={can} toast={toast} initialForm={playerCard.form ?? null}

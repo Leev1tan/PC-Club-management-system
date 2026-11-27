@@ -1779,3 +1779,17 @@ body::after {
 .pc-card-game span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-card-game .game-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 .viz-games .viz-zone-label .game-tile { margin-right: 2px; }
+
+/* ===== Power dialog (phase 6) ===== */
+.power-warning {
+  border: 1px solid var(--amber);
+  background: var(--amber-glow);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.power-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; margin: 8px 0; }
+.power-facts dt { color: var(--text-muted); }
+.power-facts dd { margin: 0; color: var(--text-primary); }
+.power-facts .mono { font-family: var(--font-mono); }
