@@ -122,6 +122,19 @@ public sealed class SessionService
         var prepaid = package != null || minutes.HasValue;
         // A player who owes money plays prepaid until the debt is paid (an open-ended session could add to it)
         if (!prepaid && user is { Debt: > 0 }) return BillingErrors.PlayerHasDebt.With(user.Debt);
+        // "From the balance": open-ended, paid from the balances, ends when they are used up
+        DateTimeOffset? balanceEnd = null;
+        if (req.LimitToBalance)
+        {
+            if (prepaid || user == null || IsFree(req.PaymentMethod) ||
+                (PaymentMethods.Normalize(req.PaymentMethod) is { } m && m != PaymentMethods.Balance)) return BillingErrors.BalanceLimitNeedsPlayer;
+            var pricing = await PricingAsync(tariff!);
+            var available = user.Balance + (req.UseBonus ? user.BonusPoints : 0m);
+            balanceEnd = ProjectEnd(until => TariffCalculator.QuotePlayed(new[] { (pricing, now, until) }, pricing, _clock.Zone).Total, available, now);
+            if (balanceEnd < now.AddMinutes(MinBalanceMinutes))
+                return BillingErrors.InsufficientBalance.With(TariffCalculator.QuotePlayed(new[] { (pricing, now, now.AddMinutes(MinBalanceMinutes)) }, pricing, _clock.Zone).Total,
+                    user.Balance, user.BonusPoints);
+        }
         string? method = null;
         string? freeReason = null;
         var value = price;
@@ -155,7 +168,9 @@ public sealed class SessionService
             IsPrepaid = prepaid,
             PackageId = package?.Id,
             PaymentMethod = method,
-            PaidMinutes = minutes
+            PaidMinutes = minutes,
+            LimitToBalance = balanceEnd.HasValue,
+            BalanceEndUtc = balanceEnd
         };
 
         await using (var tx = await _db.Database.BeginTransactionAsync())
@@ -194,14 +209,16 @@ public sealed class SessionService
             }
 
             var what = package != null ? $"package '{package.Name}' until {_clock.ToLocal(session.EndUtc!.Value):HH:mm}"
-                : prepaid ? $"{minutes} min" : "open-ended";
+                : prepaid ? $"{minutes} min"
+                : balanceEnd.HasValue ? $"from the balance, until about {_clock.ToLocal(balanceEnd.Value):HH:mm}" : "open-ended";
             await AuditAsync(AuditActions.SessionStarted, session.Id,
                 $"Session on {device.Hostname} for {(user != null ? "@" + user.Username : "a guest")}: {what}" +
                 (price > 0 ? $", {price} {cur} " + PaidText(method) : ""),
                 new
                 {
                     device.Hostname, deviceId = device.Id, tariff = tariff?.Name, package = package?.Name, minutes, cost = price,
-                    prepaid, player = user?.Username, paymentMethod = method, endUtc = session.EndUtc, cutoffUtc = session.CutoffUtc
+                    prepaid, player = user?.Username, paymentMethod = method, endUtc = session.EndUtc, cutoffUtc = session.CutoffUtc,
+                    limitToBalance = session.LimitToBalance, balanceEndUtc = session.BalanceEndUtc
                 });
             if (prepaid && price == 0)
             {
@@ -213,8 +230,8 @@ public sealed class SessionService
             await tx.CommitAsync();
         }
 
-        // Agent: end time (null = open-ended), then unlock
-        _devices.EnqueueCommand(device.Id, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = session.EndUtc }));
+        // Agent: end time (null = open-ended; from the balance: when it runs out), then unlock
+        _devices.EnqueueCommand(device.Id, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = session.EndUtc ?? session.BalanceEndUtc }));
         _devices.EnqueueCommand(device.Id, new EnqueueCommandRequest(CommandTypes.Unlock, null));
         return BillingResult<SessionEntity>.Success(session);
     }
@@ -226,7 +243,7 @@ public sealed class SessionService
     /// never below zero), the rest is due at the desk (paid in cash or by card, also written to the
     /// ledger). Prepaid time and packages were paid at the start; unused time is not refunded.
     /// </summary>
-    public async Task<BillingResult<EndResult>> EndAsync(Guid id, EndSessionRequest? req = null)
+    public async Task<BillingResult<EndResult>> EndAsync(Guid id, EndSessionRequest? req = null, string? why = null)
     {
         var cur = await _db.CurrencySymbolAsync();
         var session = await _db.Sessions.FindAsync(id);
@@ -323,9 +340,9 @@ public sealed class SessionService
 
             await AuditAsync(AuditActions.SessionEnded, session.Id,
                 $"Session on {device?.Hostname ?? "?"} ended: {session.TotalCost} {cur}" + (amountDue > 0 ? $", {amountDue} {cur} due at the desk" : "") +
-                (debt > 0 ? $", {debt} {cur} recorded as debt" : ""),
+                (debt > 0 ? $", {debt} {cur} recorded as debt" : "") + (why != null ? $" ({why})" : ""),
                 new { session.DeviceId, cost = session.TotalCost, amountDue, debt, fromBalance = charge.FromBalance, fromBonus = charge.FromBonus,
-                      prepaid = session.IsPrepaid, player = session.UserId, billedMinutes = quote?.BilledMinutes });
+                      prepaid = session.IsPrepaid, player = session.UserId, billedMinutes = quote?.BilledMinutes, reason = why });
             if (debt > 0 && _audit != null)
             {
                 var owed = await Wallet.GetAccountsAsync(_db, session.UserId!.Value);
@@ -503,12 +520,14 @@ public sealed class SessionService
             return BillingErrors.SessionChanged;
         }
 
+        var agentEnd = session.EndUtc;
+        if (session.LimitToBalance) agentEnd = await RefreshBalanceEndAsync(session, now, send: false) ?? agentEnd;
         var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == session.DeviceId);
         await AuditAsync(AuditActions.SessionResumed, session.Id,
             $"Session on {device?.Hostname ?? "?"} resumed after {(int)Math.Round(paused.TotalMinutes)} min pause",
             new { device?.Hostname, pausedMinutes = Math.Round(paused.TotalMinutes, 1), newEndUtc = session.EndUtc });
 
-        _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = session.EndUtc }));
+        _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = agentEnd }));
         _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.Unlock, null));
         return BillingResult<SessionEntity>.Success(session);
     }
@@ -589,7 +608,9 @@ public sealed class SessionService
         _devices.EnqueueCommand(fromDeviceId, new EnqueueCommandRequest(CommandTypes.Lock, null));
         if (!paused)
         {
-            _devices.EnqueueCommand(req.TargetDeviceId, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = session.EndUtc }));
+            // From the balance: the new zone may have other prices
+            var agentEnd = session.LimitToBalance ? await RefreshBalanceEndAsync(session, now, send: false) ?? session.BalanceEndUtc : session.EndUtc;
+            _devices.EnqueueCommand(req.TargetDeviceId, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = agentEnd }));
             _devices.EnqueueCommand(req.TargetDeviceId, new EnqueueCommandRequest(CommandTypes.Unlock, null));
         }
         return BillingResult<(SessionEntity, TransferQuote)>.Success((session, quote));
@@ -712,7 +733,95 @@ public sealed class SessionService
             _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = now }));
             _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.Lock, null));
         }
-        return closed;
+        return closed + await CheckBalanceLimitsAsync(now, ct);
+    }
+
+    // ===== Sessions from the balance (player login) =====
+
+    /// <summary>A session from the balance must buy at least this many minutes at the start.</summary>
+    public const int MinBalanceMinutes = 1;
+    /// <summary>The projection looks at most this far ahead (it is re-computed every 5 s anyway).</summary>
+    public const int MaxBalanceMinutes = 24 * 60;
+    /// <summary>A new end time goes to the agent when it moved by this much (a top-up, a bar purchase from the balance).</summary>
+    public static readonly TimeSpan BalanceEndResend = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The latest moment, in whole minutes from now (at most 24 h), at which the played time costs no
+    /// more than the available money. The cost is the exact post-paid price (rules, step rounding,
+    /// minimum charge), which never decreases with time, so a binary search finds it.
+    /// </summary>
+    public static DateTimeOffset ProjectEnd(Func<DateTimeOffset, decimal> cost, decimal available, DateTimeOffset now)
+    {
+        if (cost(now) > available) return now;
+        if (cost(now.AddMinutes(MaxBalanceMinutes)) <= available) return now.AddMinutes(MaxBalanceMinutes);
+        int lo = 0, hi = MaxBalanceMinutes;
+        while (lo < hi)
+        {
+            var mid = (lo + hi + 1) / 2;
+            if (cost(now.AddMinutes(mid)) <= available) lo = mid;
+            else hi = mid - 1;
+        }
+        return now.AddMinutes(lo);
+    }
+
+    /// <summary>When the balances of the player run out for this session (null: no tariff or no player).</summary>
+    public async Task<DateTimeOffset?> ProjectBalanceEndAsync(SessionEntity session, DateTimeOffset now)
+    {
+        if (!session.UserId.HasValue) return null;
+        var accounts = await Wallet.GetAccountsAsync(_db, session.UserId.Value);
+        if (accounts == null) return null;
+        var segments = await _db.SessionSegments.AsNoTracking().Where(s => s.SessionId == session.Id).ToListAsync();
+        var ids = segments.Where(s => s.TariffId.HasValue).Select(s => s.TariffId!.Value).Append(session.TariffId ?? Guid.Empty).Distinct().ToList();
+        var pricing = await PricingAsync(ids);
+        if (!session.TariffId.HasValue || !pricing.TryGetValue(session.TariffId.Value, out var billing)) return null;
+        decimal Cost(DateTimeOffset until) => TariffCalculator.QuotePlayed(
+            segments.Select(s => (s.TariffId.HasValue && pricing.TryGetValue(s.TariffId.Value, out var p) ? p : billing, s.StartUtc, s.EndUtc ?? until)),
+            billing, _clock.Zone).Total;
+        return ProjectEnd(Cost, accounts.Balance + accounts.Bonus, now);
+    }
+
+    /// <summary>Stores a new balance end (and sends it to the agent when send is true and it moved). Returns it.</summary>
+    private async Task<DateTimeOffset?> RefreshBalanceEndAsync(SessionEntity session, DateTimeOffset now, bool send)
+    {
+        var end = await ProjectBalanceEndAsync(session, now);
+        if (end == null) return null;
+        var moved = session.BalanceEndUtc is not { } before || (before - end.Value).Duration() >= BalanceEndResend;
+        if (!moved) return session.BalanceEndUtc;
+        session.BalanceEndUtc = end;
+        await _db.SaveChangesAsync();
+        if (send) _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest(CommandTypes.SessionSet, new { endUtc = end }));
+        return end;
+    }
+
+    /// <summary>
+    /// Every 5 s: a running session from the balance ends when its played time reaches the balances
+    /// (billed from them; a rest, after a bar purchase from the balance, becomes debt), else its end is
+    /// moved when a top-up or a purchase changed it. Returns the number ended.
+    /// </summary>
+    private async Task<int> CheckBalanceLimitsAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        var limited = await _db.Sessions.Where(s => s.Status == "active" && s.LimitToBalance && s.PausedUtc == null).ToListAsync(ct);
+        var ended = 0;
+        foreach (var session in limited)
+        {
+            try
+            {
+                var end = await ProjectBalanceEndAsync(session, now);
+                if (end == null) continue;
+                if (end <= now)
+                {
+                    var result = await EndAsync(session.Id, new EndSessionRequest(PaymentMethods.Balance, true, PaymentMethods.Debt), "balance used up");
+                    if (result.Ok) ended++;
+                    continue;
+                }
+                await RefreshBalanceEndAsync(session, now, send: true);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                _db.Entry(session).State = EntityState.Detached; // changed by staff at the same moment; next time
+            }
+        }
+        return ended;
     }
 
     // ===== Helpers =====

@@ -188,7 +188,9 @@ public class SessionsController : ControllerBase
                 CutoffUtc = s.CutoffUtc,
                 PaymentMethod = s.PaymentMethod,
                 PaidMinutes = s.PaidMinutes,
-                CurrentCost = currentCost
+                CurrentCost = currentCost,
+                LimitToBalance = s.LimitToBalance,
+                BalanceEndUtc = s.BalanceEndUtc
             });
         }
         return views;
@@ -201,8 +203,9 @@ public class SessionsController : ControllerBase
 /// (Owner, Manager; prepaid only; Reason required; audited as session.free_time).
 /// UseBonus: spend the bonus balance first (PC time only).
 /// </summary>
+/// LimitToBalance: an open-ended session of a player that ends when the balances are used up (player login).
 public record StartSessionRequest(Guid DeviceId, Guid? TariffId, Guid? UserId, int? DurationMinutes,
-    Guid? PackageId = null, string? PaymentMethod = null, bool UseBonus = true, string? Reason = null);
+    Guid? PackageId = null, string? PaymentMethod = null, bool UseBonus = true, string? Reason = null, bool LimitToBalance = false);
 /// <summary>PaymentMethod as for the start; free needs Owner or Manager and a Reason.</summary>
 public record ExtendSessionRequest(int Minutes, string? PaymentMethod = null, bool UseBonus = true, string? Reason = null);
 /// <summary>
@@ -231,6 +234,9 @@ public record SessionDetailView(
     public int? PaidMinutes { get; init; }
     /// <summary>Active open-ended sessions: price of the time played so far.</summary>
     public decimal? CurrentCost { get; init; }
+    /// <summary>Open-ended session that ends when the balances are used up, and when that is at the current prices.</summary>
+    public bool LimitToBalance { get; init; }
+    public DateTimeOffset? BalanceEndUtc { get; init; }
     public decimal PaidFromBalance { get; init; }
     public decimal PaidFromBonus { get; init; }
     /// <summary>Transfer: price difference paid for the move.</summary>

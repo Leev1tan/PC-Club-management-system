@@ -647,6 +647,9 @@ namespace Cms.Server.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("BalanceEndUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("ConcurrencyStamp")
                         .IsConcurrencyToken()
                         .HasColumnType("uuid");
@@ -662,6 +665,11 @@ namespace Cms.Server.Migrations
 
                     b.Property<bool>("IsPrepaid")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("LimitToBalance")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<Guid?>("PackageId")
                         .HasColumnType("uuid");

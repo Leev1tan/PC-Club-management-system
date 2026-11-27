@@ -74,7 +74,8 @@ public class DevicesController : ControllerBase
         var pinHash = await KioskSettings.GetStaffPinHashAsync(_db);
         return Ok(new DeviceHeartbeatResponse(status, pinHash)
         {
-            Client = await Cms.Server.Devices.ClubLanguage.ClientSettingsAsync(_db)
+            Client = await Cms.Server.Devices.ClubLanguage.ClientSettingsAsync(_db),
+            Session = User.DeviceId() is { } deviceId ? await Cms.Server.Devices.PlayerSessions.InfoAsync(_db, deviceId) : null
         });
     }
 
@@ -123,7 +124,7 @@ public class DevicesController : ControllerBase
                 d.ZoneId, zoneName, zoneColor,
                 d.PositionX, d.PositionY,
                 hasSession ? "occupied" : (status == "offline" ? "offline" : "free"),
-                session?.Id, session?.UserId, session?.EndUtc,
+                session?.Id, session?.UserId, session?.EndUtc ?? session?.BalanceEndUtc,
                 _runtime?.IsLocked(d.Id),
                 pendingCommands.TryGetValue(d.Id, out var pending) ? pending : 0,
                 d.Status
@@ -317,6 +318,8 @@ public record DeviceHeartbeatResponse(string Status, string? StaffPinHash)
 {
     /// <summary>Approved PCs: lock screen language and club currency (Cms.Shared.ClientSettings).</summary>
     public ClientSettings? Client { get; init; }
+    /// <summary>Approved PCs: the active session for the lock screen (player, tariff, planned end); null = none.</summary>
+    public ClientSessionInfo? Session { get; init; }
 }
 
 public enum DeviceRegistrationKind { ReRegistered, Enrolled, ReEnrolled, Pending, Unauthorized, Invalid }

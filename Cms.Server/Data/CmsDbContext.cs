@@ -354,6 +354,8 @@ public class CmsDbContext : DbContext
             entity.HasOne<UserEntity>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne<PackageEntity>().WithMany().HasForeignKey(e => e.PackageId).OnDelete(DeleteBehavior.SetNull);
             entity.Property(e => e.PaymentMethod).HasMaxLength(16);
+            // A default, so rows written without the column (older code, raw SQL) stay valid
+            entity.Property(e => e.LimitToBalance).HasDefaultValue(false);
             entity.HasIndex(e => new { e.DeviceId, e.Status });
             // At most ONE active session per PC, enforced by the database (partial unique index)
             entity.HasIndex(e => e.DeviceId)
@@ -551,6 +553,13 @@ public class SessionEntity
     public string? PaymentMethod { get; set; }
     /// <summary>Minutes paid in advance (prepaid and package sessions, including extensions).</summary>
     public int? PaidMinutes { get; set; }
+    /// <summary>
+    /// Open-ended session of a registered player that ends when the balances are used up (player login
+    /// "from the balance"): billed per minute at the end like any open-ended session.
+    /// </summary>
+    public bool LimitToBalance { get; set; }
+    /// <summary>LimitToBalance: when the balances run out at the tariff prices (re-computed every 5 s; kept while paused).</summary>
+    public DateTimeOffset? BalanceEndUtc { get; set; }
 }
 
 /// <summary>

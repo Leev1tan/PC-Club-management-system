@@ -44,7 +44,9 @@ public sealed class SessionExpiryService : BackgroundService
         var devices = scope.ServiceProvider.GetRequiredService<IDeviceRepository>();
         var clock = scope.ServiceProvider.GetRequiredService<ClubClock>();
 
-        var closed = await new SessionService(db, devices, clock).CloseExpiredAsync(ct);
+        // Sessions from the balance end with a charge: audited like an end at the desk (no staff member)
+        var audit = new Cms.Server.Auth.AuditLogger(db, new HttpContextAccessor());
+        var closed = await new SessionService(db, devices, clock, audit).CloseExpiredAsync(ct);
         if (closed > 0)
             _logger.LogInformation("Closed {Count} expired prepaid session(s)", closed);
 

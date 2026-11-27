@@ -52,6 +52,13 @@ public static class AuditActions
     public const string PlayerDebtRecorded = "player.debt_recorded";
     public const string PlayerDebtPaid = "player.debt_paid";
     public const string PlayerDebtWrittenOff = "player.debt_written_off";
+    /// <summary>Player login on the lock screen of a PC (with the session it started, or why none started).</summary>
+    public const string PlayerLogin = "player.login";
+    public const string PlayerLoginFailed = "player.login_failed";
+    /// <summary>The player login of an account or a PC is locked after repeated failures.</summary>
+    public const string PlayerLoginLocked = "player.login_locked";
+    /// <summary>The player ended the session on the lock screen.</summary>
+    public const string PlayerLogout = "player.logout";
 
     public const string TariffCreated = "tariff.created";
     public const string TariffUpdated = "tariff.updated";

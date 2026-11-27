@@ -89,6 +89,7 @@ builder.Services.AddSingleton(sp => Cms.Server.Billing.ClubClock.FromConfigurati
 
 // Repositories
 builder.Services.AddSingleton<DeviceRuntimeState>();
+builder.Services.AddSingleton<Cms.Server.Devices.PlayerLoginLimiter>();
 builder.Services.AddScoped<Cms.Server.Repositories.IDeviceRepository, Cms.Server.Repositories.EfDeviceRepository>();
 builder.Services.AddScoped<Cms.Server.Repositories.ISessionRepository, Cms.Server.Repositories.EfSessionRepository>();
 
