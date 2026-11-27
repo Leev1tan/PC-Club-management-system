@@ -1,22 +1,29 @@
 'use client';
 import { useState } from 'react';
 import { AuthStatus, Me, errorText, postJson } from './api';
-
-const roleNames: Record<string, string> = {
-  Owner: 'Власник / Owner',
-  Manager: 'Менеджер / Manager',
-  Cashier: 'Касир / Cashier',
-  Tech: 'Технік / Tech',
-};
+import { lang, setLang, t } from './i18n';
 
 export function roleLabel(role: string) {
-  return roleNames[role] ?? role;
+  return t.roles[role] ?? role;
+}
+
+/** UA / EN switch (saves the choice and reloads the page). */
+export function LangSwitch() {
+  return (
+    <span className="lang-switch" role="group" aria-label={t.lang.label}>
+      {(['uk', 'en'] as const).map(l => (
+        <button key={l} type="button" className={`btn btn-sm ${lang === l ? 'active' : ''}`} aria-pressed={lang === l}
+          onClick={() => lang !== l && setLang(l)}>{t.lang[l]}</button>
+      ))}
+    </span>
+  );
 }
 
 function AuthCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
     <div className="auth-screen">
       <div className="modal auth-card">
+        <div className="auth-lang"><LangSwitch /></div>
         <div className="sidebar-logo" style={{ marginBottom: 18 }}>
           <div className="sidebar-logo-icon">🎮</div>
           <div>
@@ -45,38 +52,38 @@ export function LoginScreen({ status, onLogin }: { status: AuthStatus | null; on
     try {
       const res = await postJson('/api/auth/login', { username: u, password: p });
       if (res.ok) onLogin(await res.json());
-      else setError(res.status === 401 ? 'Невірний логін або пароль / Wrong user name or password' : await errorText(res));
+      else setError(res.status === 401 ? t.auth.wrong : await errorText(res));
     } catch {
-      setError('Сервер недоступний / Server not reachable');
+      setError(t.common.unreachable);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <AuthCard title="Вхід персоналу / Staff sign-in">
+    <AuthCard title={t.auth.title}>
       <form onSubmit={e => { e.preventDefault(); login(username, password); }}>
         <div className="form-group">
-          <label className="form-label" htmlFor="username">Логін / User name</label>
+          <label className="form-label" htmlFor="username">{t.auth.username}</label>
           <input id="username" className="form-input" autoComplete="username" autoFocus
             value={username} onChange={e => setUsername(e.target.value)} />
         </div>
         <div className="form-group">
-          <label className="form-label" htmlFor="password">Пароль / Password</label>
+          <label className="form-label" htmlFor="password">{t.auth.password}</label>
           <input id="password" className="form-input" type="password" autoComplete="current-password"
             value={password} onChange={e => setPassword(e.target.value)} />
         </div>
         {error && <div className="auth-error" role="alert">{error}</div>}
         <div className="modal-actions">
           <button className="btn btn-primary" type="submit" disabled={busy || !username || !password}>
-            {busy ? '...' : 'Увійти / Sign in'}
+            {busy ? '...' : t.auth.signIn}
           </button>
         </div>
       </form>
 
       {status?.demoMode && status.demoAccounts && status.demoAccounts.length > 0 && (
         <div className="demo-accounts-box">
-          <div className="form-label">LIVE DEMO — публічні демо-акаунти / public demo accounts</div>
+          <div className="form-label">{t.auth.demoAccounts}</div>
           <div className="demo-accounts">
             {status.demoAccounts.map(a => (
               <button key={a.username} className="btn btn-sm" type="button" disabled={busy}
@@ -86,7 +93,7 @@ export function LoginScreen({ status, onLogin }: { status: AuthStatus | null; on
               </button>
             ))}
           </div>
-          <div className="auth-sub">Ці акаунти існують лише в демо-режимі. These accounts exist only in demo mode.</div>
+          <div className="auth-sub">{t.auth.demoOnly}</div>
         </div>
       )}
     </AuthCard>
@@ -107,7 +114,7 @@ export function SetupScreen({ onDone }: { onDone: (me: Me) => void }) {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (password !== password2) { setError('Паролі не збігаються / Passwords do not match'); return; }
+    if (password !== password2) { setError(t.auth.mismatch); return; }
     setBusy(true);
     setError(null);
     try {
@@ -115,41 +122,41 @@ export function SetupScreen({ onDone }: { onDone: (me: Me) => void }) {
       if (res.ok) onDone(await res.json());
       else setError(await errorText(res));
     } catch {
-      setError('Сервер недоступний / Server not reachable');
+      setError(t.common.unreachable);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <AuthCard title="Перший запуск / First start"
-      sub="Створіть акаунт власника. Код налаштування — у файлі setup-code.txt у каталозі даних сервера (Windows: C:\ProgramData\PCClub, Docker: docker compose exec server cat /app/data/setup-code.txt). Create the owner account with the one-time setup code from the server.">
+    <AuthCard title={t.auth.setupTitle}
+      sub={t.auth.setupSub}>
       <form onSubmit={e => { e.preventDefault(); submit(); }}>
         <div className="form-group">
-          <label className="form-label" htmlFor="setup-code">Код налаштування / Setup code</label>
+          <label className="form-label" htmlFor="setup-code">{t.auth.setupCode}</label>
           <input id="setup-code" className="form-input" placeholder="XXXX-XXXX-XXXX" autoComplete="off" autoFocus
             value={code} onChange={e => setCode(e.target.value)} />
         </div>
         <div className="form-group">
-          <label className="form-label" htmlFor="setup-user">Логін власника / Owner user name</label>
+          <label className="form-label" htmlFor="setup-user">{t.auth.ownerUsername}</label>
           <input id="setup-user" className="form-input" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} />
         </div>
         <div className="form-group">
-          <label className="form-label" htmlFor="setup-name">Ім&apos;я / Display name</label>
+          <label className="form-label" htmlFor="setup-name">{t.auth.displayName}</label>
           <input id="setup-name" className="form-input" value={displayName} onChange={e => setDisplayName(e.target.value)} />
         </div>
         <div className="form-group">
-          <label className="form-label" htmlFor="setup-pass">Пароль (мін. 8) / Password (min. 8)</label>
+          <label className="form-label" htmlFor="setup-pass">{t.auth.passwordMin}</label>
           <input id="setup-pass" className="form-input" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} />
         </div>
         <div className="form-group">
-          <label className="form-label" htmlFor="setup-pass2">Повторіть пароль / Repeat password</label>
+          <label className="form-label" htmlFor="setup-pass2">{t.auth.passwordRepeat}</label>
           <input id="setup-pass2" className="form-input" type="password" autoComplete="new-password" value={password2} onChange={e => setPassword2(e.target.value)} />
         </div>
         {error && <div className="auth-error" role="alert">{error}</div>}
         <div className="modal-actions">
           <button className="btn btn-primary" type="submit" disabled={busy || !code || !username || !password}>
-            {busy ? '...' : 'Створити власника / Create owner'}
+            {busy ? '...' : t.auth.createOwner}
           </button>
         </div>
       </form>

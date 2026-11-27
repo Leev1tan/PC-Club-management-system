@@ -26,7 +26,7 @@ export function TariffsTab({ can, zones, devices, tariffs, toast, onChanged, onA
   const deleteTariff = async (tariff: Tariff) => {
     if (!window.confirm(fmt(t.tariffs.confirmDelete, { name: tariff.name }))) return;
     const res = await api(`/api/tariffs/${tariff.id}`, { method: 'DELETE' });
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     toast(t.tariffs.deleted, 'info');
     onChanged();
   };
@@ -34,14 +34,14 @@ export function TariffsTab({ can, zones, devices, tariffs, toast, onChanged, onA
   const deletePackage = async (p: Package) => {
     if (!window.confirm(fmt(t.packages.confirmDelete, { name: p.name }))) return;
     const res = await api(`/api/packages/${p.id}`, { method: 'DELETE' });
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     toast(t.packages.deleted, 'info');
     loadPackages();
   };
 
   const toggleActive = async (p: Package) => {
     const res = await postJson(`/api/packages/${p.id}`, toPackageRequest(p, { isActive: !p.isActive }), 'PUT');
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     loadPackages();
   };
 
@@ -50,12 +50,12 @@ export function TariffsTab({ can, zones, devices, tariffs, toast, onChanged, onA
       {/* Zones */}
       <div className="section-card">
         <div className="section-card-header">
-          <span className="section-card-title">🗺️ Зони</span>
-          {can.management && <button className="btn btn-primary btn-sm" onClick={onAddZone}>+ Додати зону</button>}
+          <span className="section-card-title">{t.zones.title}</span>
+          {can.management && <button className="btn btn-primary btn-sm" onClick={onAddZone}>{t.zones.add}</button>}
         </div>
         {zones.length === 0 ? (
           <div className="empty-state" style={{ padding: 30 }}>
-            <div className="empty-state-sub">Зони дозволяють групувати ПК за локацією та ціною</div>
+            <div className="empty-state-sub">{t.zones.emptyHint}</div>
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -66,7 +66,7 @@ export function TariffsTab({ can, zones, devices, tariffs, toast, onChanged, onA
                   {can.management && <button className="btn btn-sm btn-danger" onClick={() => onDeleteZone(z.id)} style={{ padding: '2px 6px', fontSize: 11 }}>✕</button>}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                  {devices.filter(d => d.zoneId === z.id).length} ПК · {packages.filter(p => p.zoneId === z.id && p.isActive).length} пакетів
+                  {fmt(t.zones.summary, { pcs: devices.filter(d => d.zoneId === z.id).length, packages: packages.filter(p => p.zoneId === z.id && p.isActive).length })}
                 </div>
               </div>
             ))}
@@ -260,7 +260,7 @@ function TariffEditor({ tariff, zones, toast, onClose, onSaved }: {
     };
     const res = tariff ? await postJson(`/api/tariffs/${tariff.id}`, body, 'PUT') : await postJson('/api/tariffs', body);
     setBusy(false);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     toast(t.tariffs.saved, 'success');
     onSaved();
   };
@@ -364,7 +364,7 @@ function PackageEditor({ pkg, zones, toast, onClose, onSaved }: {
     };
     const res = pkg ? await postJson(`/api/packages/${pkg.id}`, body, 'PUT') : await postJson('/api/packages', body);
     setBusy(false);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     toast(t.packages.saved, 'success');
     onSaved();
   };
@@ -375,7 +375,7 @@ function PackageEditor({ pkg, zones, toast, onClose, onSaved }: {
         <div className="modal-title">🎟️ {pkg ? `${t.packages.editTitle}: ${pkg.name}` : t.packages.newTitle}</div>
         <div className="form-group">
           <label className="form-label">{t.packages.name}</label>
-          <input className="form-input" placeholder="напр. 3 години, Нічний 22:00–08:00" value={name} onChange={e => setName(e.target.value)} />
+          <input className="form-input" placeholder={t.zones.packagePlaceholder} value={name} onChange={e => setName(e.target.value)} />
         </div>
         <div className="form-grid">
           <div className="form-group">
@@ -424,7 +424,7 @@ function BonusSection({ settings, canEdit, toast, onSaved }: { settings: Billing
 
   const save = async () => {
     const res = await postJson('/api/billing/settings', { bonusTopUpRules: shown }, 'PUT');
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     toast(t.bonus.saved, 'success');
     setTiers(null);
     onSaved();

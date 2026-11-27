@@ -150,7 +150,7 @@ function TopUpForm({ player, settings, toast, onCancel, onDone }: {
     setBusy(true);
     const res = await postJson(`/api/users/${player.id}/topup`, { amount: value, method });
     setBusy(false);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     onDone(fmt(t.player.topUpDone, { amount: money(value) }) + (bonus > 0 ? fmt(t.player.bonusAdded, { bonus: money(bonus) }) : ''));
   };
 
@@ -195,7 +195,7 @@ function RefundForm({ player, toast, onCancel, onDone }: { player: Player; toast
     setBusy(true);
     const res = await postJson(`/api/users/${player.id}/refund`, { amount: value, method, reason });
     setBusy(false);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     onDone(fmt(t.player.refundDone, { amount: money(value) }));
   };
 
@@ -233,7 +233,7 @@ function AdjustForm({ player, toast, onCancel, onDone }: { player: Player; toast
     setBusy(true);
     const res = await postJson(`/api/users/${player.id}/adjust`, { amount: value, reason, target });
     setBusy(false);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     onDone(t.player.adjustDone);
   };
 

@@ -1,11 +1,11 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthStatus, Me, api, errorText, getJson, permissions, postJson, setUnauthorizedHandler } from './api';
-import { LoginScreen, SetupScreen, roleLabel } from './auth';
+import { LangSwitch, LoginScreen, SetupScreen, roleLabel } from './auth';
 import { AnalyticsTab } from './analytics-tab';
 import { AuditTab, SettingsTab, StaffTab } from './admin-tabs';
 import { Tariff } from './billing';
-import { fmt as fmtText, lang, methodLabel, money, setLang, t } from './i18n';
+import { cash, fmt as fmtText, lang, locale, methodLabel, money, setCurrency, t } from './i18n';
 import { PlayerCard } from './player-card';
 import { PosTab } from './pos-tab';
 import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-dialogs';
@@ -62,30 +62,29 @@ const allTabs: { id: Tab; label: string; icon: string; section?: string; need: N
 ];
 
 // ===== Helpers =====
-const fmt = (n: number) => n.toFixed(2);
-const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
-const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
 const fmtDateTime = (iso: string) => `${fmtDate(iso)} ${fmtTime(iso)}`;
 
 /** Remaining time; a paused session keeps the time it had at the pause. */
 function timeRemaining(endUtc: string | null, pausedUtc?: string | null): string {
-  if (!endUtc) return 'Відкрита';
+  if (!endUtc) return t.ago.open;
   const diff = new Date(endUtc).getTime() - (pausedUtc ? new Date(pausedUtc).getTime() : Date.now());
-  if (diff <= 0) return 'Завершено';
+  if (diff <= 0) return t.ago.over;
   const m = Math.floor(diff / 60000);
   const h = Math.floor(m / 60);
-  return h > 0 ? `${h}г ${m % 60}хв` : `${m}хв`;
+  return h > 0 ? fmtText(t.ago.hm, { h, m: m % 60 }) : fmtText(t.ago.m, { m });
 }
 
 function timeAgo(iso: string | null): string {
-  if (!iso) return 'Ніколи';
+  if (!iso) return t.ago.never;
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
-  if (m < 1) return 'Щойно';
-  if (m < 60) return `${m}хв тому`;
+  if (m < 1) return t.ago.now;
+  if (m < 60) return fmtText(t.ago.minutes, { n: m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}г тому`;
-  return `${Math.floor(h / 24)}д тому`;
+  if (h < 24) return fmtText(t.ago.hours, { n: h });
+  return fmtText(t.ago.days, { n: Math.floor(h / 24) });
 }
 
 // ===== Auth gate: setup screen, login page or the admin UI =====
@@ -93,11 +92,17 @@ export default function Page() {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = still loading
 
+  // The club currency comes with the signed-in staff member; set it before the admin page renders
+  const accept = useCallback((who: Me | null) => {
+    if (who) setCurrency(who.currency);
+    setMe(who);
+  }, []);
+
   const refresh = useCallback(async () => {
     const [st, who] = await Promise.all([getJson<AuthStatus>('/api/auth/status'), getJson<Me>('/api/auth/me')]);
     setStatus(st);
-    setMe(who);
-  }, []);
+    accept(who);
+  }, [accept]);
 
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => { document.documentElement.lang = lang; }, []);
@@ -114,14 +119,15 @@ export default function Page() {
   };
 
   if (me === undefined) {
+    // No text: the static page is rendered in Ukrainian, the browser may show English (no mismatch)
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-muted)' }}>
-        <div style={{ fontSize: 14 }}>Завантаження...</div>
+        <div style={{ fontSize: 40, animation: 'pulse 1.5s infinite' }} aria-busy="true">🎮</div>
       </div>
     );
   }
-  if (!me && status?.setupRequired) return <SetupScreen onDone={setMe} />;
-  if (!me) return <LoginScreen status={status} onLogin={setMe} />;
+  if (!me && status?.setupRequired) return <SetupScreen onDone={accept} />;
+  if (!me) return <LoginScreen status={status} onLogin={accept} />;
   return <AdminPage key={me.id + me.role} me={me} onLogout={logout} />;
 }
 
@@ -140,6 +146,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [loading, setLoading] = useState(true);
   const [demo, setDemo] = useState<DemoInfo | null>(null);
   const [zoneFilter, setZoneFilter] = useState<string | null>(null);
+  const [, setCurrencyRev] = useState(0); // a new club currency renders every screen again
   const [sessionFilter, setSessionFilter] = useState<'all' | 'active' | 'ended'>('all');
 
   // Modal state
@@ -160,14 +167,17 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   // Only what the role may read (Tech: PCs and zones; Cashier: no revenue)
   const fetchAll = useCallback(async () => {
-    const [d, z, t, u, s, r] = await Promise.all([
+    const [d, z, t, u, s, r, who] = await Promise.all([
       getJson<Device[]>('/api/devices'),
       getJson<Zone[]>('/api/zones'),
       can.frontDesk ? getJson<Tariff[]>('/api/tariffs') : Promise.resolve(null),
       can.frontDesk ? getJson<User[]>('/api/users') : Promise.resolve(null),
       can.frontDesk ? getJson<Session[]>('/api/sessions') : Promise.resolve(null),
       can.management ? getJson<Revenue>('/api/sessions/revenue') : Promise.resolve(null),
+      getJson<Me>('/api/auth/me'),
     ]);
+    // The owner may change the club currency at any time: every screen follows within one refresh
+    if (who && setCurrency(who.currency)) setCurrencyRev(v => v + 1);
     if (d) setDevices(d);
     if (z) setZones(z);
     if (t) setTariffs(t);
@@ -197,27 +207,27 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // ===== API Actions =====
   const sendCommand = async (deviceId: string, type: string, payload?: object) => {
     const res = await postJson(`/api/devices/${deviceId}/commands`, { type, payload: payload || null });
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast(`Команду "${type}" надіслано`, 'success');
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
+    toast(fmtText(t.map.commandSent, { type }), 'success');
     fetchAll();
     setTimeout(fetchAll, 2500); // the agent usually confirms within 1-2 s
   };
 
   const sendMessage = (deviceId: string, hostname: string) => {
-    const text = window.prompt(`Повідомлення на екран ${hostname}:`);
+    const text = window.prompt(fmtText(t.map.messagePrompt, { host: hostname }));
     if (text && text.trim()) sendCommand(deviceId, 'message', { text: text.trim() });
   };
 
   const extendSession = async (sessionId: string, minutes: number) => {
     const res = await postJson(`/api/sessions/${sessionId}/extend`, { minutes });
     if (res.ok) { toast(fmtText(t.session.extended, { minutes }), 'success'); fetchAll(); }
-    else toast(`Помилка: ${await errorText(res)}`, 'error');
+    else toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error');
   };
 
   const pauseOrResume = async (sessionId: string, paused: boolean) => {
     const res = await postJson(`/api/sessions/${sessionId}/${paused ? 'resume' : 'pause'}`);
     if (res.ok) { toast(paused ? t.session.resumedToast : t.session.pausedToast, 'success'); fetchAll(); }
-    else toast(`Помилка: ${await errorText(res)}`, 'error');
+    else toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error');
   };
 
   // The end dialog asks how an open-ended session is paid; it needs the session row
@@ -236,48 +246,46 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   const createZone = async (name: string, color: string) => {
     const res = await postJson('/api/zones', { name, color, sortOrder: zones.length });
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast(`Зону "${name}" створено ✓`, 'success');
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
+    toast(fmtText(t.zones.created, { name }), 'success');
     fetchAll();
   };
 
   const deleteZone = async (id: string) => {
     const res = await api(`/api/zones/${id}`, { method: 'DELETE' });
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast('Зону видалено', 'info');
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
+    toast(t.zones.deleted, 'info');
     fetchAll();
   };
 
   const assignZone = async (deviceId: string, zoneId: string | null) => {
     const res = await postJson(`/api/devices/${deviceId}/zone`, { zoneId }, 'PUT');
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast('Зону призначено ✓', 'success');
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
+    toast(t.devices.zoneAssigned, 'success');
     fetchAll();
   };
 
   // Approval of PCs that registered without the enrollment token
   const deviceAction = async (deviceId: string, action: 'approve' | 'reject' | 'revoke', hostname: string) => {
-    if (action !== 'approve' && !window.confirm(action === 'revoke'
-      ? `Відкликати ${hostname}? Ключ ПК перестане працювати (історія залишиться).`
-      : `Відхилити ${hostname}?`)) return;
+    if (action !== 'approve' && !window.confirm(fmtText(action === 'revoke' ? t.devices.confirmRevoke : t.devices.confirmReject, { host: hostname }))) return;
     const res = await postJson(`/api/devices/${deviceId}/${action}`);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast(action === 'approve' ? `${hostname} схвалено ✓` : action === 'reject' ? `${hostname} відхилено` : `${hostname} відкликано`, 'success');
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
+    toast(fmtText(action === 'approve' ? t.devices.approvedToast : action === 'reject' ? t.devices.rejectedToast : t.devices.revokedToast, { host: hostname }), 'success');
     fetchAll();
   };
 
   const createPlayer = async (username: string, displayName: string, password: string) => {
     const res = await postJson('/api/users/register', { username, displayName, password });
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast(`Гравця @${username} створено ✓`, 'success');
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
+    toast(fmtText(t.players.created, { username }), 'success');
     fetchAll();
   };
 
   const setPlayerPin = async (userId: string, username: string) => {
-    const password = window.prompt(`Новий пароль або PIN для @${username} (мін. 4 символи):`);
+    const password = window.prompt(fmtText(t.players.pinPrompt, { username }));
     if (!password) return;
     const res = await postJson(`/api/users/${userId}/password`, { password });
-    toast(res.ok ? 'Пароль гравця змінено ✓' : `Помилка: ${await errorText(res)}`, res.ok ? 'success' : 'error');
+    toast(res.ok ? t.players.pinChanged : `${t.common.errorPrefix}: ${await errorText(res)}`, res.ok ? 'success' : 'error');
   };
 
 
@@ -295,8 +303,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     ? <span style={{ color: 'var(--amber)' }}>⏸ {t.session.paused} · {timeRemaining(s.endUtc, s.pausedUtc)}</span>
     : <span style={{ color: 'var(--blue)' }}>{timeRemaining(s.endUtc)}</span>;
   const sessionCost = (s: Session) => s.status === 'active' && !s.isPrepaid
-    ? <span title={t.session.current}>{money(s.currentCost ?? 0)} ₴ …</span>
-    : <>{money(s.totalCost)} ₴</>;
+    ? <span title={t.session.current}>{cash(s.currentCost ?? 0)} …</span>
+    : <>{cash(s.totalCost)}</>;
   const sessionActions = (s: Session) => (
     <div style={{ display: 'flex', gap: 4 }}>
       <button className="btn btn-sm" title={s.pausedUtc ? t.session.resume : t.session.pause} onClick={() => pauseOrResume(s.id, !!s.pausedUtc)}>{s.pausedUtc ? '▶️' : '⏸️'}</button>
@@ -320,7 +328,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'analytics': return <AnalyticsTab />;
       case 'audit': return <AuditTab owner={can.owner} />;
       case 'staff': return <StaffTab me={me} toast={toast} />;
-      case 'settings': return <SettingsTab toast={toast} />;
+      case 'settings': return <SettingsTab toast={toast} onCurrency={code => { if (setCurrency(code)) setCurrencyRev(v => v + 1); }} />;
     }
   };
 
@@ -332,59 +340,59 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <div className="stat-card">
             <div className="stat-card-header">
               <div className="stat-card-icon" style={{ background: 'var(--accent-glow)' }}>🖥️</div>
-              <span className="stat-card-label">Всього ПК</span>
+              <span className="stat-card-label">{t.dashboard.totalPcs}</span>
             </div>
             <div className="stat-card-value">{devices.length}</div>
-            <div className="stat-card-sub">{onlineDevices.length} онлайн</div>
+            <div className="stat-card-sub">{fmtText(t.dashboard.online, { n: onlineDevices.length })}</div>
           </div>
           <div className="stat-card">
             <div className="stat-card-header">
               <div className="stat-card-icon" style={{ background: 'var(--green-glow)' }}>✅</div>
-              <span className="stat-card-label">Вільних</span>
+              <span className="stat-card-label">{t.dashboard.free}</span>
             </div>
             <div className="stat-card-value">{freeDevices.length}</div>
-            <div className="stat-card-sub">Готові до гри</div>
+            <div className="stat-card-sub">{t.dashboard.ready}</div>
           </div>
           <div className="stat-card">
             <div className="stat-card-header">
               <div className="stat-card-icon" style={{ background: 'var(--blue-glow)' }}>🎮</div>
-              <span className="stat-card-label">Активні сесії</span>
+              <span className="stat-card-label">{t.dashboard.active}</span>
             </div>
             <div className="stat-card-value">{activeSessions.length}</div>
-            <div className="stat-card-sub">Зараз грають</div>
+            <div className="stat-card-sub">{t.dashboard.playing}</div>
           </div>
           <div className="stat-card">
             <div className="stat-card-header">
               <div className="stat-card-icon" style={{ background: 'var(--amber-glow)' }}>💰</div>
-              <span className="stat-card-label">Дохід сьогодні</span>
+              <span className="stat-card-label">{t.dashboard.revenueToday}</span>
             </div>
-            <div className="stat-card-value">{revenue ? `${fmt(revenue.today)} ₴` : '—'}</div>
-            <div className="stat-card-sub">Тиждень: {revenue ? `${fmt(revenue.week)} ₴` : '—'}</div>
+            <div className="stat-card-value">{revenue ? cash(revenue.today) : t.none}</div>
+            <div className="stat-card-sub">{fmtText(t.dashboard.week, { amount: revenue ? cash(revenue.week) : t.none })}</div>
           </div>
         </div>
 
         {/* Active Sessions */}
         <div className="section-card">
           <div className="section-card-header">
-            <span className="section-card-title">🎮 Активні сесії</span>
+            <span className="section-card-title">{t.dashboard.activeTitle}</span>
           </div>
           {activeSessions.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">😴</div>
-              <div className="empty-state-title">Немає активних сесій</div>
-              <div className="empty-state-sub">Перейдіть на Карту ПК щоб розпочати сесію</div>
+              <div className="empty-state-title">{t.dashboard.noActive}</div>
+              <div className="empty-state-sub">{t.dashboard.noActiveHint}</div>
             </div>
           ) : (
             <div className="table-wrapper">
               <table className="data-table">
                 <thead><tr>
-                  <th>ПК</th><th>Гравець</th><th>Тариф</th><th>Залишилось</th><th>Вартість</th><th></th>
+                  <th>{t.sessions.col.pc}</th><th>{t.sessions.col.player}</th><th>{t.sessions.col.tariff}</th><th>{t.sessions.col.left}</th><th>{t.sessions.col.cost}</th><th></th>
                 </tr></thead>
                 <tbody>
                   {activeSessions.map(s => (
                     <tr key={s.id}>
                       <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.deviceHostname || '—'}</td>
-                      <td>{s.username || 'Гість'}</td>
+                      <td>{s.username || t.guest}</td>
                       <td>{sessionLabel(s)}</td>
                       <td>{sessionLeft(s)}</td>
                       <td>{sessionCost(s)}</td>
@@ -401,7 +409,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {zones.length > 0 && (
           <div className="section-card">
             <div className="section-card-header">
-              <span className="section-card-title">🗺️ Зони</span>
+              <span className="section-card-title">{t.dashboard.zones}</span>
             </div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               {zones.map(z => {
@@ -414,7 +422,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                       <span style={{ fontWeight: 600, fontSize: 14 }}>{z.name}</span>
                     </div>
                     <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                      {zoneDevices.length} ПК · {zoneFree} вільних
+                      {fmtText(t.dashboard.zoneSummary, { pcs: zoneDevices.length, free: zoneFree })}
                     </div>
                   </div>
                 );
@@ -428,20 +436,23 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   // ===== PC Map Tab =====
   function MapTab() {
-    const filtered = zoneFilter ? devices.filter(d => d.zoneId === zoneFilter) : devices;
+    // By zone (in the zone order), then by name: STD-01 ... STD-12, VIP-01 ...
+    const zoneOrder = (id: string | null) => { const z = zones.find(x => x.id === id); return z ? z.sortOrder : Number.MAX_SAFE_INTEGER; };
+    const filtered = (zoneFilter ? devices.filter(d => d.zoneId === zoneFilter) : devices).slice()
+      .sort((a, b) => zoneOrder(a.zoneId) - zoneOrder(b.zoneId) || a.hostname.localeCompare(b.hostname, undefined, { numeric: true }));
 
     return (
       <>
         <div className="page-header">
-          <span className="page-title">Карта ПК</span>
+          <span className="page-title">{t.map.title}</span>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            {freeDevices.length} вільних · {occupiedDevices.length} зайнятих
+            {fmtText(t.map.summary, { free: freeDevices.length, busy: occupiedDevices.length })}
           </span>
         </div>
 
         {zones.length > 0 && (
           <div className="filter-bar">
-            <button className={`filter-chip ${!zoneFilter ? 'active' : ''}`} onClick={() => setZoneFilter(null)}>Всі</button>
+            <button className={`filter-chip ${!zoneFilter ? 'active' : ''}`} onClick={() => setZoneFilter(null)}>{t.common.all}</button>
             {zones.map(z => (
               <button key={z.id} className={`filter-chip ${zoneFilter === z.id ? 'active' : ''}`}
                 onClick={() => setZoneFilter(zoneFilter === z.id ? null : z.id)}
@@ -456,8 +467,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {filtered.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">🖥️</div>
-            <div className="empty-state-title">Немає пристроїв</div>
-            <div className="empty-state-sub">Встановіть агент на ПК щоб вони з&apos;явились тут</div>
+            <div className="empty-state-title">{t.map.empty}</div>
+            <div className="empty-state-sub">{t.map.emptyHint}</div>
           </div>
         ) : (
           <div className="pc-map">
@@ -468,22 +479,22 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 <div className="pc-card-name">{d.hostname}</div>
                 <div className="pc-card-status">
                   <span className={`dot ${d.sessionPausedUtc ? 'amber' : d.occupancyStatus === 'free' ? 'green' : d.occupancyStatus === 'occupied' ? 'blue' : 'red'}`} />
-                  {d.sessionPausedUtc ? t.session.paused : d.occupancyStatus === 'free' ? 'Вільний' : d.occupancyStatus === 'occupied' ? 'Зайнятий' : 'Офлайн'}
+                  {d.sessionPausedUtc ? t.session.paused : d.occupancyStatus === 'free' ? t.map.free : d.occupancyStatus === 'occupied' ? t.map.busy : t.map.offline}
                 </div>
                 {d.sessionEndUtc && <div className="pc-card-timer">{d.sessionPausedUtc ? '⏸ ' : ''}{timeRemaining(d.sessionEndUtc, d.sessionPausedUtc)}</div>}
                 {d.sessionLabel && <div className="pc-card-zone" title={d.sessionLabel}>{d.sessionIsPackage ? '🎟️ ' : ''}{d.sessionLabel}</div>}
                 {d.zoneName && <div className="pc-card-zone">{d.zoneName}</div>}
                 <div className="pc-card-flags">
-                  {d.isLocked === true && <span title="Заблоковано">🔒</span>}
-                  {d.isLocked === false && <span title="Розблоковано">🔓</span>}
-                  {(d.pendingCommands ?? 0) > 0 && <span title="Команди чекають на підтвердження від ПК">⏳ {d.pendingCommands}</span>}
+                  {d.isLocked === true && <span title={t.map.locked}>🔒</span>}
+                  {d.isLocked === false && <span title={t.map.unlocked}>🔓</span>}
+                  {(d.pendingCommands ?? 0) > 0 && <span title={t.map.pendingCommands}>⏳ {d.pendingCommands}</span>}
                 </div>
 
                 {pcPopover === d.id && (
                   <div className="popover" onClick={e => e.stopPropagation()}>
                     {can.frontDesk && d.occupancyStatus === 'free' && d.enrollment !== 'pending' && (
                       <button className="popover-item" onClick={() => { setPcPopover(null); setStartDialog({ id: d.id, hostname: d.hostname, zoneId: d.zoneId }); }}>
-                        🎮 Розпочати сесію
+                        {t.map.start}
                       </button>
                     )}
                     {can.frontDesk && d.activeSessionId && d.sessionEndUtc && !d.sessionPausedUtc && (
@@ -503,14 +514,14 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                     )}
                     {can.frontDesk && d.activeSessionId && (
                       <button className="popover-item" onClick={() => { setPcPopover(null); endSession(d.activeSessionId!); }}>
-                        ⏹️ Завершити сесію
+                        {t.map.end}
                       </button>
                     )}
-                    <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'lock'); }}>🔒 Заблокувати</button>
-                    <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'unlock'); }}>🔓 Розблокувати</button>
-                    <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'restart'); }}>🔄 Перезавантажити</button>
-                    <button className="popover-item" onClick={() => { setPcPopover(null); sendMessage(d.id, d.hostname); }}>💬 Повідомлення</button>
-                    <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'logoff'); }}>🚪 Вийти з системи</button>
+                    <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'lock'); }}>{t.map.lock}</button>
+                    <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'unlock'); }}>{t.map.unlock}</button>
+                    <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'restart'); }}>{t.map.restart}</button>
+                    <button className="popover-item" onClick={() => { setPcPopover(null); sendMessage(d.id, d.hostname); }}>{t.map.message}</button>
+                    <button className="popover-item" onClick={() => { setPcPopover(null); sendCommand(d.id, 'logoff'); }}>{t.map.logoff}</button>
                   </div>
                 )}
               </div>
@@ -526,21 +537,21 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     return (
       <>
         <div className="page-header">
-          <span className="page-title">Пристрої</span>
-          <span className="badge badge-green">{onlineDevices.length} онлайн</span>
+          <span className="page-title">{t.devices.title}</span>
+          <span className="badge badge-green">{fmtText(t.devices.online, { n: onlineDevices.length })}</span>
         </div>
 
         {devices.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">🖥️</div>
-            <div className="empty-state-title">Немає пристроїв</div>
-            <div className="empty-state-sub">Агент автоматично зареєструє ПК при першому підключенні</div>
+            <div className="empty-state-title">{t.devices.empty}</div>
+            <div className="empty-state-sub">{t.devices.emptyHint}</div>
           </div>
         ) : (
           <div className="table-wrapper">
             <table className="data-table">
               <thead><tr>
-                <th>Ім&apos;я</th><th>Статус</th><th>Підключення</th><th>Зона</th><th>IP</th><th>ОС</th><th>Останній зв&apos;язок</th><th>Дії</th>
+                <th>{t.devices.col.name}</th><th>{t.devices.col.status}</th><th>{t.devices.col.enrollment}</th><th>{t.devices.col.zone}</th><th>{t.devices.col.ip}</th><th>{t.devices.col.os}</th><th>{t.devices.col.lastSeen}</th><th>{t.devices.col.actions}</th>
               </tr></thead>
               <tbody>
                 {devices.map(d => (
@@ -548,18 +559,18 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                     <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{d.hostname}</td>
                     <td>
                       <span className={`badge ${d.status === 'online' ? 'badge-green' : 'badge-red'}`}>
-                        {d.status === 'online' ? 'Онлайн' : 'Офлайн'}
+                        {d.status === 'online' ? t.devices.statusOnline : t.devices.statusOffline}
                       </span>
                     </td>
                     <td>
                       <span className={`badge ${d.enrollment === 'pending' ? 'badge-amber' : d.enrollment === 'revoked' ? 'badge-red' : 'badge-green'}`}>
-                        {d.enrollment === 'pending' ? 'Чекає схвалення' : d.enrollment === 'revoked' ? 'Відкликано' : 'Схвалено'}
+                        {d.enrollment === 'pending' ? t.devices.pending : d.enrollment === 'revoked' ? t.devices.revoked : t.devices.approved}
                       </span>
                     </td>
                     <td>
                       <select className="form-select" style={{ width: 140, padding: '4px 8px', fontSize: 12 }} disabled={!can.deviceAdmin}
                         value={d.zoneId || ''} onChange={e => assignZone(d.id, e.target.value || null)}>
-                        <option value="">Без зони</option>
+                        <option value="">{t.devices.noZone}</option>
                         {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
                       </select>
                     </td>
@@ -569,13 +580,13 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
                         {d.enrollment === 'pending' ? (can.deviceAdmin && <>
-                          <button className="btn btn-success btn-sm" onClick={() => deviceAction(d.id, 'approve', d.hostname)}>Схвалити</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => deviceAction(d.id, 'reject', d.hostname)}>Відхилити</button>
+                          <button className="btn btn-success btn-sm" onClick={() => deviceAction(d.id, 'approve', d.hostname)}>{t.devices.approve}</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => deviceAction(d.id, 'reject', d.hostname)}>{t.devices.reject}</button>
                         </>) : d.enrollment === 'revoked' ? null : <>
-                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'restart')} title="Перезавантажити">🔄</button>
-                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'lock')} title="Заблокувати">🔒</button>
-                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'logoff')} title="Вийти">🚪</button>
-                          {can.deviceAdmin && <button className="btn btn-danger btn-sm" onClick={() => deviceAction(d.id, 'revoke', d.hostname)} title="Відкликати ключ ПК">⛔</button>}
+                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'restart')} title={t.devices.restart}>🔄</button>
+                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'lock')} title={t.devices.lock}>🔒</button>
+                          <button className="btn btn-sm" onClick={() => sendCommand(d.id, 'logoff')} title={t.devices.logoff}>🚪</button>
+                          {can.deviceAdmin && <button className="btn btn-danger btn-sm" onClick={() => deviceAction(d.id, 'revoke', d.hostname)} title={t.devices.revoke}>⛔</button>}
                         </>}
                       </div>
                     </td>
@@ -598,11 +609,11 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     return (
       <>
         <div className="page-header">
-          <span className="page-title">Сесії</span>
+          <span className="page-title">{t.sessions.title}</span>
           <div className="filter-bar" style={{ marginBottom: 0 }}>
             {(['all', 'active', 'ended'] as const).map(f => (
               <button key={f} className={`filter-chip ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
-                {f === 'all' ? 'Всі' : f === 'active' ? 'Активні' : 'Завершені'}
+                {f === 'all' ? t.common.all : f === 'active' ? t.sessions.active : t.sessions.ended}
               </button>
             ))}
           </div>
@@ -611,15 +622,15 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <div className="table-wrapper">
           <table className="data-table">
             <thead><tr>
-              <th>ПК</th><th>Гравець</th><th>Тариф</th><th>Початок</th><th>Залишилось</th><th>Вартість</th><th>Статус</th><th></th>
+              <th>{t.sessions.col.pc}</th><th>{t.sessions.col.player}</th><th>{t.sessions.col.tariff}</th><th>{t.sessions.col.start}</th><th>{t.sessions.col.left}</th><th>{t.sessions.col.cost}</th><th>{t.sessions.col.status}</th><th></th>
             </tr></thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Немає сесій</td></tr>
+                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>{t.sessions.empty}</td></tr>
               ) : filtered.map(s => (
                 <tr key={s.id}>
                   <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.deviceHostname || '—'}</td>
-                  <td>{s.username || 'Гість'}</td>
+                  <td>{s.username || t.guest}</td>
                   <td>{sessionLabel(s)}</td>
                   <td>{fmtDateTime(s.startUtc)}</td>
                   <td style={{ color: s.status === 'active' ? 'var(--blue)' : 'var(--text-muted)' }}>
@@ -628,7 +639,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                   <td style={{ fontWeight: 600 }}>{sessionCost(s)}</td>
                   <td>
                     <span className={`badge ${s.status !== 'active' ? 'badge-amber' : s.pausedUtc ? 'badge-amber' : 'badge-green'}`}>
-                      {s.status !== 'active' ? 'Завершена' : s.pausedUtc ? t.session.paused : 'Активна'}
+                      {s.status !== 'active' ? t.sessions.statusEnded : s.pausedUtc ? t.session.paused : t.sessions.statusActive}
                     </span>
                     <div className="user-chip">{methodLabel(s.paymentMethod)}</div>
                   </td>
@@ -647,34 +658,34 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     return (
       <>
         <div className="page-header">
-          <span className="page-title">Гравці</span>
+          <span className="page-title">{t.players.title}</span>
           <span style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{users.length} зареєстровано</span>
-            <button className="btn btn-primary btn-sm" onClick={() => setPlayerModal(true)}>+ Новий гравець</button>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{fmtText(t.players.count, { n: users.length })}</span>
+            <button className="btn btn-primary btn-sm" onClick={() => setPlayerModal(true)}>{t.players.add}</button>
           </span>
         </div>
 
         {users.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">👥</div>
-            <div className="empty-state-title">Немає гравців</div>
-            <div className="empty-state-sub">Гравці з&apos;являться після реєстрації через клієнт</div>
+            <div className="empty-state-title">{t.players.empty}</div>
+            <div className="empty-state-sub">{t.players.emptyHint}</div>
           </div>
         ) : (
           <div className="table-wrapper">
             <table className="data-table">
               <thead><tr>
-                <th>Логін</th><th>Ім&apos;я</th><th>Баланс</th><th>Бонуси</th><th>Зареєстрований</th><th>Дії</th>
+                <th>{t.players.col.login}</th><th>{t.players.col.name}</th><th>{t.players.col.balance}</th><th>{t.players.col.bonus}</th><th>{t.players.col.created}</th><th>{t.players.col.actions}</th>
               </tr></thead>
               <tbody>
                 {users.map(u => (
                   <tr key={u.id}>
                     <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>@{u.username}</td>
                     <td>{u.displayName}</td>
-                    <td style={{ fontWeight: 600, color: u.balance > 0 ? 'var(--green)' : 'var(--text-muted)' }}>{fmt(u.balance)} ₴</td>
+                    <td style={{ fontWeight: 600, color: u.balance > 0 ? 'var(--green)' : 'var(--text-muted)' }}>{cash(u.balance)}</td>
                     <td style={{ color: u.bonusPoints > 0 ? 'var(--amber)' : 'var(--text-muted)' }}>
-                      {money(u.bonusPoints)} ₴ 🎁
-                      {(u.debt ?? 0) > 0 && <div><span className="badge badge-red">{t.player.debt}: {money(u.debt)} ₴</span></div>}
+                      {cash(u.bonusPoints)} 🎁
+                      {(u.debt ?? 0) > 0 && <div><span className="badge badge-red">{t.player.debt}: {cash(u.debt)}</span></div>}
                     </td>
                     <td>{fmtDate(u.createdUtc)}</td>
                     <td>
@@ -683,7 +694,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                         <button className="btn btn-success btn-sm" onClick={() => setPlayerCard({ user: u, form: 'topup' })}>
                           {t.player.topUp}
                         </button>
-                        <button className="btn btn-sm" onClick={() => setPlayerPin(u.id, u.username)} title="Пароль / PIN">🔑</button>
+                        <button className="btn btn-sm" onClick={() => setPlayerPin(u.id, u.username)} title={t.players.pin}>🔑</button>
                       </div>
                     </td>
                   </tr>
@@ -706,13 +717,13 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     return (
       <div className="modal-overlay" onClick={() => setZoneModal(false)}>
         <div className="modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-title">🗺️ Нова зона</div>
+          <div className="modal-title">{t.zones.newTitle}</div>
           <div className="form-group">
-            <label className="form-label">Назва</label>
-            <input className="form-input" placeholder="напр. VIP, Стандарт, Консолі..." value={name} onChange={e => setName(e.target.value)} />
+            <label className="form-label">{t.zones.name}</label>
+            <input className="form-input" placeholder={t.zones.namePlaceholder} value={name} onChange={e => setName(e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Колір</label>
+            <label className="form-label">{t.zones.color}</label>
             <div style={{ display: 'flex', gap: 8 }}>
               {colors.map(c => (
                 <div key={c} onClick={() => setColor(c)}
@@ -724,9 +735,9 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
             </div>
           </div>
           <div className="modal-actions">
-            <button className="btn" onClick={() => setZoneModal(false)}>Скасувати</button>
+            <button className="btn" onClick={() => setZoneModal(false)}>{t.cancel}</button>
             <button className="btn btn-primary" disabled={!name.trim()} onClick={() => { createZone(name.trim(), color); setZoneModal(false); }}>
-              Створити
+              {t.common.create}
             </button>
           </div>
         </div>
@@ -743,24 +754,24 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     return (
       <div className="modal-overlay" onClick={() => setPlayerModal(false)}>
         <div className="modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-title">👤 Новий гравець</div>
+          <div className="modal-title">{t.players.newTitle}</div>
           <div className="form-group">
-            <label className="form-label">Логін</label>
+            <label className="form-label">{t.players.login}</label>
             <input className="form-input" value={username} onChange={e => setUsername(e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Ім&apos;я</label>
+            <label className="form-label">{t.players.name}</label>
             <input className="form-input" value={displayName} onChange={e => setDisplayName(e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Пароль або PIN (мін. 4) — для входу на екрані блокування</label>
+            <label className="form-label">{t.players.password}</label>
             <input className="form-input" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} />
           </div>
           <div className="modal-actions">
-            <button className="btn" onClick={() => setPlayerModal(false)}>Скасувати</button>
+            <button className="btn" onClick={() => setPlayerModal(false)}>{t.cancel}</button>
             <button className="btn btn-primary" disabled={!username.trim() || password.length < 4}
               onClick={() => { createPlayer(username.trim(), displayName.trim(), password); setPlayerModal(false); }}>
-              Створити
+              {t.common.create}
             </button>
           </div>
         </div>
@@ -774,7 +785,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-muted)' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 48, marginBottom: 12, animation: 'pulse 1.5s infinite' }}>🎮</div>
-          <div style={{ fontSize: 14 }}>Завантаження...</div>
+          <div style={{ fontSize: 14 }}>{t.loading}</div>
         </div>
       </div>
     );
@@ -814,10 +825,10 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {demo?.enabled && (
           <div className="demo-banner">
             <strong>LIVE DEMO</strong> · {demo.resetIntervalHours
-              ? `Дані скидаються кожні ${demo.resetIntervalHours} год · Data resets every ${demo.resetIntervalHours} h`
-              : 'Дані скидаються при перезапуску · Data resets on restart'}
-            {demo.nextResetUtc && ` · наступне / next: ${fmtTime(demo.nextResetUtc)}`}
-            {' · ПК симульовані / PCs are simulated'}
+              ? fmtText(t.banner.resetsEvery, { hours: demo.resetIntervalHours })
+              : t.banner.resetsOnRestart}
+            {demo.nextResetUtc && ` · ${fmtText(t.banner.next, { time: fmtTime(demo.nextResetUtc) })}`}
+            {` · ${t.banner.simulated}`}
           </div>
         )}
         <div className="top-bar">
@@ -826,13 +837,9 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
           </span>
           <div className="top-bar-actions">
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              {onlineDevices.length}/{devices.length} ПК онлайн
+              {fmtText(t.top.pcsOnline, { online: onlineDevices.length, total: devices.length })}
             </span>
-            <span className="lang-switch" role="group" aria-label={t.lang.label}>
-              {(['uk', 'en'] as const).map(l => (
-                <button key={l} className={`btn btn-sm ${lang === l ? 'active' : ''}`} aria-pressed={lang === l} onClick={() => lang !== l && setLang(l)}>{t.lang[l]}</button>
-              ))}
-            </span>
+            <LangSwitch />
             <span className="user-chip" title={roleLabel(me.role)}>👤 {me.displayName} · {roleLabel(me.role)}</span>
             <button className="btn btn-sm" onClick={onLogout}>{t.nav.logout}</button>
           </div>

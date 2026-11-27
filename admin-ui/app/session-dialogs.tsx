@@ -89,7 +89,7 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
       : { deviceId: device.id, tariffId, userId: playerId || null, durationMinutes: duration, paymentMethod: prepaid ? method : null, useBonus, reason: free ? reason : null };
     const res = await postJson('/api/sessions', body);
     setBusy(false);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     toast(t.session.started, 'success');
     onDone();
   };
@@ -229,7 +229,7 @@ export function TransferDialog({ session, devices, players, toast, onClose, onDo
     setBusy(true);
     const res = await postJson(`/api/sessions/${session.id}/transfer`, { targetDeviceId: target, paymentMethod: quote && quote.surcharge > 0 ? method : null });
     setBusy(false);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     toast(fmt(t.transfer.done, { host: free.find(d => d.id === target)?.hostname ?? '' }), 'success');
     onDone();
   };
@@ -250,7 +250,7 @@ export function TransferDialog({ session, devices, players, toast, onClose, onDo
               <option value="">—</option>
               {free.map(d => (
                 <option key={d.id} value={d.id}>
-                  {d.hostname} · {d.zoneName ?? t.none}{d.zoneId === from?.zoneId ? ` (${t.transfer.sameZone})` : ''}{d.status !== 'online' ? ' · офлайн' : ''}
+                  {d.hostname} · {d.zoneName ?? t.none}{d.zoneId === from?.zoneId ? ` (${t.transfer.sameZone})` : ''}{d.status !== 'online' ? ` · ${t.devices.offlineShort}` : ''}
                 </option>
               ))}
             </select>
@@ -292,7 +292,7 @@ export function EndSessionDialog({ session, players, toast, onClose, onDone }: {
     setBusy(true);
     const res = await postJson(`/api/sessions/${session.id}/end`, session.isPrepaid ? {} : { paymentMethod: method, deskMethod, useBonus });
     setBusy(false);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
+    if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
     const ended = await res.json();
     if (ended.debtRecorded > 0) toast(fmt(t.session.endedDebt, { amount: money(ended.debtRecorded) }), 'info');
     else toast(ended.amountDue > 0 ? fmt(t.session.endedDue, { amount: money(ended.amountDue) }) : t.session.ended, ended.amountDue > 0 ? 'info' : 'success');

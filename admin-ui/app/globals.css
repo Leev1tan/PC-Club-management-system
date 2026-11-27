@@ -1084,6 +1084,12 @@ body::after {
   padding: 24px 16px;
 }
 
+.auth-lang {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
 .auth-card {
   min-width: 0;
   width: 100%;
@@ -1667,6 +1673,15 @@ body::after {
 .viz-variance li > span { font-family: var(--font-mono); font-weight: 600; margin-right: 6px; }
 @media (max-width: 900px) {
   .analytics-grid { grid-template-columns: minmax(0, 1fr); }
+}
+/* Phones: the icon sidebar has no room for section names; the top bar keeps the title, language and sign-out */
+@media (max-width: 768px) {
+  .sidebar-section { display: none; }
+}
+@media (max-width: 520px) {
+  .top-bar { padding: 10px 16px; gap: 8px; }
+  .top-bar-actions { gap: 6px; }
+  .top-bar-actions > span:first-child, .top-bar-actions .user-chip { display: none; }
 }
 @media (max-width: 520px) {
   .analytics .page-header { flex-wrap: wrap; gap: 10px; }

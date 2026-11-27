@@ -2,15 +2,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Me, api, errorText, getJson, postJson } from './api';
 import { roleLabel } from './auth';
-import { fmt, t } from './i18n';
+import { currency, fmt, locale, t } from './i18n';
 import { AuditVerify } from './pos';
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
 
 const fmtDateTime = (iso: string) => {
   const d = new Date(iso);
-  return `${d.toLocaleDateString('uk-UA')} ${d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+  return `${d.toLocaleDateString(locale)} ${d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
 };
+const failed = async (res: Response) => `${t.common.errorPrefix}: ${await errorText(res)}`;
 
 // ===== Audit log (Owner, Manager; read-only) =====
 type AuditEntry = {
@@ -19,9 +20,9 @@ type AuditEntry = {
   hash?: string | null; prevHash?: string | null;
 };
 
-const auditFilters: { prefix: string; label: string }[] = [
-  { prefix: '', label: 'Всі / All' },
-  { prefix: 'device.unlock_without_session', label: 'Розблок. без оплати / Unlock unpaid' },
+const auditFilters = (): { prefix: string; label: string }[] => [
+  { prefix: '', label: t.common.all },
+  { prefix: 'device.unlock_without_session', label: t.auditPage.unlockUnpaid },
   { prefix: 'device.emergency_unlock', label: t.audit.emergency },
   { prefix: 'session.free_time', label: t.audit.free },
   { prefix: 'shift.', label: t.audit.shifts },
@@ -29,20 +30,20 @@ const auditFilters: { prefix: string; label: string }[] = [
   { prefix: 'stock.', label: '📦 ' + t.nav.stock },
   { prefix: 'product.', label: '🛒 ' + t.stock.name },
   { prefix: 'player.debt', label: t.audit.debt },
-  { prefix: 'player.', label: 'Баланси / Balances' },
-  { prefix: 'session.', label: 'Сесії / Sessions' },
-  { prefix: 'tariff.', label: 'Тарифи / Tariffs' },
+  { prefix: 'player.', label: t.auditPage.balances },
+  { prefix: 'session.', label: t.auditPage.sessions },
+  { prefix: 'tariff.', label: t.auditPage.tariffs },
   { prefix: 'package.', label: t.audit.packages },
   { prefix: 'billing.', label: t.audit.billing },
-  { prefix: 'auth.', label: 'Входи / Logins' },
-  { prefix: 'staff.', label: 'Персонал / Staff' },
-  { prefix: 'device.', label: 'ПК / PCs' },
-  { prefix: 'settings.', label: 'Налаштування / Settings' },
+  { prefix: 'auth.', label: t.auditPage.logins },
+  { prefix: 'staff.', label: t.auditPage.staff },
+  { prefix: 'device.', label: t.auditPage.pcs },
+  { prefix: 'settings.', label: t.auditPage.settings },
 ];
 
 const alertActions = new Set(['device.unlock_without_session', 'auth.login_failed', 'player.balance_adjusted', 'player.bonus_adjusted',
   'player.refund', 'settings.staff_pin_removed', 'device.emergency_unlock', 'session.free_time', 'stock.corrected', 'sale.refunded',
-  'shift.cash_payout', 'player.debt_written_off', 'product.price_changed']);
+  'shift.cash_payout', 'player.debt_written_off', 'product.price_changed', 'settings.currency_changed']);
 
 /** Owner: recomputes the hash chain of the whole audit log on the server. */
 function VerifyChain() {
@@ -94,35 +95,38 @@ export function AuditTab({ owner = false }: { owner?: boolean }) {
   return (
     <>
       <div className="page-header">
-        <span className="page-title">Журнал дій / Audit log</span>
-        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Лише читання · записи не змінюються й не видаляються</span>
+        <span className="page-title">{t.auditPage.title}</span>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t.auditPage.readOnly}</span>
       </div>
       {owner && <VerifyChain />}
       <div className="filter-bar">
-        {auditFilters.map(f => (
+        {auditFilters().map(f => (
           <button key={f.prefix} className={`filter-chip ${filter === f.prefix ? 'active' : ''}`} onClick={() => setFilter(f.prefix)}>{f.label}</button>
         ))}
-        <input className="form-input" style={{ width: 180, padding: '4px 10px' }} placeholder="Логін / user name"
+        <input className="form-input" style={{ width: 180, padding: '4px 10px' }} placeholder={t.auditPage.actor}
           value={actor} onChange={e => setActor(e.target.value)} />
-        <button className="btn btn-sm" onClick={() => load()}>↻</button>
+        <button className="btn btn-sm" onClick={() => load()} title={t.refresh}>↻</button>
       </div>
       <div className="table-wrapper">
         <table className="data-table">
-          <thead><tr><th>Час</th><th>Хто</th><th>Дія</th><th>Опис</th><th>IP</th></tr></thead>
+          <thead><tr>
+            <th>{t.auditPage.col.time}</th><th>{t.auditPage.col.who}</th><th>{t.auditPage.col.action}</th>
+            <th>{t.auditPage.col.description}</th><th>{t.auditPage.col.ip}</th>
+          </tr></thead>
           <tbody>
             {entries.length === 0 ? (
-              <tr><td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>{loading ? '...' : 'Немає записів'}</td></tr>
+              <tr><td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>{loading ? '...' : t.auditPage.empty}</td></tr>
             ) : entries.map(e => (
               <tr key={e.id}>
                 <td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(e.createdUtc)}</td>
-                <td>{e.actorUsername ? <>{e.actorUsername}<br /><span className="user-chip">{e.actorRole}</span></> : <span className="user-chip">—</span>}</td>
+                <td>{e.actorUsername ? <>{e.actorUsername}<br /><span className="user-chip">{roleLabel(e.actorRole ?? '')}</span></> : <span className="user-chip">{t.none}</span>}</td>
                 <td><span className={`badge ${alertActions.has(e.action) ? 'badge-red' : 'badge-blue'}`}>{e.action}</span></td>
                 <td>
                   {e.summary}
                   {e.detailsJson && <div className="audit-details">{e.detailsJson}</div>}
                   {e.hash && <div className="audit-hash" title={`${t.audit.hash}: ${e.hash}\nprev: ${e.prevHash ?? ''}`}>#{e.id} · {e.hash.slice(0, 12)}…</div>}
                 </td>
-                <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{e.ip || '—'}</td>
+                <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{e.ip || t.none}</td>
               </tr>
             ))}
           </tbody>
@@ -130,7 +134,7 @@ export function AuditTab({ owner = false }: { owner?: boolean }) {
       </div>
       {more && (
         <div style={{ textAlign: 'center', marginTop: 12 }}>
-          <button className="btn" disabled={loading} onClick={() => load(entries[entries.length - 1]?.id)}>Ще / More</button>
+          <button className="btn" disabled={loading} onClick={() => load(entries[entries.length - 1]?.id)}>{t.more}</button>
         </div>
       )}
     </>
@@ -150,47 +154,50 @@ export function StaffTab({ me, toast }: { me: Me; toast: ToastFn }) {
 
   const create = async () => {
     const res = await postJson('/api/staff', form);
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast(`Акаунт ${form.username} створено ✓`, 'success');
+    if (!res.ok) { toast(await failed(res), 'error'); return; }
+    toast(fmt(t.staff.created, { username: form.username }), 'success');
     setForm({ username: '', displayName: '', password: '', role: 'Cashier' });
     load();
   };
 
   const update = async (s: Staff, change: Partial<Pick<Staff, 'role' | 'isActive'>>) => {
     const res = await postJson(`/api/staff/${s.id}`, change, 'PUT');
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast('Збережено ✓ (активні входи цього акаунта завершено)', 'success');
+    if (!res.ok) { toast(await failed(res), 'error'); return; }
+    toast(t.staff.saved, 'success');
     load();
   };
 
   const resetPassword = async (s: Staff) => {
-    const password = window.prompt(`Новий пароль для ${s.username} (мін. 8 символів):`);
+    const password = window.prompt(fmt(t.staff.resetPrompt, { username: s.username }));
     if (!password) return;
     const res = await postJson(`/api/staff/${s.id}/password`, { password });
-    toast(res.ok ? 'Пароль змінено ✓' : `Помилка: ${await errorText(res)}`, res.ok ? 'success' : 'error');
+    toast(res.ok ? t.staff.passwordChanged : await failed(res), res.ok ? 'success' : 'error');
   };
 
   return (
     <>
       <div className="section-card">
-        <div className="section-card-header"><span className="section-card-title">👤 Новий акаунт персоналу / New staff account</span></div>
+        <div className="section-card-header"><span className="section-card-title">{t.staff.newTitle}</span></div>
         <form className="staff-form" onSubmit={e => { e.preventDefault(); create(); }}>
-          <input className="form-input" placeholder="Логін / user name" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
-          <input className="form-input" placeholder="Ім'я / display name" value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} />
-          <input className="form-input" type="password" autoComplete="new-password" placeholder="Пароль (мін. 8)" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+          <input className="form-input" placeholder={t.staff.username} value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
+          <input className="form-input" placeholder={t.staff.displayName} value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} />
+          <input className="form-input" type="password" autoComplete="new-password" placeholder={t.staff.password} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
           <select className="form-select" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
             {roles.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
           </select>
-          <button className="btn btn-primary" type="submit" disabled={!form.username || form.password.length < 8}>Створити</button>
+          <button className="btn btn-primary" type="submit" disabled={!form.username || form.password.length < 8}>{t.common.create}</button>
         </form>
       </div>
       <div className="table-wrapper">
         <table className="data-table">
-          <thead><tr><th>Логін</th><th>Ім&apos;я</th><th>Роль</th><th>Статус</th><th>Останній вхід</th><th>Дії</th></tr></thead>
+          <thead><tr>
+            <th>{t.staff.col.login}</th><th>{t.staff.col.name}</th><th>{t.staff.col.role}</th><th>{t.staff.col.status}</th>
+            <th>{t.staff.col.lastLogin}</th><th>{t.staff.col.actions}</th>
+          </tr></thead>
           <tbody>
             {staff.map(s => (
               <tr key={s.id}>
-                <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.username}{s.id === me.id && ' (ви)'}</td>
+                <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.username}{s.id === me.id && t.staff.you}</td>
                 <td>{s.displayName}</td>
                 <td>
                   <select className="form-select" style={{ width: 170, padding: '4px 8px', fontSize: 12 }} value={s.role}
@@ -198,12 +205,12 @@ export function StaffTab({ me, toast }: { me: Me; toast: ToastFn }) {
                     {roles.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                   </select>
                 </td>
-                <td><span className={`badge ${s.isActive ? 'badge-green' : 'badge-red'}`}>{s.isActive ? 'Активний' : 'Вимкнено'}</span></td>
-                <td>{s.lastLoginUtc ? fmtDateTime(s.lastLoginUtc) : '—'}</td>
+                <td><span className={`badge ${s.isActive ? 'badge-green' : 'badge-red'}`}>{s.isActive ? t.staff.active : t.staff.disabled}</span></td>
+                <td>{s.lastLoginUtc ? fmtDateTime(s.lastLoginUtc) : t.none}</td>
                 <td>
                   <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn btn-sm" onClick={() => update(s, { isActive: !s.isActive })}>{s.isActive ? 'Вимкнути' : 'Увімкнути'}</button>
-                    <button className="btn btn-sm" onClick={() => resetPassword(s)}>Пароль</button>
+                    <button className="btn btn-sm" onClick={() => update(s, { isActive: !s.isActive })}>{s.isActive ? t.staff.disable : t.staff.enable}</button>
+                    <button className="btn btn-sm" onClick={() => resetPassword(s)}>{t.staff.passwordButton}</button>
                   </div>
                 </td>
               </tr>
@@ -216,9 +223,43 @@ export function StaffTab({ me, toast }: { me: Me; toast: ToastFn }) {
 }
 
 // ===== Club settings (Owner) =====
-type Settings = { staffPinConfigured: boolean; staffPinUpdatedUtc: string | null; enrollmentTokenConfigured: boolean; allowPendingRegistration: boolean };
+type CurrencyView = { code: string; symbol: string; nameUk: string; nameEn: string };
+type Settings = {
+  staffPinConfigured: boolean; staffPinUpdatedUtc: string | null; enrollmentTokenConfigured: boolean; allowPendingRegistration: boolean;
+  currency?: CurrencyView | null; currencies?: CurrencyView[];
+};
 
-export function SettingsTab({ toast }: { toast: ToastFn }) {
+/** Club currency (display only): UAH, EUR, USD, PLN. The amounts in the database are never converted. */
+function CurrencySettings({ settings, toast, onCurrency }: { settings: Settings | null; toast: ToastFn; onCurrency: (code: string) => void }) {
+  const [code, setCode] = useState(settings?.currency?.code ?? currency());
+  useEffect(() => { if (settings?.currency) setCode(settings.currency.code); }, [settings?.currency]);
+  const list = settings?.currencies ?? [];
+  const name = (c: CurrencyView) => `${t.settings.currencyNames[c.code] ?? c.code} (${c.symbol}, ${c.code})`;
+
+  const save = async () => {
+    const res = await postJson('/api/settings/currency', { code }, 'PUT');
+    if (!res.ok) { toast(await failed(res), 'error'); return; }
+    const saved: CurrencyView = await res.json();
+    toast(fmt(t.settings.currencySaved, { name: name(saved) }), 'success');
+    onCurrency(saved.code);
+  };
+
+  return (
+    <div className="section-card">
+      <div className="section-card-header"><span className="section-card-title">{t.settings.currencyTitle}</span></div>
+      <p className="auth-sub">{t.settings.currencyHint}</p>
+      <form className="staff-form" onSubmit={e => { e.preventDefault(); save(); }}>
+        <label className="form-label" htmlFor="club-currency" style={{ alignSelf: 'center', margin: 0 }}>{t.settings.currencyLabel}</label>
+        <select id="club-currency" className="form-select" value={code} onChange={e => setCode(e.target.value)}>
+          {list.map(c => <option key={c.code} value={c.code}>{name(c)}</option>)}
+        </select>
+        <button className="btn btn-primary" type="submit" disabled={!list.length || code === (settings?.currency?.code ?? currency())}>{t.settings.currencySave}</button>
+      </form>
+    </div>
+  );
+}
+
+export function SettingsTab({ toast, onCurrency }: { toast: ToastFn; onCurrency: (code: string) => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [pin, setPin] = useState('');
   const [pin2, setPin2] = useState('');
@@ -229,59 +270,62 @@ export function SettingsTab({ toast }: { toast: ToastFn }) {
   useEffect(() => { load(); }, [load]);
 
   const savePin = async () => {
-    if (pin !== pin2) { toast('PIN не збігається', 'error'); return; }
+    if (pin !== pin2) { toast(t.settings.pinMismatch, 'error'); return; }
     const res = await postJson('/api/settings/staff-pin', { pin }, 'PUT');
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast('PIN персоналу збережено ✓ ПК отримають його за кілька секунд', 'success');
+    if (!res.ok) { toast(await failed(res), 'error'); return; }
+    toast(t.settings.pinSaved, 'success');
     setPin(''); setPin2('');
     load();
   };
 
   const removePin = async () => {
-    if (!window.confirm('Видалити PIN? Аварійне розблокування на ПК стане неможливим.')) return;
+    if (!window.confirm(t.settings.removeConfirm)) return;
     const res = await api('/api/settings/staff-pin', { method: 'DELETE' });
-    toast(res.ok ? 'PIN видалено' : `Помилка: ${await errorText(res)}`, res.ok ? 'info' : 'error');
+    toast(res.ok ? t.settings.pinRemoved : await failed(res), res.ok ? 'info' : 'error');
     load();
   };
 
   const changePassword = async () => {
     const res = await postJson('/api/auth/password', { currentPassword: current, newPassword: next });
-    toast(res.ok ? 'Пароль змінено ✓' : `Помилка: ${await errorText(res)}`, res.ok ? 'success' : 'error');
+    toast(res.ok ? t.settings.passwordChanged : await failed(res), res.ok ? 'success' : 'error');
     if (res.ok) { setCurrent(''); setNext(''); }
   };
 
   return (
     <>
+      <CurrencySettings settings={settings} toast={toast} onCurrency={code => { onCurrency(code); load(); }} />
+
       <div className="section-card">
-        <div className="section-card-header"><span className="section-card-title">🔑 PIN персоналу для екрана блокування / Lock-screen staff PIN</span></div>
+        <div className="section-card-header"><span className="section-card-title">{t.settings.pinTitle}</span></div>
         <p className="auth-sub">
-          Ctrl+Shift+U на ПК + цей PIN розблоковує ПК аварійно, також коли сервер або агент не працює.
-          Сервер зберігає лише хеш (PBKDF2); ПК перевіряють PIN локально. Мінімум 8 символів, краще цифри й літери.
-          Стан: {settings ? (settings.staffPinConfigured ? `задано ${settings.staffPinUpdatedUtc ? fmtDateTime(settings.staffPinUpdatedUtc) : ''}` : 'НЕ задано — аварійного розблокування немає') : '...'}
+          {t.settings.pinHint}{' '}
+          {t.settings.pinState}: {settings
+            ? (settings.staffPinConfigured ? fmt(t.settings.pinSet, { time: settings.staffPinUpdatedUtc ? fmtDateTime(settings.staffPinUpdatedUtc) : '' }) : t.settings.pinNotSet)
+            : '...'}
         </p>
         <form className="staff-form" onSubmit={e => { e.preventDefault(); savePin(); }}>
-          <input className="form-input" type="password" autoComplete="new-password" placeholder="Новий PIN" value={pin} onChange={e => setPin(e.target.value)} />
-          <input className="form-input" type="password" autoComplete="new-password" placeholder="Повторіть PIN" value={pin2} onChange={e => setPin2(e.target.value)} />
-          <button className="btn btn-primary" type="submit" disabled={pin.length < 8}>Зберегти PIN</button>
-          {settings?.staffPinConfigured && <button className="btn btn-danger" type="button" onClick={removePin}>Видалити PIN</button>}
+          <input className="form-input" type="password" autoComplete="new-password" placeholder={t.settings.newPin} value={pin} onChange={e => setPin(e.target.value)} />
+          <input className="form-input" type="password" autoComplete="new-password" placeholder={t.settings.repeatPin} value={pin2} onChange={e => setPin2(e.target.value)} />
+          <button className="btn btn-primary" type="submit" disabled={pin.length < 8}>{t.settings.savePin}</button>
+          {settings?.staffPinConfigured && <button className="btn btn-danger" type="button" onClick={removePin}>{t.settings.removePin}</button>}
         </form>
       </div>
 
       <div className="section-card">
-        <div className="section-card-header"><span className="section-card-title">🖥️ Підключення ПК / PC enrollment</span></div>
+        <div className="section-card-header"><span className="section-card-title">{t.settings.enrollTitle}</span></div>
         <p className="auth-sub">
-          Токен підключення: {settings?.enrollmentTokenConfigured ? 'задано на сервері (CMS_ENROLLMENT_TOKEN)' : 'не задано'}.
-          {' '}ПК без токена: {settings?.allowPendingRegistration ? 'чекають на схвалення у вкладці «Пристрої»' : 'відхиляються'}.
-          {' '}Клієнт: ClubClientSetup.exe -ServerUrl &quot;http://сервер:5081&quot; -EnrollmentToken &quot;…&quot;
+          {settings?.enrollmentTokenConfigured ? t.settings.tokenSet : t.settings.tokenNotSet}
+          {' '}{settings?.allowPendingRegistration ? t.settings.pendingWait : t.settings.pendingRefused}
+          {' '}{t.settings.clientHint}
         </p>
       </div>
 
       <div className="section-card">
-        <div className="section-card-header"><span className="section-card-title">🔒 Мій пароль / My password</span></div>
+        <div className="section-card-header"><span className="section-card-title">{t.settings.passwordTitle}</span></div>
         <form className="staff-form" onSubmit={e => { e.preventDefault(); changePassword(); }}>
-          <input className="form-input" type="password" autoComplete="current-password" placeholder="Поточний пароль" value={current} onChange={e => setCurrent(e.target.value)} />
-          <input className="form-input" type="password" autoComplete="new-password" placeholder="Новий пароль (мін. 8)" value={next} onChange={e => setNext(e.target.value)} />
-          <button className="btn btn-primary" type="submit" disabled={!current || next.length < 8}>Змінити</button>
+          <input className="form-input" type="password" autoComplete="current-password" placeholder={t.settings.currentPassword} value={current} onChange={e => setCurrent(e.target.value)} />
+          <input className="form-input" type="password" autoComplete="new-password" placeholder={t.settings.newPassword} value={next} onChange={e => setNext(e.target.value)} />
+          <button className="btn btn-primary" type="submit" disabled={!current || next.length < 8}>{t.settings.change}</button>
         </form>
       </div>
     </>
