@@ -81,6 +81,19 @@ public static class AuditActions
     public const string ShiftClosed = "shift.closed";
     public const string ShiftCashPayout = "shift.cash_payout";
 
+    public const string ReservationCreated = "reservation.created";
+    public const string ReservationUpdated = "reservation.updated";
+    public const string ReservationConfirmed = "reservation.confirmed";
+    public const string ReservationDeclined = "reservation.declined";
+    public const string ReservationCancelled = "reservation.cancelled";
+    public const string ReservationCheckedIn = "reservation.checked_in";
+    /// <summary>No check-in within the grace period: cancelled automatically, the deposit kept or returned.</summary>
+    public const string ReservationNoShow = "reservation.no_show";
+    public const string ReservationExpired = "reservation.request_expired";
+    /// <summary>A manager or the owner started a session on a PC held for a reservation of someone else.</summary>
+    public const string ReservationHoldOverridden = "reservation.hold_overridden";
+    public const string ReservationSettingsChanged = "reservation.settings_changed";
+
     public const string GameCreated = "game.created";
     public const string GameUpdated = "game.updated";
     public const string GameDeleted = "game.deleted";

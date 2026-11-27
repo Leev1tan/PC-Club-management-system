@@ -9,6 +9,7 @@ namespace Cms.Server.Shifts;
 ///  - PC time (sessions and packages) by how it was paid: cash, card, balance, bonus, debt;
 ///  - bar sales and refunds by method, receipts; top-ups and balance refunds; bonus issued and spent;
 ///    debt recorded, paid and written off; cash payouts; balance corrections; other rows;
+///  - reservation deposits held, released and kept (a kept deposit is PC time revenue paid from the balance);
 ///  - cash and card at the desk (in, out, net). Every desk amount is in exactly one section, so the
 ///    sections add up to the desk money of the rows (<see cref="Reconciled"/>).
 /// </summary>
@@ -45,6 +46,12 @@ public sealed class LedgerTotals
     public decimal CashOut { get; private set; }
     public decimal CardIn { get; private set; }
     public decimal CardOut { get; private set; }
+    /// <summary>Reservation deposits taken off the balances and held (not revenue).</summary>
+    public decimal DepositsHeld { get; private set; }
+    /// <summary>Held deposits back on the balances (applied at a check-in, or returned).</summary>
+    public decimal DepositsReleased { get; private set; }
+    /// <summary>Deposits kept for no-shows: PC time revenue paid from the balance (in Time and TimeTotal).</summary>
+    public decimal DepositsKept { get; private set; }
     public int Rows { get; private set; }
     public long? FirstId { get; private set; }
     public long? LastId { get; private set; }
@@ -142,6 +149,18 @@ public sealed class LedgerTotals
                 break;
             case LedgerTypes.DebtWriteOff:
                 DebtWrittenOff -= r.DebtDelta;
+                break;
+            case LedgerTypes.DepositHold:
+                DepositsHeld += r.Amount;
+                break;
+            case LedgerTypes.DepositRelease:
+                DepositsReleased += r.Amount;
+                break;
+            case LedgerTypes.DepositKept:
+                // The reserved PC time that nobody used: revenue, paid from the balance when the deposit was held
+                DepositsKept += r.Amount;
+                TimeTotal += r.Amount;
+                Time = Time.Add(PaymentMethods.Balance, r.Amount);
                 break;
             case LedgerTypes.CashPayout:
                 _payouts.Add(new ZPayout(r.Id, r.CreatedUtc, -r.DeskAmount, r.Reason, r.ActorUsername));

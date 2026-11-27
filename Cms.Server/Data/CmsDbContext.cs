@@ -29,6 +29,7 @@ public class CmsDbContext : DbContext
     public DbSet<GameEntity> Games => Set<GameEntity>();
     public DbSet<GameZoneEntity> GameZones => Set<GameZoneEntity>();
     public DbSet<GamePlayEntity> GamePlays => Set<GamePlayEntity>();
+    public DbSet<ReservationEntity> Reservations => Set<ReservationEntity>();
 
     /// <summary>
     /// Cash and card rows of the ledger need an open shift (Shifts:RequireOpenShift, default true).
@@ -122,8 +123,13 @@ public class CmsDbContext : DbContext
             }
         }
 
-        // Every change of a session gets a new stamp; EF checks the old one in the UPDATE
+        // Every change of a session or a reservation gets a new stamp; EF checks the old one in the UPDATE
         foreach (var entry in ChangeTracker.Entries<SessionEntity>())
+        {
+            if (entry.State == EntityState.Modified)
+                entry.Entity.ConcurrencyStamp = Guid.NewGuid();
+        }
+        foreach (var entry in ChangeTracker.Entries<ReservationEntity>())
         {
             if (entry.State == EntityState.Modified)
                 entry.Entity.ConcurrencyStamp = Guid.NewGuid();
@@ -217,6 +223,31 @@ public class CmsDbContext : DbContext
             // Plain ids, no foreign keys: the ledger never changes, and the demo reset truncates it alone
             entity.HasIndex(e => e.ShiftId);
             entity.HasIndex(e => e.SaleId);
+            entity.HasIndex(e => e.ReservationId);
+        });
+
+        modelBuilder.Entity<ReservationEntity>(entity =>
+        {
+            entity.ToTable("Reservations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Status).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Source).HasMaxLength(8).IsRequired();
+            entity.Property(e => e.GuestName).HasMaxLength(ReservationLimits.NameLength);
+            entity.Property(e => e.Phone).HasMaxLength(ReservationLimits.PhoneLength);
+            entity.Property(e => e.Deposit).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.DepositStatus).HasMaxLength(12).IsRequired();
+            entity.Property(e => e.Note).HasMaxLength(ReservationLimits.NoteLength);
+            entity.Property(e => e.CreatedByUsername).HasMaxLength(64);
+            entity.Property(e => e.CancelReason).HasMaxLength(200);
+            entity.HasOne<DeviceEntity>().WithMany().HasForeignKey(e => e.DeviceId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<ZoneEntity>().WithMany().HasForeignKey(e => e.ZoneId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<UserEntity>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.SetNull);
+            // Club day of the start (DateOnly.DayNumber): SQLite cannot compare DateTimeOffset in SQL
+            entity.HasIndex(e => e.StartDay);
+            entity.HasIndex(e => new { e.Status, e.StartDay });
+            entity.HasIndex(e => e.Phone);
+            entity.Property(e => e.ConcurrencyStamp).IsConcurrencyToken();
         });
 
         modelBuilder.Entity<ShiftEntity>(entity =>
@@ -618,6 +649,85 @@ public class LedgerEntryEntity
     public decimal DebtDelta { get; set; }
     /// <summary>Debt right after the row (null in rows of versions before the debt).</summary>
     public decimal? DebtAfter { get; set; }
+    /// <summary>Reservation of a deposit row (deposit_hold, deposit_release, deposit_kept).</summary>
+    public long? ReservationId { get; set; }
+}
+
+public static class ReservationStatuses
+{
+    /// <summary>A request of the public booking page: staff confirm or decline it; it holds no PC.</summary>
+    public const string Requested = "requested";
+    public const string Confirmed = "confirmed";
+    public const string CheckedIn = "checked_in";
+    public const string Cancelled = "cancelled";
+    public const string Declined = "declined";
+    public const string NoShow = "no_show";
+    /// <summary>A request that nobody confirmed before its start.</summary>
+    public const string Expired = "expired";
+
+    /// <summary>These occupy their PC (or a PC of their zone) for their time.</summary>
+    public static readonly string[] Occupying = { Confirmed, CheckedIn };
+}
+
+public static class DepositStatuses
+{
+    public const string None = "none";
+    /// <summary>Taken off the real balance and held (ledger deposit_hold).</summary>
+    public const string Held = "held";
+    /// <summary>Back on the balance at check-in, so the session is paid from it (deposit_release).</summary>
+    public const string Applied = "applied";
+    /// <summary>Back on the balance: cancelled by staff, or a no-show with the setting "return" (deposit_release).</summary>
+    public const string Returned = "returned";
+    /// <summary>Kept by the club for a no-show (deposit_kept, revenue).</summary>
+    public const string Kept = "kept";
+}
+
+public static class ReservationLimits
+{
+    public const int NameLength = 60;
+    public const int PhoneLength = 20;
+    public const int NoteLength = 200;
+}
+
+/// <summary>
+/// A reservation (spec area 7): one PC, or any PC of a zone (a PC is picked when the hold begins and at
+/// check-in), a start and a duration, for a registered player or a name (walk-in, public request). Confirmed
+/// reservations never overlap on a PC and never need more PCs of a zone than the zone has
+/// (Reservations/ReservationPlan). Personal data (GuestName, Phone) is erased some days after the slot.
+/// </summary>
+public class ReservationEntity
+{
+    public long Id { get; set; }
+    public string Status { get; set; } = ReservationStatuses.Confirmed;
+    /// <summary>staff (admin UI) or public (booking page).</summary>
+    public string Source { get; set; } = "staff";
+    /// <summary>The PC of the reservation; null = any PC of the zone.</summary>
+    public Guid? DeviceId { get; set; }
+    public Guid? ZoneId { get; set; }
+    /// <summary>Any-PC reservation: the PC held for it (from the hold) and used at check-in.</summary>
+    public Guid? AssignedDeviceId { get; set; }
+    public DateTimeOffset StartUtc { get; set; }
+    public DateTimeOffset EndUtc { get; set; }
+    public int DurationMinutes { get; set; }
+    /// <summary>Club-local date of the start as DateOnly.DayNumber (queries by day work on SQLite too).</summary>
+    public int StartDay { get; set; }
+    public Guid? UserId { get; set; }
+    /// <summary>Walk-in name or the name of a public request (personal data; erased later).</summary>
+    public string? GuestName { get; set; }
+    /// <summary>Phone of a public request (personal data; erased later).</summary>
+    public string? Phone { get; set; }
+    public decimal Deposit { get; set; }
+    public string DepositStatus { get; set; } = DepositStatuses.None;
+    public Guid? SessionId { get; set; }
+    public string? Note { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; }
+    public DateTimeOffset UpdatedUtc { get; set; }
+    public Guid? CreatedById { get; set; }
+    public string? CreatedByUsername { get; set; }
+    public string? CancelReason { get; set; }
+    /// <summary>When the name and the phone were erased (the row stays for the statistics).</summary>
+    public DateTimeOffset? ErasedUtc { get; set; }
+    public Guid ConcurrencyStamp { get; set; } = Guid.NewGuid();
 }
 
 public static class ShiftStatuses
@@ -897,6 +1007,8 @@ public static class ClubSettingKeys
     public const string Currency = "club.currency";
     /// <summary>Language of the lock screens on the club PCs: uk (default) or en (Devices/ClubLanguage).</summary>
     public const string Language = "club.language";
+    /// <summary>Reservations, the public booking page and bar orders: JSON (Reservations/ReservationSettings).</summary>
+    public const string Reservations = "reservations.settings";
 }
 
 /// <summary>Shifts:RequireOpenShift (default true): cash and card payments need an open shift.</summary>

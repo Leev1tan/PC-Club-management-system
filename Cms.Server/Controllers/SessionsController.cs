@@ -32,7 +32,8 @@ public class SessionsController : ControllerBase
 
     private SessionService Service => new(_db, _devices, _clock, _audit, StaffActor.From(HttpContext?.User))
     {
-        CanGiveFreeTime = HttpContext?.User is { } u && (u.IsInRole(StaffRoles.Owner) || u.IsInRole(StaffRoles.Manager))
+        CanGiveFreeTime = HttpContext?.User is { } u && (u.IsInRole(StaffRoles.Owner) || u.IsInRole(StaffRoles.Manager)),
+        CanOverrideReservation = HttpContext?.User is { } m && (m.IsInRole(StaffRoles.Owner) || m.IsInRole(StaffRoles.Manager))
     };
 
     /// <summary>
@@ -204,8 +205,10 @@ public class SessionsController : ControllerBase
 /// UseBonus: spend the bonus balance first (PC time only).
 /// </summary>
 /// LimitToBalance: an open-ended session of a player that ends when the balances are used up (player login).
+/// OverrideReservation: start on a PC held for a reservation of someone else (Owner, Manager; audited).
 public record StartSessionRequest(Guid DeviceId, Guid? TariffId, Guid? UserId, int? DurationMinutes,
-    Guid? PackageId = null, string? PaymentMethod = null, bool UseBonus = true, string? Reason = null, bool LimitToBalance = false);
+    Guid? PackageId = null, string? PaymentMethod = null, bool UseBonus = true, string? Reason = null, bool LimitToBalance = false,
+    bool OverrideReservation = false);
 /// <summary>PaymentMethod as for the start; free needs Owner or Manager and a Reason.</summary>
 public record ExtendSessionRequest(int Minutes, string? PaymentMethod = null, bool UseBonus = true, string? Reason = null);
 /// <summary>
@@ -214,7 +217,7 @@ public record ExtendSessionRequest(int Minutes, string? PaymentMethod = null, bo
 /// DeskMethod debt on the player account) or cash | card (all at the desk; guests always).
 /// </summary>
 public record EndSessionRequest(string? PaymentMethod = null, bool UseBonus = true, string? DeskMethod = null);
-public record TransferSessionRequest(Guid TargetDeviceId, string? PaymentMethod = null, bool UseBonus = true);
+public record TransferSessionRequest(Guid TargetDeviceId, string? PaymentMethod = null, bool UseBonus = true, bool OverrideReservation = false);
 
 public record SessionDetailView(
     Guid Id, Guid DeviceId, string? DeviceHostname,

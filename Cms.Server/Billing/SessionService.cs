@@ -2,6 +2,7 @@ using Cms.Server.Auth;
 using Cms.Server.Controllers;
 using Cms.Server.Data;
 using Cms.Server.Repositories;
+using Cms.Server.Reservations;
 using Cms.Shared;
 using Microsoft.EntityFrameworkCore;
 
@@ -49,6 +50,31 @@ public sealed class SessionService
     /// <summary>Owner or Manager: may give free PC time (payment method free, with a reason).</summary>
     public bool CanGiveFreeTime { get; init; }
 
+    /// <summary>Owner or Manager: may start a session on a PC held for a reservation of someone else (OverrideReservation, audited).</summary>
+    public bool CanOverrideReservation { get; init; }
+
+    /// <summary>Set by the check-in of this reservation: its own hold does not block the start.</summary>
+    public long? CheckInReservationId { get; init; }
+
+    /// <summary>
+    /// A PC held for a reservation (from the hold until the grace period ends) takes no other session: the check-in
+    /// of the reservation starts it, or the owner or a manager overrides the hold (the caller audits it).
+    /// </summary>
+    private async Task<BillingResult<ReservationHold?>> CheckHoldAsync(Guid deviceId, bool overrideRequested)
+    {
+        if (CheckInReservationId.HasValue) return BillingResult<ReservationHold?>.Success(null);
+        var hold = await ReservationHolds.ActiveAsync(_db, deviceId, _clock);
+        if (hold == null) return BillingResult<ReservationHold?>.Success(null);
+        if (!overrideRequested) return ReservationErrors.PcReserved.With(hold.Name, hold.StartLocal, hold.Id);
+        if (!CanOverrideReservation) return ReservationErrors.OverrideNeedsManager;
+        return BillingResult<ReservationHold?>.Success(hold);
+    }
+
+    private Task AuditOverrideAsync(ReservationHold hold, string hostname, Guid sessionId, string? player) =>
+        _audit?.WriteAsync(AuditActions.ReservationHoldOverridden, "reservation", hold.Id,
+            $"Hold of reservation #{hold.Id} ({hold.StartLocal}) overridden on {hostname}: a session for {(player != null ? "@" + player : "a guest")} started",
+            new { reservation = hold.Id, device = hostname, sessionId, player, reservedAt = hold.StartUtc }) ?? Task.CompletedTask;
+
     private Task AuditAsync(string action, Guid sessionId, string summary, object details) =>
         _audit?.WriteAsync(action, "session", sessionId, summary, details) ?? Task.CompletedTask;
 
@@ -81,6 +107,8 @@ public sealed class SessionService
         }
 
         var now = _clock.UtcNow;
+        var held = await CheckHoldAsync(device.Id, req.OverrideReservation);
+        if (!held.Ok) return held.Error!;
         PackageEntity? package = null;
         TariffEntity? tariff;
         PackageTerms? terms = null;
@@ -178,7 +206,8 @@ public sealed class SessionService
             BalanceEndUtc = balanceEnd
         };
 
-        await using (var tx = await _db.Database.BeginTransactionAsync())
+        // A check-in runs inside the transaction of the reservation (it commits both)
+        await using (var tx = await JoinedTransaction.BeginAsync(_db))
         {
             // A prepaid session that has run out but is not closed yet does not block the PC
             var active = await _db.Sessions.Where(s => s.DeviceId == device.Id && s.Status == "active").ToListAsync();
@@ -232,6 +261,7 @@ public sealed class SessionService
                     $"Free time on {device.Hostname}: {what}, worth {value} {cur}" + (freeReason != null ? $": {freeReason}" : $" (price 0 {cur})"),
                     new { device.Hostname, minutes, package = package?.Name, value, reason = freeReason, player = user?.Username });
             }
+            if (held.Value is { } overridden) await AuditOverrideAsync(overridden, device.Hostname, session.Id, user?.Username);
             await tx.CommitAsync();
         }
 
@@ -558,6 +588,8 @@ public sealed class SessionService
         if (!planned.Ok) return planned.Error!;
         var plan = planned.Value!;
         var quote = plan.Quote;
+        var held = await CheckHoldAsync(req.TargetDeviceId, req.OverrideReservation);
+        if (!held.Ok) return held.Error!;
 
         var user = session.UserId.HasValue ? await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == session.UserId.Value) : null;
         string? method = null;
@@ -605,6 +637,9 @@ public sealed class SessionService
                 new { from = plan.FromHostname, to = quote.TargetHostname, fromDeviceId, toDeviceId = req.TargetDeviceId,
                       surcharge = quote.Surcharge, basis = quote.Basis, remainingMinutes = quote.RemainingMinutes,
                       tariff = quote.TargetTariffName, package = quote.TargetPackageName, paymentMethod = method, paused });
+            if (held.Value is { } overridden)
+                await AuditOverrideAsync(overridden, quote.TargetHostname, session.Id,
+                    user?.Username);
             await tx.CommitAsync();
         }
 

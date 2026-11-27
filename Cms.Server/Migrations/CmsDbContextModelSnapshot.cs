@@ -427,6 +427,9 @@ namespace Cms.Server.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
 
+                    b.Property<long?>("ReservationId")
+                        .HasColumnType("bigint");
+
                     b.Property<long?>("SaleId")
                         .HasColumnType("bigint");
 
@@ -447,6 +450,8 @@ namespace Cms.Server.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedUtc");
+
+                    b.HasIndex("ReservationId");
 
                     b.HasIndex("SaleId");
 
@@ -543,6 +548,112 @@ namespace Cms.Server.Migrations
                     b.HasIndex("Category", "SortOrder");
 
                     b.ToTable("Products", (string)null);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.ReservationEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid?>("AssignedDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CreatedByUsername")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("Deposit")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("DepositStatus")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("DurationMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("EndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ErasedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GuestName")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid?>("SessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<int>("StartDay")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("StartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset>("UpdatedUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ZoneId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("Phone");
+
+                    b.HasIndex("StartDay");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("ZoneId");
+
+                    b.HasIndex("Status", "StartDay");
+
+                    b.ToTable("Reservations", (string)null);
                 });
 
             modelBuilder.Entity("Cms.Server.Data.SaleEntity", b =>
@@ -1157,6 +1268,24 @@ namespace Cms.Server.Migrations
 
             modelBuilder.Entity("Cms.Server.Data.PackageEntity", b =>
                 {
+                    b.HasOne("Cms.Server.Data.ZoneEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ZoneId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Cms.Server.Data.ReservationEntity", b =>
+                {
+                    b.HasOne("Cms.Server.Data.DeviceEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Cms.Server.Data.UserEntity", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Cms.Server.Data.ZoneEntity", null)
                         .WithMany()
                         .HasForeignKey("ZoneId")

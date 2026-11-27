@@ -55,6 +55,10 @@ public class LedgerController : ControllerBase
     }
 
     /// <summary>Players whose Balance / BonusPoints differ from the sum of their ledger rows (empty = all fine).</summary>
+    /// <summary>Money held on player balances (reservation deposits) against its ledger rows.</summary>
+    [HttpGet("holds")]
+    public async Task<ActionResult<HoldsView>> Holds() => Ok(await Cms.Server.Billing.Holds.CheckAsync(_db, HttpContext.RequestAborted));
+
     [HttpGet("reconcile")]
     public async Task<ActionResult<ReconcileView>> Reconcile()
     {

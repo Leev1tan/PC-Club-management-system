@@ -81,6 +81,8 @@ public sealed record AnalyticsReport(
 {
     /// <summary>Most played games of the period (hours inside the period), from the plays the lock screens report.</summary>
     public IReadOnlyList<Cms.Server.Devices.GameStat> TopGames { get; init; } = Array.Empty<Cms.Server.Devices.GameStat>();
+    /// <summary>Reservation deposits of the period: held, released, kept for no-shows (kept = in the PC time revenue).</summary>
+    public ZHolds Holds { get; init; } = ZHolds.Zero;
 }
 
 public static class AnalyticsService
@@ -136,13 +138,15 @@ public static class AnalyticsService
             new ZDebt(total.DebtRecorded, total.DebtPaid, total.DebtWrittenOff),
             total.Payouts,
             new AnalyticsAverage(
-                total.Sessions > 0 ? TariffCalculator.Round(total.TimeTotal / total.Sessions) : null, total.Sessions,
+                // Kept deposits of no-shows are PC time revenue but no session
+                total.Sessions > 0 ? TariffCalculator.Round((total.TimeTotal - total.DepositsKept) / total.Sessions) : null, total.Sessions,
                 total.Receipts > 0 ? TariffCalculator.Round(total.BarSales.Total / total.Receipts) : null, total.Receipts),
             new ZDesk(total.CashIn, total.CashOut, total.CashNet), new ZDesk(total.CardIn, total.CardOut, total.CardNet),
             hourly ? "hour" : "day", series,
             occupancy.Summary, occupancy.Heatmap, shifts, check)
         {
-            TopGames = games
+            TopGames = games,
+            Holds = ZHolds.Of(total)
         };
     }
 

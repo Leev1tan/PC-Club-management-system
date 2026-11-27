@@ -3,6 +3,7 @@ using Cms.Server.Billing;
 using Cms.Server.Data;
 using Cms.Server.Devices;
 using Cms.Server.Repositories;
+using Cms.Server.Reservations;
 using Cms.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -145,19 +146,41 @@ public class PlayerLoginController : ControllerBase
             return BillingErrors.PlayerBusy.With(host).ToActionResult();
         }
 
-        var service = new SessionService(_db, _devices, _clock, _audit);
-        var start = await service.StartAsync(new StartSessionRequest(deviceId, null, user!.Id,
-            offer == OfferMinutes ? req.Minutes : null, offer == OfferPackage ? req.PackageId : null,
-            PaymentMethods.Balance, UseBonus: true, LimitToBalance: offer == OfferBalance));
-        if (!start.Ok)
+        // A PC held for a reservation: the reserved player checks in with the login; everybody else is refused
+        var hold = await ReservationHolds.ActiveAsync(_db, deviceId, _clock);
+        if (hold != null && hold.UserId != user!.Id)
         {
             await _audit.WriteAsync(AuditActions.PlayerLogin, "player", user.Id,
+                $"@{user.Username} logged in on {device.Hostname}, no session: pc_reserved (reservation #{hold.Id} at {hold.StartLocal})",
+                new { device.Hostname, offer, error = "pc_reserved", reservation = hold.Id });
+            return ReservationErrors.PcReserved.With(hold.Name, hold.StartLocal, hold.Id).ToActionResult();
+        }
+
+        BillingResult<SessionEntity> start;
+        if (hold != null)
+        {
+            var mode = offer switch { OfferBalance => "balance", OfferPackage => "package", _ => "minutes" };
+            var checkIn = await new ReservationService(_db, _devices, _clock, _audit).CheckInAsync(hold.Id,
+                new CheckInRequest(deviceId, mode, offer == OfferMinutes ? req.Minutes : null, offer == OfferPackage ? req.PackageId : null, PaymentMethods.Balance));
+            start = checkIn.Ok ? BillingResult<SessionEntity>.Success(checkIn.Value.Session) : checkIn.Error!;
+        }
+        else
+        {
+            var service = new SessionService(_db, _devices, _clock, _audit);
+            start = await service.StartAsync(new StartSessionRequest(deviceId, null, user!.Id,
+                offer == OfferMinutes ? req.Minutes : null, offer == OfferPackage ? req.PackageId : null,
+                PaymentMethods.Balance, UseBonus: true, LimitToBalance: offer == OfferBalance));
+        }
+        if (!start.Ok)
+        {
+            await _audit.WriteAsync(AuditActions.PlayerLogin, "player", user!.Id,
                 $"@{user.Username} logged in on {device.Hostname}, no session: {start.Error!.Code}", new { device.Hostname, offer, error = start.Error.Code });
             return start.Error.ToActionResult();
         }
         var session = start.Value!;
-        await _audit.WriteAsync(AuditActions.PlayerLogin, "player", user.Id,
-            $"@{user.Username} logged in on {device.Hostname} and started a session ({offer})", new { device.Hostname, offer, sessionId = session.Id, session.EndUtc, session.BalanceEndUtc });
+        await _audit.WriteAsync(AuditActions.PlayerLogin, "player", user!.Id,
+            $"@{user.Username} logged in on {device.Hostname} and started a session ({offer})" + (hold != null ? $" of reservation #{hold.Id}" : ""),
+            new { device.Hostname, offer, sessionId = session.Id, session.EndUtc, session.BalanceEndUtc, reservation = hold?.Id });
         var accounts = await Wallet.GetAccountsAsync(_db, user.Id);
         return Ok(new PlayerLoginView(session.Id, user.Username, user.DisplayName, accounts?.Balance ?? 0m, accounts?.Bonus ?? 0m,
             session.EndUtc ?? session.BalanceEndUtc, session.LimitToBalance, offer));

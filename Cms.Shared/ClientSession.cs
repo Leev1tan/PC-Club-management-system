@@ -34,3 +34,16 @@ public sealed class LogoffRequest
     public Guid Id { get; init; }
     public DateTimeOffset RequestedUtc { get; init; }
 }
+
+/// <summary>
+/// The reservation that holds the PC now (heartbeat response, then state.json): the lock screen shows "Reserved for
+/// {Name} at {StartLocal}". Name is the nickname of a player or the first name of a guest: never a phone or a surname.
+/// </summary>
+public sealed class ClientReservationInfo
+{
+    public long Id { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public DateTimeOffset StartUtc { get; init; }
+    /// <summary>Start in club time, "HH:mm".</summary>
+    public string StartLocal { get; init; } = string.Empty;
+}

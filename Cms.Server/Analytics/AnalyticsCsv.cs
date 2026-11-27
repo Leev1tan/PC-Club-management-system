@@ -52,6 +52,10 @@ public static class AnalyticsCsv
         csv.Row(debt, t.T("Сплачено", "Paid"), a.Debt.Paid.Total);
         csv.Row(debt, t.T("Списано", "Written off"), a.Debt.WrittenOff);
         csv.Row(t.T("Виплати з каси", "Cash payouts"), t.T("Разом", "Total"), a.Payouts);
+        var deposits = t.T("Депозити броні", "Reservation deposits");
+        csv.Row(deposits, t.T("Утримано з балансу", "Held from balances"), a.Holds.DepositsHeld);
+        csv.Row(deposits, t.T("Повернуто на баланс", "Back on balances"), a.Holds.DepositsReleased);
+        csv.Row(deposits, t.T("Залишено клубу (неявка, у виручці за час)", "Kept for no-shows (in PC time revenue)"), a.Holds.DepositsKept);
         var average = t.T("Середній чек", "Average ticket");
         csv.Row(average, t.T("Сесія (час на ПК)", "Session (PC time)"), a.AverageTicket.Session, a.AverageTicket.Sessions);
         csv.Row(average, t.T("Чек бару", "Bar receipt"), a.AverageTicket.Receipt, a.AverageTicket.Receipts);

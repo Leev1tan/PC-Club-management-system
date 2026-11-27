@@ -38,6 +38,12 @@ public sealed record ZStaff(string Username, int Rows, decimal CashNet, decimal 
     decimal TopUps, decimal Refunds, decimal Payouts, decimal DebtRecorded);
 /// <summary>Rows of other types (opening balances, legacy rows) with their desk money, so the sums always add up.</summary>
 public sealed record ZOther(int Rows, decimal Cash, decimal Card);
+/// <summary>Money held for the club on player balances: reservation deposits (held, released, kept for a no-show).</summary>
+public sealed record ZHolds(decimal DepositsHeld, decimal DepositsReleased, decimal DepositsKept)
+{
+    public static readonly ZHolds Zero = new(0, 0, 0);
+    public static ZHolds Of(LedgerTotals t) => new(t.DepositsHeld, t.DepositsReleased, t.DepositsKept);
+}
 /// <summary>Reconciled: the cash and card of all sections equal the desk sums of the ledger rows of the shift.</summary>
 public sealed record ZLedger(int Rows, long? FirstId, long? LastId, bool Reconciled);
 
@@ -53,6 +59,9 @@ public sealed record ZReport(
     ZTime Time, ZBar Bar, ZCount TopUps, ZCount BalanceRefunds, ZBonus Bonus, ZDebt Debt, ZPayouts Payouts, ZAdjustments Adjustments,
     ZDesk Cash, ZDesk Card, ZOther Other, IReadOnlyList<ZStaff> ByStaff, ZLedger Ledger)
 {
+    /// <summary>Reservation deposits of the shift (a kept deposit is also in Time).</summary>
+    public ZHolds Holds { get; init; } = ZHolds.Zero;
+
     public static async Task<ZReport> BuildAsync(CmsDbContext db, ShiftEntity shift, ClubClock clock, CancellationToken ct = default)
     {
         var rows = await db.Ledger.AsNoTracking().Where(l => l.ShiftId == shift.Id).OrderBy(l => l.Id).ToListAsync(ct);
@@ -97,6 +106,9 @@ public sealed record ZReport(
             new ZPayouts(sums.Payouts, sums.PayoutRows.ToList()),
             new ZAdjustments(sums.BalancePlus, sums.BalanceMinus),
             cash, card, new ZOther(sums.OtherRows, sums.OtherCash, sums.OtherCard), byStaff,
-            new ZLedger(rows.Count, rows.FirstOrDefault()?.Id, rows.LastOrDefault()?.Id, sums.Reconciled));
+            new ZLedger(rows.Count, rows.FirstOrDefault()?.Id, rows.LastOrDefault()?.Id, sums.Reconciled))
+        {
+            Holds = ZHolds.Of(sums)
+        };
     }
 }

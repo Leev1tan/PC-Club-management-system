@@ -72,10 +72,12 @@ public class DevicesController : ControllerBase
         // and the club settings of the lock screen (language, currency)
         if (status != DeviceStatuses.Approved) return Ok(new DeviceHeartbeatResponse(status, null));
         var pinHash = await KioskSettings.GetStaffPinHashAsync(_db);
+        var hold = User.DeviceId() is { } held ? await Cms.Server.Reservations.ReservationHolds.ActiveAsync(_db, held, _clock ?? Cms.Server.Billing.ClubClock.System()) : null;
         return Ok(new DeviceHeartbeatResponse(status, pinHash)
         {
             Client = await Cms.Server.Devices.ClubLanguage.ClientSettingsAsync(_db),
-            Session = User.DeviceId() is { } deviceId ? await Cms.Server.Devices.PlayerSessions.InfoAsync(_db, deviceId) : null
+            Session = User.DeviceId() is { } deviceId ? await Cms.Server.Devices.PlayerSessions.InfoAsync(_db, deviceId) : null,
+            Reservation = hold == null ? null : new ClientReservationInfo { Id = hold.Id, Name = hold.Name, StartUtc = hold.StartUtc, StartLocal = hold.StartLocal }
         });
     }
 
@@ -103,6 +105,10 @@ public class DevicesController : ControllerBase
 
         // Commands queued for a device but not yet acknowledged by its agent
         var games = await Cms.Server.Devices.GamePlays.CurrentAsync(_db, activeSessions.ToDictionary(kv => kv.Key, kv => kv.Value.Id));
+
+        // The next reservation of each PC (held now, or starting within 12 hours): "reserved at HH:MM" on the map
+        var clock = _clock ?? Cms.Server.Billing.ClubClock.System();
+        var reservations = await Cms.Server.Reservations.ReservationMap.NextByPcAsync(_db, clock);
 
         var pendingCommands = await _db.Commands.AsNoTracking()
             .Where(c => c.Status == "pending" || c.Status == "delivered")
@@ -139,7 +145,8 @@ public class DevicesController : ControllerBase
                 CurrentGame = games.TryGetValue(d.Id, out var game) ? game.Name : null,
                 MacAddress = d.MacAddress,
                 CurrentGameColor = game?.Color,
-                CurrentGameStartedUtc = game?.StartUtc
+                CurrentGameStartedUtc = game?.StartUtc,
+                Reservation = reservations.TryGetValue(d.Id, out var next) ? next : null
             };
         }));
     }
@@ -382,6 +389,8 @@ public record DeviceHeartbeatResponse(string Status, string? StaffPinHash)
     public ClientSettings? Client { get; init; }
     /// <summary>Approved PCs: the active session for the lock screen (player, tariff, planned end); null = none.</summary>
     public ClientSessionInfo? Session { get; init; }
+    /// <summary>Approved PCs: the reservation that holds the PC now ("Reserved for ... at HH:mm"); null = none.</summary>
+    public ClientReservationInfo? Reservation { get; init; }
 }
 
 public enum DeviceRegistrationKind { ReRegistered, Enrolled, ReEnrolled, Pending, Unauthorized, Invalid }
@@ -427,6 +436,8 @@ public record DeviceDetailView(
     public string? MacAddress { get; init; }
     public string? CurrentGameColor { get; init; }
     public DateTimeOffset? CurrentGameStartedUtc { get; init; }
+    /// <summary>The next confirmed reservation of the PC (held now or within 12 hours); null = none.</summary>
+    public Cms.Server.Reservations.PcReservationView? Reservation { get; init; }
 }
 public record EnqueueCommandRequest(string Type, object? Payload);
 /// <summary>Event of the PC (Cms.Shared.LauncherEvent): Id (for de-duplication), Type staff_unlock, when, why the PC was locked.</summary>

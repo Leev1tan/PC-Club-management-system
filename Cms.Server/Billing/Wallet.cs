@@ -36,6 +36,12 @@ public static class LedgerTypes
     public const string BarSale = "bar_sale";
     /// <summary>Refund of a bar receipt, the same way it was paid (-desk or +balance).</summary>
     public const string BarRefund = "bar_refund";
+    /// <summary>Deposit of a reservation, taken off the real balance and held (-balance; not revenue).</summary>
+    public const string DepositHold = "deposit_hold";
+    /// <summary>A held deposit back on the real balance: applied at check-in (the session is paid from it) or returned (+balance).</summary>
+    public const string DepositRelease = "deposit_release";
+    /// <summary>A held deposit kept by the club for a no-show (no balance change; PC time revenue paid from the balance).</summary>
+    public const string DepositKept = "deposit_kept";
 }
 
 public static class PaymentMethods
