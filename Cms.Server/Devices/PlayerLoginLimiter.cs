@@ -12,7 +12,8 @@ namespace Cms.Server.Devices;
 ///    many accounts). The club PCs share one IP behind the router, so there is no per-IP limit here.
 /// A successful login clears both counters. A manager or the owner can clear a lockout in the admin UI
 /// (PlayerLockoutsController); the list shows a name only when it is an account (players type their password
-/// into the name field), otherwise only an opaque id of the name.
+/// into the name field), otherwise only an opaque id (HMAC with a random key of this process), and the audit
+/// log gets nothing derived from such a name.
 /// </summary>
 public sealed class PlayerLoginLimiter
 {
@@ -79,9 +80,15 @@ public sealed class PlayerLoginLimiter
         }
     }
 
-    /// <summary>Opaque id of a typed user name: the first 16 hex digits of its SHA-256 (the list never shows unknown names).</summary>
-    public static string AccountId(string? username) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(AccountKey(username))))[..16].ToLowerInvariant();
+    /// <summary>Random key of this process for <see cref="AccountId"/> (the lockouts live in memory, so the ids need not survive a restart).</summary>
+    private readonly byte[] _idKey = RandomNumberGenerator.GetBytes(32);
+
+    /// <summary>
+    /// Opaque id of a typed user name for the lockout list: HMAC-SHA256 with a random key of this process, so it
+    /// cannot be reversed (players type PINs into the name field) and differs between processes. Never store it.
+    /// </summary>
+    public string AccountId(string? username) =>
+        Convert.ToHexString(HMACSHA256.HashData(_idKey, Encoding.UTF8.GetBytes(AccountKey(username))))[..24].ToLowerInvariant();
 
     public sealed record LockedAccount(string Id, string Name, DateTimeOffset LockedUntilUtc);
     public sealed record LockedDevice(Guid DeviceId, DateTimeOffset LockedUntilUtc);

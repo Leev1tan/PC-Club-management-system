@@ -11,7 +11,8 @@ namespace Cms.Server.Controllers;
 /// <summary>
 /// Lockouts of the player login on the lock screens (PlayerLoginLimiter, kept in memory): a manager or the owner
 /// sees them and clears one, for a user name or for a PC; audited. A name that is no account is listed without
-/// the text (players type their password into the name field), only with an opaque id that clears it.
+/// the text (players type their password into the name field), only with an opaque id of this server process
+/// (HMAC with a random key) that clears it; its audit row has a fixed target and nothing derived from the name.
 /// </summary>
 [ApiController]
 [Route("api/player-lockouts")]
@@ -64,12 +65,18 @@ public class PlayerLockoutsController : ControllerBase
         var name = _limiter.ClearAccount(string.IsNullOrWhiteSpace(req.Username) ? null : req.Username, req.Id, now);
         if (name == null) return NotLocked();
         var account = await _db.Users.AsNoTracking().Where(u => u.Username == name).Select(u => new { u.Id, u.Username }).FirstOrDefaultAsync();
-        // A name that is no account is not written down (it can be a typed password)
-        await _audit.WriteAsync(AuditActions.PlayerLoginLockoutCleared, account != null ? "player" : "lockout", account?.Id.ToString() ?? PlayerLoginLimiter.AccountId(name),
-            account != null ? $"Player login lockout cleared for account @{account.Username}" : "Player login lockout cleared for an unknown user name",
-            new { player = account?.Username });
-        return Ok(new { cleared = "account", id = PlayerLoginLimiter.AccountId(name), username = account?.Username });
+        if (account != null)
+            await _audit.WriteAsync(AuditActions.PlayerLoginLockoutCleared, "player", account.Id,
+                $"Player login lockout cleared for account @{account.Username}", new { player = account.Username });
+        else
+            // A name that is no account can be a typed PIN or password: the audit log gets nothing derived from it
+            await _audit.WriteAsync(AuditActions.PlayerLoginLockoutCleared, "lockout", UnknownNameTarget,
+                "Player login lockout cleared for an unknown user name", new { player = (string?)null });
+        return Ok(new { cleared = "account", id = _limiter.AccountId(name), username = account?.Username });
     }
+
+    /// <summary>Audit target of a cleared lockout of a name that is no account (nothing derived from the name).</summary>
+    public const string UnknownNameTarget = "unknown-name";
 
     private ConflictObjectResult NotLocked() => Conflict(new { error = "This login is not locked (any more).", code = "lockout_not_found" });
 }

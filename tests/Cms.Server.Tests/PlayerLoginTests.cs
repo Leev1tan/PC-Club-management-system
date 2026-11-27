@@ -202,7 +202,8 @@ public sealed class PlayerLoginTests : ApiTestBase, IClassFixture<CmsFactory>
         var accounts = list.GetProperty("accounts").EnumerateArray().ToList();
         Assert.Contains(accounts, a => a.GetProperty("username").GetString() == username);
         // The name that is no account is listed only with its id (it can be a typed password)
-        var unknown = Assert.Single(accounts, a => a.GetProperty("id").GetString() == Cms.Server.Devices.PlayerLoginLimiter.AccountId(ghost));
+        var limiter = _factory.Services.GetRequiredService<Cms.Server.Devices.PlayerLoginLimiter>();
+        var unknown = Assert.Single(accounts, a => a.GetProperty("id").GetString() == limiter.AccountId(ghost));
         Assert.Equal(JsonValueKind.Null, unknown.GetProperty("username").ValueKind);
         Assert.DoesNotContain(ghost, list.GetRawText());
         Assert.Contains(list.GetProperty("devices").EnumerateArray(), d => d.GetProperty("hostname").GetString() == sprayed.Hostname);
@@ -220,6 +221,25 @@ public sealed class PlayerLoginTests : ApiTestBase, IClassFixture<CmsFactory>
         Assert.Contains(cleared, a => a.GetProperty("summary").GetString() == "Player login lockout cleared for an unknown user name");
         Assert.Contains(cleared, a => a.GetProperty("summary").GetString() == $"Player login lockout cleared for PC {sprayed.Hostname}");
         Assert.DoesNotContain(cleared, a => a.GetRawText().Contains(ghost));
+        // Nothing derived from the unknown name is in the audit log: not the opaque id, not a plain hash of it
+        var unknownRow = Assert.Single(cleared, a => a.GetProperty("summary").GetString() == "Player login lockout cleared for an unknown user name");
+        Assert.Equal(Cms.Server.Controllers.PlayerLockoutsController.UnknownNameTarget, unknownRow.GetProperty("targetId").GetString());
+        var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ghost))).ToLowerInvariant();
+        var all = (await owner.GetFromJsonAsync<JsonElement>("/api/audit?take=500")).GetRawText().ToLowerInvariant();
+        Assert.DoesNotContain(ghost, all);
+        Assert.DoesNotContain(sha[..12], all);
+        Assert.DoesNotContain(unknown.GetProperty("id").GetString()!, all);
+    }
+
+    [Fact]
+    public void The_opaque_id_of_a_name_differs_between_server_processes()
+    {
+        var a = new Cms.Server.Devices.PlayerLoginLimiter();
+        var b = new Cms.Server.Devices.PlayerLoginLimiter();
+        Assert.Equal(a.AccountId("1234"), a.AccountId(" 1234 "));
+        Assert.NotEqual(a.AccountId("1234"), b.AccountId("1234"));
+        var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("1234"))).ToLowerInvariant();
+        Assert.DoesNotContain(a.AccountId("1234"), sha);
     }
 
     [Fact]
