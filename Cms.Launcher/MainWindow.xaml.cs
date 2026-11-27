@@ -275,6 +275,7 @@ public partial class MainWindow : Window
         if (_languageButton != null) _languageButton.Content = _texts.LanguageSwitch;
         UpdateSessionHeader();
         RenderGames();
+        RefreshGameNow();
         if (_lastDecision != null) UpdateLockReason(_lastDecision);
         UpdateCountdowns(_lastState?.RemainingSeconds ?? 0);
     }
@@ -451,6 +452,7 @@ public partial class MainWindow : Window
             RefreshClientSettings();
             RefreshCatalog();
             TrackGames();
+            RefreshGameNow();
 
             UpdateSessionHeader();
             UpdateCountdowns(state?.RemainingSeconds ?? 0);

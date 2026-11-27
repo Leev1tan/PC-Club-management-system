@@ -252,13 +252,27 @@ public partial class MainWindow
         try
         {
             ReportGameEvents(_gameTracker.Update(_processes.Snapshot(), _processes.CurrentSessionId, DateTimeOffset.UtcNow));
-            var running = _gameTracker.Running;
-            if (running.Count == 0) GameNowText.Text = string.Empty;
         }
         catch
         {
             // the process list is not readable at this moment; next time
         }
+    }
+
+    /// <summary>
+    /// "Now: game" on the top bar: the game that this lock screen started, else the game of the session on the server. A lock
+    /// screen that started again (watchdog, update) or a pause did not lose it then (Windows test 2026-11-27 night, defect 6).
+    /// The server's game is followed again by its ProcessName (its stop is reported) and closed by the teardown.
+    /// </summary>
+    private void RefreshGameNow()
+    {
+        if (_accountBusy) return; // "logging in with the club account" stays until the game starts
+        var server = _lastState?.Session?.Game;
+        if (server != null && _catalog.FirstOrDefault(g => g.Id == server.Id) is { } entry && _gameTracker.Adopt(entry, DateTimeOffset.UtcNow))
+            RememberStarted(entry, null, null);
+        var id = _gameTracker.Showing(server?.Id);
+        var name = id is not { } shown ? null : _catalog.FirstOrDefault(g => g.Id == shown)?.Name ?? (server?.Id == shown ? server.Name : null);
+        GameNowText.Text = string.IsNullOrEmpty(name) ? string.Empty : LauncherTexts.Format(_texts.GameNow, name);
     }
 
     private void ReportGameEvents(IEnumerable<GameEvent> events)

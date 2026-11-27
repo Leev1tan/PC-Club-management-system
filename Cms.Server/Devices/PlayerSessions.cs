@@ -22,13 +22,19 @@ public static class PlayerSessions
         // The session of a player of an event: the lock screen shows the event and the common end
         var ev = await db.EventPlayers.AsNoTracking().Where(p => p.SessionId == s.Id)
             .Join(db.Events.AsNoTracking(), p => p.EventId, e => e.Id, (p, e) => new { e.Id, e.Name, e.EndUtc }).FirstOrDefaultAsync(ct);
+        // The open game play of this session: a lock screen that started again shows "Now: <game>" and follows it
+        // (sorted in memory: SQLite cannot order by DateTimeOffset)
+        var game = (await db.GamePlays.AsNoTracking().Where(p => p.DeviceId == deviceId && p.SessionId == s.Id && p.EndUtc == null)
+                .Join(db.Games.AsNoTracking(), p => p.GameId, g => g.Id, (p, g) => new { g.Id, g.Name, p.StartUtc }).ToListAsync(ct))
+            .OrderByDescending(p => p.StartUtc).FirstOrDefault();
         return new ClientSessionInfo
         {
             Id = s.Id, StartUtc = s.StartUtc, EndUtc = s.EndUtc ?? s.BalanceEndUtc, Paused = s.PausedUtc.HasValue, Prepaid = s.IsPrepaid,
             FromBalance = s.LimitToBalance, Tariff = tariff, Package = package,
             Username = user?.Username, DisplayName = user?.DisplayName, Balance = user?.Balance, Bonus = user?.BonusPoints,
             Order = order == null ? null : new ClientOrderInfo { Id = order.Id, Status = order.Status, Payment = order.Payment, Total = order.Total, Items = lines },
-            Event = ev == null ? null : new ClientEventInfo { Id = ev.Id, Name = ev.Name, EndUtc = ev.EndUtc }
+            Event = ev == null ? null : new ClientEventInfo { Id = ev.Id, Name = ev.Name, EndUtc = ev.EndUtc },
+            Game = game == null ? null : new ClientGameInfo { Id = game.Id, Name = game.Name }
         };
     }
 }

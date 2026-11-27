@@ -195,6 +195,10 @@ public sealed class GameCatalogTests : ApiTestBase, IClassFixture<CmsFactory>
         Assert.Equal(HttpStatusCode.OK, (await Event("game_started", cs)).StatusCode); // sent twice: one play
         Assert.Equal(HttpStatusCode.OK, (await Event("game_started", dota)).StatusCode); // switch
         Assert.Equal(dota.GetProperty("name").GetString(), (await Device()).GetProperty("currentGame").GetString());
+        // The heartbeat answer has the game of the session: a lock screen that started again shows it (defect 6)
+        var game = (await pc.HeartbeatAsync()).GetProperty("session").GetProperty("game");
+        Assert.Equal(dota.GetProperty("id").GetString(), game.GetProperty("id").GetString());
+        Assert.Equal(dota.GetProperty("name").GetString(), game.GetProperty("name").GetString());
         Assert.Equal(HttpStatusCode.BadRequest, (await Event("game_started", off)).StatusCode); // not in the catalog any more
         var unknown = await pc.PostAsync($"/api/devices/{pc.Id}/events", new { id = Guid.NewGuid(), type = "game_started", occurredUtc = DateTimeOffset.UtcNow, gameId = Guid.NewGuid() });
         Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
@@ -226,6 +230,7 @@ public sealed class GameCatalogTests : ApiTestBase, IClassFixture<CmsFactory>
         // Stopped by the lock screen; the next game ends with the session
         Assert.Equal(HttpStatusCode.OK, (await Event("game_stopped", dota)).StatusCode);
         Assert.Equal(JsonValueKind.Null, (await Device()).GetProperty("currentGame").ValueKind);
+        Assert.Equal(JsonValueKind.Null, (await pc.HeartbeatAsync()).GetProperty("session").GetProperty("game").ValueKind);
         Assert.Equal(HttpStatusCode.OK, (await Event("game_started", cs)).StatusCode);
         await JsonAsync(await owner.PostAsJsonAsync($"/api/sessions/{session.GetProperty("id").GetString()}/end", new { }));
         Assert.Equal(JsonValueKind.Null, (await Device()).GetProperty("currentGame").ValueKind);

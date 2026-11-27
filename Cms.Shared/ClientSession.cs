@@ -26,6 +26,18 @@ public sealed class ClientSessionInfo
     public ClientOrderInfo? Order { get; init; }
     /// <summary>The event (tournament) of this session: its name and the common end; null = a normal session.</summary>
     public ClientEventInfo? Event { get; init; }
+    /// <summary>
+    /// The game of this session that the lock screen reported as started and not stopped (null = none). A lock screen that
+    /// started again (watchdog, update) shows it and follows it again (Windows test 2026-11-27 night, defect 6).
+    /// </summary>
+    public ClientGameInfo? Game { get; init; }
+}
+
+/// <summary>The current game of a session on the lock screen: the catalog entry and its name.</summary>
+public sealed class ClientGameInfo
+{
+    public Guid Id { get; init; }
+    public string Name { get; init; } = string.Empty;
 }
 
 /// <summary>An event (tournament) on the lock screen: the name that staff gave it and the common end of its sessions.</summary>
