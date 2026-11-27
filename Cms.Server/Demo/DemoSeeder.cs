@@ -21,7 +21,9 @@ public sealed record DemoSeedResult(IReadOnlyList<SimulatedPc> Pcs, IReadOnlyLis
 /// (DemoSeeder.Bar.cs): a bar catalog with stock, back-to-back 12 h shifts for the whole history (the
 /// current one open), each closed like a real close with its audit anchor (ShiftService.ApplyClose),
 /// receipts, a refund, a cash payout, deliveries, a stock correction, a player with debt, and an
-/// audit log (hash chain). All data is fictional. Nothing here is used outside DEMO_MODE.
+/// audit log (hash chain). Games (DemoSeeder.Games.cs): a catalog of well-known games (names and
+/// generated tiles only) and the games played in every session. All data is fictional. Nothing here is
+/// used outside DEMO_MODE.
 /// The whole club is planned in memory and written in bulk with ids in date order (about 1 s).
 /// </summary>
 public static partial class DemoSeeder
@@ -97,10 +99,10 @@ public static partial class DemoSeeder
 
     /// <summary>Tables with many rows: PostgreSQL empties them with one TRUNCATE.</summary>
     private static readonly string[] BigTables =
-        { "Commands", "Heartbeats", "Transactions", "SessionSegments", "Sessions", "SaleItems", "Sales", "StockMovements", "Shifts", "LedgerEntries", "AuditLog" };
+        { "Commands", "Heartbeats", "Transactions", "GamePlays", "SessionSegments", "Sessions", "SaleItems", "Sales", "StockMovements", "Shifts", "LedgerEntries", "AuditLog" };
 
     /// <summary>Tables of the bulk insert whose foreign keys PostgreSQL checks once at the end.</summary>
-    private static readonly string[] BulkTables = { "Sessions", "SessionSegments", "Sales", "SaleItems", "StockMovements", "LedgerEntries" };
+    private static readonly string[] BulkTables = { "Sessions", "SessionSegments", "GamePlays", "Sales", "SaleItems", "StockMovements", "LedgerEntries" };
 
     private sealed record ForeignKeyDefinition(string Table, string Name, string Definition);
 
@@ -121,6 +123,7 @@ public static partial class DemoSeeder
                && !await db.Zones.AnyAsync(ct)
                && !await db.Tariffs.AnyAsync(ct)
                && !await db.Packages.AnyAsync(ct)
+               && !await db.Games.AnyAsync(ct)
                && !await db.Sessions.AnyAsync(ct)
                && !await db.Ledger.AnyAsync(ct)
                && !await db.StaffUsers.AnyAsync(ct);
@@ -144,6 +147,8 @@ public static partial class DemoSeeder
         {
             // The big tables in one TRUNCATE (row triggers of the append-only tables do not fire), the small ones in foreign key order
             await db.Database.ExecuteSqlRawAsync($"TRUNCATE TABLE {string.Join(", ", BigTables.Select(t => $"\"{t}\""))} RESTART IDENTITY", ct);
+            await db.GameZones.ExecuteDeleteAsync(ct);
+            await db.Games.ExecuteDeleteAsync(ct);
             await db.Packages.ExecuteDeleteAsync(ct);
             await db.TariffRules.ExecuteDeleteAsync(ct);
             await db.Tariffs.ExecuteDeleteAsync(ct);
@@ -170,6 +175,9 @@ public static partial class DemoSeeder
             await LedgerGuard.ClearForDemoResetAsync(db, ct);
             await PosGuard.ClearForDemoResetAsync(db, ct);
             await db.Transactions.ExecuteDeleteAsync(ct);
+            await db.GamePlays.ExecuteDeleteAsync(ct);
+            await db.GameZones.ExecuteDeleteAsync(ct);
+            await db.Games.ExecuteDeleteAsync(ct);
             await db.SessionSegments.ExecuteDeleteAsync(ct);
             await db.Sessions.ExecuteDeleteAsync(ct);
             await db.Devices.ExecuteDeleteAsync(ct);
@@ -190,7 +198,7 @@ public static partial class DemoSeeder
 
         // Bulk insert in foreign key order. The rows are complete (balances after each ledger row, the
         // shift of each row, hashes of the audit rows), so they skip the change tracker (Data/BulkInsert)
-        foreach (var rows in new IEnumerable<object>[] { seed.Club, seed.Sessions, seed.Segments, seed.Shifts, seed.Sales,
+        foreach (var rows in new IEnumerable<object>[] { seed.Club, seed.Sessions, seed.Segments, seed.Plays, seed.Shifts, seed.Sales,
                      seed.SaleItems.SelectMany(x => x.Items), seed.Movements, seed.LedgerRows, audit })
             await BulkInsert.InsertAsync(db, rows, ct);
 
@@ -270,6 +278,7 @@ public static partial class DemoSeeder
         public DemoSeedResult Run()
         {
             var pcs = SeedClub();
+            SeedGames();
             SeedStaff();
             SeedPlayers();
             PlanWindows();
@@ -277,6 +286,7 @@ public static partial class DemoSeeder
             SeedDebtor();
             SeedFreeTime();
             SeedHistory();
+            SeedPlays();
             SeedBar();
             ApplyPlayerEvents();
             PlanShifts();
@@ -293,6 +303,7 @@ public static partial class DemoSeeder
             {
                 var spec = Zones[z];
                 var zone = new ZoneEntity { Id = Guid.NewGuid(), Name = spec.Name, Color = spec.Color, SortOrder = z };
+                _zoneIds.Add(zone.Id);
                 var tariff = new TariffEntity
                 {
                     Id = Guid.NewGuid(), Name = spec.TariffName, PricePerHour = spec.Base, IsDefault = z == 0, ZoneId = zone.Id,

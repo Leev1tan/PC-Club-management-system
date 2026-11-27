@@ -3,6 +3,7 @@ using Cms.Server.Auth;
 using Cms.Server.Billing;
 using Cms.Server.Controllers;
 using Cms.Server.Data;
+using Cms.Server.Devices;
 using Cms.Server.Pos;
 using Cms.Server.Repositories;
 using Cms.Server.Shifts;
@@ -24,7 +25,8 @@ namespace Cms.Server.Demo;
 ///  - the bar sells a drink or a snack every minute or so (cash, card or a player's balance), and a
 ///    sold-out product gets a delivery; desk payments happen only while a shift is open, and when a
 ///    visitor closes the shift the demo cashier opens a new one a few minutes later;
-///  - once in a while a PC reports an emergency staff PIN unlock (audit log).
+///  - once in a while a PC reports an emergency staff PIN unlock (audit log);
+///  - players start games of the catalog in running sessions and sometimes switch (current game, top games).
 /// Sessions, sales and shifts go through the real services, so prices, ledger rows and commands follow the real rules.
 /// Not thread-safe: called from one background loop only.
 /// </summary>
@@ -53,6 +55,9 @@ public sealed class DemoSimulator
     private DateTimeOffset? _noShiftSinceUtc;
     private DateTimeOffset _nextUnlockUtc;
     private static readonly TimeSpan ReopenShiftAfter = TimeSpan.FromMinutes(3);
+    // Games use their own random numbers too
+    private readonly Random _games = new();
+    private DateTimeOffset _nextGamesUtc;
 
     public DemoSimulator(ILogger<DemoSimulator> logger, DeviceRuntimeState runtime, Random? rng = null, ClubClock? clock = null, Random? posRng = null)
     {
@@ -92,6 +97,7 @@ public sealed class DemoSimulator
         _nextShiftCheckUtc = now.AddSeconds(30);
         _noShiftSinceUtc = null;
         _nextUnlockUtc = now.AddMinutes(_pos.Next(40, 90));
+        _nextGamesUtc = now.AddSeconds(_games.Next(15, 30));
     }
 
     public async Task TickAsync(CmsDbContext db, IDeviceRepository repo, DateTimeOffset now, CancellationToken ct = default)
@@ -122,6 +128,11 @@ public sealed class DemoSimulator
         {
             _nextBarUtc = now.AddSeconds(_pos.Next(35, 95));
             await SellAtTheBarAsync(db, now, ct);
+        }
+        if (now >= _nextGamesUtc)
+        {
+            _nextGamesUtc = now.AddSeconds(_games.Next(20, 45));
+            await PlayGamesAsync(db, now, ct);
         }
         if (now >= _nextUnlockUtc)
         {
@@ -384,6 +395,44 @@ public sealed class DemoSimulator
         }
         if (result.Ok)
             _logger.LogInformation("Demo: bar receipt #{Id}, {Total} ₴ ({Method})", result.Value!.Id, result.Value.Total, result.Value.Method);
+    }
+
+    /// <summary>
+    /// Running, not paused sessions on online PCs: a player without a game starts one of the zone's
+    /// catalog (weighted like the seeded history); one who played for 40 minutes sometimes switches.
+    /// </summary>
+    private async Task PlayGamesAsync(CmsDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var sessions = (await db.Sessions.AsNoTracking().Where(s => s.Status == "active" && s.PausedUtc == null).ToListAsync(ct))
+            .Where(s => IsOnline(s.DeviceId, now) && !SessionService.IsDue(s, now)).ToList();
+        if (sessions.Count == 0) return;
+        var open = (await db.GamePlays.AsNoTracking().Where(p => p.EndUtc == null).ToListAsync(ct))
+            .GroupBy(p => p.DeviceId).ToDictionary(g => g.Key, g => g.OrderByDescending(p => p.StartUtc).First());
+        var devices = await db.Devices.AsNoTracking().Select(d => new { d.Id, d.ZoneId }).ToDictionaryAsync(d => d.Id, d => d.ZoneId, ct);
+        var zones = await db.Zones.AsNoTracking().ToDictionaryAsync(z => z.Id, z => z.SortOrder, ct);
+        var games = await db.Games.AsNoTracking().Where(g => g.IsActive).ToListAsync(ct);
+        var gameZones = (await db.GameZones.AsNoTracking().ToListAsync(ct)).ToLookup(z => z.GameId, z => z.ZoneId);
+        foreach (var session in sessions)
+        {
+            var current = open.TryGetValue(session.DeviceId, out var p) && p.SessionId == session.Id ? p : null;
+            var start = current == null ? _games.NextDouble() < 0.5 : now - current.StartUtc > TimeSpan.FromMinutes(40) && _games.NextDouble() < 0.1;
+            if (!start) continue;
+            var zoneId = devices.TryGetValue(session.DeviceId, out var z) ? z : null;
+            var zoneIndex = zoneId.HasValue && zones.TryGetValue(zoneId.Value, out var order) ? order : 0;
+            var options = games.Where(g => g.Id != current?.GameId && (g.AllZones || (zoneId.HasValue && gameZones[g.Id].Contains(zoneId.Value))))
+                .Select(g => (Game: g, Weight: DemoSeeder.GameWeight(g.Name, zoneIndex))).Where(x => x.Weight > 0).ToList();
+            if (options.Count == 0) continue;
+            var r = _games.NextDouble() * options.Sum(o => o.Weight);
+            var pick = options[^1].Game;
+            foreach (var o in options)
+            {
+                r -= o.Weight;
+                if (r <= 0) { pick = o.Game; break; }
+            }
+            if (await GamePlays.StartAsync(db, session.DeviceId, pick.Id, now, ct))
+                _logger.LogDebug("Demo: {Game} started on {Device}", pick.Name, session.DeviceId);
+            db.ChangeTracker.Clear();
+        }
     }
 
     /// <summary>Somebody on staff used the PIN on the lock screen of a PC; the agent reports it.</summary>
