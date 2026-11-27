@@ -271,6 +271,28 @@ Prepare: a player with a PIN (Players → 🔑) and 100 ₴ on the balance; the 
 - [ ] A session started by the cashier for a guest: the PC unlocks without a login; the session screen shows
       "Guest", the tariff and the time; there is no "End the session" button
 
+### Test 17: Clean Session Teardown (phase 6)
+Prepare: a Steam game and Notepad in the catalog; Discord and Chrome installed. As Administrator check
+`C:\ProgramData\ClubAgent\teardown.json` (cleanup off) and `icacls C:\ClubAgent` (Users: RX only).
+- [ ] As the player: `echo x > C:\ClubAgent\test.txt` is refused (access denied)
+- [ ] Start a 2-minute session; start Notepad and the Steam game from the grid, start Discord and Chrome yourself;
+      open Task Manager as Administrator (Ctrl+Alt+Del → switch user) to watch the processes
+- [ ] Pause the session in the admin UI: the PC locks, nothing is closed; resume: the games still run
+- [ ] Let the time run out: within 5 s Notepad, the game, Steam (with steamwebhelper), Discord and Chrome are
+      closed; Explorer and the lock screen still run; the audit log has `device.session_teardown` with the names
+- [ ] A second Windows user logged in at the same time (fast user switching) keeps its Chrome
+- [ ] Turn the cleanup on: in `C:\ClubAgent\appsettings.json` set `"Enabled": true` with the path
+      `%LOCALAPPDATA%\\Google\\Chrome\\User Data`, `Restart-Service ClubAgent`; sign in to a site in Chrome,
+      end the session: Chrome opens without the login next time; the audit log says "cleanup removed … file(s)"
+- [ ] As the player create a junction inside the cleaned path to a folder with a test file
+      (`mklink /J "%LOCALAPPDATA%\Google\Chrome\User Data\Jump" C:\Users\Public\Documents`); end a
+      session: the test file in `C:\Users\Public\Documents` is still there
+- [ ] Add `C:\Windows` to `Paths` (not to the roots): nothing there is deleted (the agent log and the audit
+      log show no error; the path is skipped)
+- [ ] Stop the agent during a session and wait 20 s: the PC locks (agent silent), but nothing is closed; start
+      the agent again: the session continues
+- [ ] Reinstall the client (`Install.cmd` again): the changed `Teardown` section stays
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates
 - If lock doesn't work: check `C:\ProgramData\ClubAgent\state.json` shows `"isLocked":true`

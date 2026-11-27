@@ -218,6 +218,45 @@ staff-pin.json exists after the staff PIN is set (True)
 private: only SYSTEM, Administrators and LOCAL SERVICE have access
 ```
 
+## Session teardown
+
+At the end of a session (ended at the desk, time over, money used up, moved to another PC, or a staff unlock
+without a session that is locked again) the lock screen of the PC:
+
+1. closes the programs it started from the game grid, with their child processes, and the processes of the
+   games it started;
+2. closes every process with a name from `KillProcessNames` (by default the game launchers, Discord, Telegram
+   and the browsers), only in the player's Windows session; Windows processes and the shell are never closed;
+3. when `Cleanup.Enabled` is `true`, deletes the `Cleanup.Paths`, only inside `Cleanup.AllowedRoots`;
+4. reports what it did to the agent; the audit log shows `device.session_teardown` ("3 program(s) closed
+   (steam, cs2, Discord); cleanup removed 31 file(s) …").
+
+A pause or a staff lock during the session closes nothing. The settings are in `C:\ClubAgent\appsettings.json`
+on each PC (only administrators can change the folder; the installer keeps the section on a reinstall):
+
+```json
+"Teardown": {
+  "KillProcessNames": [ "steam", "steamwebhelper", "EpicGamesLauncher", "Discord", "chrome", "msedge", "firefox" ],
+  "Cleanup": {
+    "Enabled": false,
+    "AllowedRoots": [ "%LOCALAPPDATA%", "%APPDATA%" ],
+    "Paths": [ "%LOCALAPPDATA%\\Google\\Chrome\\User Data", "%APPDATA%\\discord\\Local Storage" ]
+  }
+}
+```
+
+- `%VARIABLES%` are expanded in the player's Windows account (`%LOCALAPPDATA%` = the player's profile).
+- Turn the cleanup on only for a shared kiosk account (`-KioskMode`: all players use `ClubUser`), so that
+  the next player never gets the browser, chat or launcher login of the previous one. Check the paths first:
+  everything under them is deleted (for example all Chrome profiles of the account).
+- A path outside the allowed roots, a drive, an allowed root itself, a relative path or a path with an
+  unknown variable is skipped. A symbolic link, junction or other reparse point is never followed: as the
+  path, in the path or inside the deleted tree it is skipped, its target stays.
+- Steam stores the saved logins in its install folder (`C:\Program Files (x86)\Steam\config\loginusers.vdf`).
+  To delete it, add `C:\\Program Files (x86)\\Steam\\config` to `AllowedRoots` and the file to `Paths`.
+- After a change, restart the agent (`Restart-Service ClubAgent`): it writes the settings to
+  `C:\ProgramData\ClubAgent\teardown.json` for the lock screen.
+
 ## Acceptance Checks
 
 - Admin UI opens at `http://10.3.3.1:5081` and asks for a login.

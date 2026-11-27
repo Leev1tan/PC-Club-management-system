@@ -188,6 +188,7 @@ GET  /api/demo                   → Demo mode status (banner in the admin UI)  
 ├── staff-pin.json       # PBKDF2 hash of the staff PIN (from the server)
 ├── client-settings.json # club settings for the lock screen: language (uk, en), currency (from the heartbeat)
 ├── games.json           # game catalog of this PC's zone with its ETag (fetched every 30 s with If-None-Match)
+├── teardown.json        # session teardown settings from the agent's appsettings.json (never from the server)
 ├── inbox\               # players: create files only (no read, change, delete)
 │   └── event-*.json     # note of an emergency PIN unlock (launcher); the agent sends it, then deletes it
 └── private\             # SYSTEM, Administrators, agent only
@@ -249,6 +250,18 @@ becomes debt), audited "balance used up". Pause keeps the end; resume and transf
 **Warnings**: at 10, 5 and 1 minute left the lock screen plays a sound and shows a small window on top of other
 windows (also over a game in borderless mode) for 10 s; the banner on the session screen stays in the last 10
 minutes. When the end moves (extension, top-up), warnings that lie behind are not repeated.
+
+**Session teardown** (`MainWindow.Teardown.cs`, logic in `Cms.Client/SessionTeardown.cs`): `TeardownTrigger`
+decides that the session of the PC is over (the agent locks the PC and the session seen while unlocked is gone,
+or the agent reports `session_expired`; never on a pause, a staff lock during the session or a silent agent).
+`ProcessTeardown.Plan` takes the processes of the player's Windows session only: the processes the lock screen
+started (same id and name, so a reused id is not killed), the process names of the games it started and the
+configured names; never this program, the shell or Windows processes. They are killed with their child
+processes (`IProcessTable.Kill(entireTree)`). `DataCleanup` (off by default) deletes the configured paths only
+inside the allowed roots: every directory from the root to the target must be a real directory, links inside
+the tree are skipped, read-only files are deleted, files in use are errors. Both work behind interfaces
+(`IProcessTable`, `IFileSystem`) and are tested with a fake process list, a fake Windows file system and real
+symbolic links on Linux. The note goes to the inbox; the server audits `device.session_teardown`.
 
 **State Polling**:
 - Reads `state.json` every 2 seconds
