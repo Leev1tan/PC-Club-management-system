@@ -28,6 +28,10 @@ public static class LedgerTypes
     public const string Legacy = "legacy";
     /// <summary>Cash taken out of the drawer during a shift (collection, supplier), with a reason (-desk).</summary>
     public const string CashPayout = "cash_payout";
+    /// <summary>Bar receipt: cash or card at the desk (+desk) or from the real balance (-balance; bonus never pays at the bar).</summary>
+    public const string BarSale = "bar_sale";
+    /// <summary>Refund of a bar receipt, the same way it was paid (-desk or +balance).</summary>
+    public const string BarRefund = "bar_refund";
 }
 
 public static class PaymentMethods

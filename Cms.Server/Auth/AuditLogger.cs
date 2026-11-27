@@ -58,6 +58,14 @@ public static class AuditActions
     public const string ShiftOpened = "shift.opened";
     public const string ShiftClosed = "shift.closed";
     public const string ShiftCashPayout = "shift.cash_payout";
+
+    public const string ProductCreated = "product.created";
+    public const string ProductUpdated = "product.updated";
+    public const string ProductPriceChanged = "product.price_changed";
+    public const string ProductDeleted = "product.deleted";
+    public const string StockRestocked = "stock.restocked";
+    public const string StockCorrected = "stock.corrected";
+    public const string SaleRefunded = "sale.refunded";
 }
 
 /// <summary>
