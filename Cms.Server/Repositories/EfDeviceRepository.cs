@@ -125,6 +125,12 @@ public class EfDeviceRepository : IDeviceRepository
             device.LastIp = request.Ip;
             changed = true;
         }
+        // The MAC address for Wake-on-LAN; an invalid value is ignored (the last valid one stays)
+        if (MacAddresses.Normalize(request.Mac) is { } mac && device.MacAddress != mac)
+        {
+            device.MacAddress = mac;
+            changed = true;
+        }
         if (_runtime == null || _runtime.TakeHeartbeatSample(device.Id, now, _retention.HeartbeatSampleInterval))
         {
             _db.Heartbeats.Add(new HeartbeatEntity

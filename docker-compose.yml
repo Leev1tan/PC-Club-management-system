@@ -28,6 +28,8 @@
 #   DEMO_RESET_HOURS    demo wipe + re-seed interval in hours (default 6; 0 = only on restart)
 #   CMS_TIMEZONE        club time zone for tariff rules and packages (default Europe/Kyiv)
 #   CMS_REQUIRE_OPEN_SHIFT  cash and card payments need an open shift (default true)
+#   CMS_WAKE_BROADCAST / CMS_WAKE_PORT  Wake-on-LAN target (default 255.255.255.255, 9); the compose network
+#                       cannot broadcast into the club LAN: use a relay address or host networking (ClubDeployment.md)
 #   CMS_SERVER_IMAGE / CMS_UI_IMAGE   use pre-built images instead of building locally
 
 name: ccms
@@ -68,6 +70,8 @@ services:
       DEMO_RESET_HOURS: ${DEMO_RESET_HOURS:-6}
       Club__TimeZone: ${CMS_TIMEZONE:-Europe/Kyiv}
       Shifts__RequireOpenShift: ${CMS_REQUIRE_OPEN_SHIFT:-true}
+      Power__WakeBroadcast: ${CMS_WAKE_BROADCAST:-255.255.255.255}
+      Power__WakePort: ${CMS_WAKE_PORT:-9}
     volumes:
       # login cookie keys and the one-time setup code (logins survive a container restart)
       - serverdata:/app/data

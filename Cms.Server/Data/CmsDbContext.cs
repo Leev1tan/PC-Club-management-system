@@ -141,6 +141,7 @@ public class CmsDbContext : DbContext
             entity.Property(e => e.DeviceKey).HasMaxLength(500).IsRequired();
             entity.HasIndex(e => e.DeviceKey).IsUnique();
             entity.Property(e => e.Status).HasMaxLength(20).IsRequired().HasDefaultValue("approved");
+            entity.Property(e => e.MacAddress).HasMaxLength(17);
             entity.HasOne<ZoneEntity>().WithMany().HasForeignKey(e => e.ZoneId).OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -453,6 +454,8 @@ public class DeviceEntity
     public Guid? ZoneId { get; set; }
     public int? PositionX { get; set; }  // For PC map grid
     public int? PositionY { get; set; }
+    /// <summary>MAC address of the network card the agent uses ("AA:BB:CC:DD:EE:FF"), from the heartbeat; for Wake-on-LAN.</summary>
+    public string? MacAddress { get; set; }
 }
 
 public class ZoneEntity

@@ -170,6 +170,10 @@ namespace Cms.Server.Migrations
                     b.Property<DateTimeOffset?>("LastSeenUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("MacAddress")
+                        .HasMaxLength(17)
+                        .HasColumnType("character varying(17)");
+
                     b.Property<string>("OsVersion")
                         .IsRequired()
                         .HasMaxLength(255)

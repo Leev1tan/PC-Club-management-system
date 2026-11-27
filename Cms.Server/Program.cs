@@ -90,6 +90,12 @@ builder.Services.AddSingleton(sp => Cms.Server.Billing.ClubClock.FromConfigurati
 // Repositories
 builder.Services.AddSingleton<DeviceRuntimeState>();
 builder.Services.AddSingleton<Cms.Server.Devices.PlayerLoginLimiter>();
+// Wake-on-LAN: UDP to Power:WakeBroadcast / Power:WakePort; the demo simulates it (no network traffic)
+builder.Services.AddSingleton(Cms.Server.Devices.PowerOptions.FromConfiguration(builder.Configuration));
+if (demo.Enabled)
+    builder.Services.AddSingleton<Cms.Server.Devices.IWakeOnLanSender, Cms.Server.Demo.DemoWakeOnLanSender>();
+else
+    builder.Services.AddSingleton<Cms.Server.Devices.IWakeOnLanSender, Cms.Server.Devices.UdpWakeOnLanSender>();
 builder.Services.AddScoped<Cms.Server.Repositories.IDeviceRepository, Cms.Server.Repositories.EfDeviceRepository>();
 builder.Services.AddScoped<Cms.Server.Repositories.ISessionRepository, Cms.Server.Repositories.EfSessionRepository>();
 
@@ -113,6 +119,8 @@ var app = builder.Build();
 if (builder.Configuration.GetValue("Cors:AllowAnyOrigin", false))
     app.Logger.LogWarning("Cors:AllowAnyOrigin is no longer supported and is ignored; use Cors:AllowedOrigins.");
 app.Logger.LogInformation("Data directory: {DataDirectory}", paths.DataDirectory);
+if (app.Services.GetRequiredService<Cms.Server.Devices.PowerOptions>().Error is { } powerError)
+    app.Logger.LogError("Wake-on-LAN is off: {Error}", powerError);
 if (sqlitePath != null)
     app.Logger.LogInformation("SQLite database: {Path}", sqlitePath);
 if (sqliteCopiedFrom != null)

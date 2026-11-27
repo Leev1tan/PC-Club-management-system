@@ -18,7 +18,9 @@ namespace Cms.Server.Demo;
 /// sees exactly what it would see with real PCs:
 ///  - heartbeats every 5 s (one PC stays offline on purpose);
 ///  - picks up queued commands and acknowledges them after a short, random delay;
-///  - "restart" takes the PC offline for about 30 s, then it comes back;
+///  - "restart" takes the PC offline for about 30 s, then it comes back; "shutdown" takes it offline
+///    until a Wake-on-LAN (simulated, no network traffic) or for 3 minutes; a wake starts the always
+///    offline PC for 10 minutes;
 ///  - an autopilot starts sessions so the club map keeps changing: walk-in guests pay in cash or by
 ///    card, sometimes a registered player pays from the balance, sometimes a package is bought;
 ///  - now and then a session is paused for a few minutes and resumed;
@@ -34,6 +36,9 @@ public sealed class DemoSimulator
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RestartDowntime = TimeSpan.FromSeconds(30); // > 20 s "offline" threshold
+    private static readonly TimeSpan ShutdownDowntime = TimeSpan.FromMinutes(3);   // comes back by itself: the public demo stays whole
+    private static readonly TimeSpan WakeAwake = TimeSpan.FromMinutes(10);        // the always offline PC after a wake
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Guid> _wakes = new();
     private static readonly TimeSpan HeartbeatPruneInterval = TimeSpan.FromMinutes(10);
     private const double TargetOccupancy = 0.65;
     private const int MaxPaused = 2;
@@ -100,8 +105,28 @@ public sealed class DemoSimulator
         _nextGamesUtc = now.AddSeconds(_games.Next(15, 30));
     }
 
+    /// <summary>A Wake-on-LAN of the admin UI (any thread): handled in the next tick.</summary>
+    public void Wake(Guid deviceId) => _wakes.Enqueue(deviceId);
+
+    private void HandleWakes(DateTimeOffset now)
+    {
+        while (_wakes.TryDequeue(out var id))
+        {
+            if (!_pcs.TryGetValue(id, out var pc) || pc.IsUp(now)) continue;
+            var boot = now.AddSeconds(_rng.Next(15, 26));
+            if (pc.ShutDownUntilUtc.HasValue) pc.ShutDownUntilUtc = boot;
+            if (pc.Info.AlwaysOffline)
+            {
+                (pc.AwakeFromUtc, pc.AwakeUntilUtc) = (boot, boot + WakeAwake);
+                pc.Booting = true;
+            }
+            _logger.LogInformation("Demo: {Host} wakes up (Wake-on-LAN)", pc.Info.Hostname);
+        }
+    }
+
     public async Task TickAsync(CmsDbContext db, IDeviceRepository repo, DateTimeOffset now, CancellationToken ct = default)
     {
+        HandleWakes(now);
         SendHeartbeats(repo, now);
         await PickUpCommandsAsync(db, repo, now, ct);
         ExecuteDueCommands(repo, now);
@@ -152,11 +177,13 @@ public sealed class DemoSimulator
     {
         foreach (var pc in _pcs.Values)
         {
-            if (pc.Info.AlwaysOffline) continue;
-            if (pc.RestartingUntilUtc is { } until)
+            if (!pc.IsUp(now)) continue;
+            if (pc.RestartingUntilUtc.HasValue || pc.ShutDownUntilUtc.HasValue || pc.Booting)
             {
-                if (now < until) continue;
-                pc.RestartingUntilUtc = null; // back from the restart
+                // back from a restart, a shutdown or a wake
+                pc.RestartingUntilUtc = null;
+                pc.ShutDownUntilUtc = null;
+                pc.Booting = false;
                 pc.BootedUtc = now;
                 pc.NextHeartbeatUtc = now;
             }
@@ -168,7 +195,8 @@ public sealed class DemoSimulator
                 MemPercent: inUse ? _rng.Next(45, 85) : _rng.Next(18, 30),
                 ActiveUser: inUse ? "player" : "kiosk",
                 Ip: pc.Info.Ip,
-                Uptime: now - pc.BootedUtc));
+                Uptime: now - pc.BootedUtc,
+                Mac: pc.Info.Mac));
             pc.NextHeartbeatUtc = now + HeartbeatInterval;
         }
     }
@@ -219,6 +247,10 @@ public sealed class DemoSimulator
                 pc.RestartingUntilUtc = now + RestartDowntime + TimeSpan.FromSeconds(_rng.Next(0, 10));
                 _logger.LogInformation("Demo: {Host} restarts", pc.Info.Hostname);
                 return ("done", "Restart scheduled in 5 seconds");
+            case CommandTypes.Shutdown:
+                pc.ShutDownUntilUtc = now + ShutdownDowntime;
+                _logger.LogInformation("Demo: {Host} shuts down", pc.Info.Hostname);
+                return ("done", "Shutdown scheduled in 5 seconds");
             default:
                 return ("ignored", "Unknown command");
         }
@@ -468,9 +500,20 @@ public sealed class DemoSimulator
         public DateTimeOffset NextHeartbeatUtc { get; set; }
         public DateTimeOffset BootedUtc { get; set; }
         public DateTimeOffset? RestartingUntilUtc { get; set; }
+        /// <summary>Shut down: offline until this time (a wake brings it closer).</summary>
+        public DateTimeOffset? ShutDownUntilUtc { get; set; }
+        /// <summary>The always offline PC runs from AwakeFromUtc to AwakeUntilUtc after a wake.</summary>
+        public DateTimeOffset? AwakeFromUtc { get; set; }
+        public DateTimeOffset? AwakeUntilUtc { get; set; }
+        public bool Booting { get; set; }
 
-        public bool IsUp(DateTimeOffset now) =>
-            !Info.AlwaysOffline && (RestartingUntilUtc is not { } until || now >= until);
+        public bool IsUp(DateTimeOffset now)
+        {
+            if (Info.AlwaysOffline && !(AwakeFromUtc <= now && now < AwakeUntilUtc)) return false;
+            if (RestartingUntilUtc is { } restart && now < restart) return false;
+            if (ShutDownUntilUtc is { } down && now < down) return false;
+            return true;
+        }
     }
 
     private sealed record PendingAck(Guid DeviceId, CommandView Command, DateTimeOffset DueUtc);

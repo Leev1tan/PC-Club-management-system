@@ -137,6 +137,7 @@ public class DevicesController : ControllerBase
                     : session.TariffId.HasValue && tariffNames.TryGetValue(session.TariffId.Value, out var tariff) ? tariff : null,
                 SessionIsPackage = session?.PackageId != null,
                 CurrentGame = games.TryGetValue(d.Id, out var game) ? game.Name : null,
+                MacAddress = d.MacAddress,
                 CurrentGameColor = game?.Color,
                 CurrentGameStartedUtc = game?.StartUtc
             };
@@ -182,6 +183,8 @@ public class DevicesController : ControllerBase
         if (!StaffCommandTypes.Contains(request.Type ?? string.Empty))
             return BadRequest(new { error = $"Unknown command. Allowed: {string.Join(", ", StaffCommandTypes)}." });
         var type = request.Type!.ToLowerInvariant();
+        // A reboot is a power action: Owner, Manager and Tech only (not the cashier)
+        if (type == CommandTypes.Restart && !CanPower(User)) return PowerForbidden();
         var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId);
         if (device == null) return NotFound();
 
@@ -196,6 +199,62 @@ public class DevicesController : ControllerBase
             withoutSession ? $"Unlocked {device.Hostname} without an active session (no payment)" : $"Command {type} sent to {device.Hostname}",
             new { type, message = text is { Length: > 200 } ? text[..200] : text });
         return Ok(cmd);
+    }
+
+    private static bool CanPower(System.Security.Claims.ClaimsPrincipal user) =>
+        user.IsInRole(StaffRoles.Owner) || user.IsInRole(StaffRoles.Manager) || user.IsInRole(StaffRoles.Tech);
+
+    private ObjectResult PowerForbidden() => StatusCode(StatusCodes.Status403Forbidden,
+        new { error = "Only the owner, a manager or a technician may shut down, reboot or wake a PC.", code = "power_forbidden" });
+
+    /// <summary>
+    /// Shutdown or reboot through the command queue (the agent runs shutdown /s or /r), or Wake-on-LAN: the
+    /// server sends the magic packet to the MAC address from the heartbeat (Power:WakeBroadcast, Power:WakePort;
+    /// simulated in the demo). Owner, Manager and Tech; audited as device.power.
+    /// </summary>
+    [HttpPost("{deviceId:guid}/power")]
+    [Authorize(Policy = Policies.DeviceAdmin)]
+    public async Task<ActionResult<PowerView>> Power(Guid deviceId, [FromBody] PowerRequest request,
+        [FromServices] Cms.Server.Devices.IWakeOnLanSender wake, [FromServices] Cms.Server.Devices.PowerOptions options)
+    {
+        var action = request.Action?.Trim().ToLowerInvariant();
+        if (action is not ("shutdown" or "reboot" or "wake"))
+            return BadRequest(new { error = "Action must be shutdown, reboot or wake.", code = "bad_power_action" });
+        var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId);
+        if (device == null) return NotFound();
+        if (device.Status != DeviceStatuses.Approved)
+            return Conflict(new { error = "The PC is not approved.", code = "device_not_approved" });
+        var session = await _db.Sessions.AsNoTracking().FirstOrDefaultAsync(s => s.DeviceId == deviceId && s.Status == "active");
+        var player = session?.UserId is { } uid ? await _db.Users.AsNoTracking().Where(u => u.Id == uid).Select(u => u.Username).FirstOrDefaultAsync() : null;
+        var during = session == null ? "" : $" during the session of {(player != null ? "@" + player : "a guest")} (the session goes on)";
+
+        if (action == "wake")
+        {
+            if (options.Error != null)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = options.Error, code = "wake_not_configured" });
+            var mac = MacAddresses.Parse(device.MacAddress);
+            if (mac == null)
+                return Conflict(new { error = "The PC has not reported its MAC address yet (the agent sends it with the heartbeat).", code = "no_mac" });
+            var target = options.Target;
+            try
+            {
+                await wake.SendAsync(device.Id, mac, target, HttpContext.RequestAborted);
+            }
+            catch (System.Net.Sockets.SocketException ex)
+            {
+                return StatusCode(StatusCodes.Status502BadGateway, new { error = $"Wake-on-LAN could not be sent: {ex.Message}", code = "wake_failed" });
+            }
+            await AuditAsync(AuditActions.DevicePower, deviceId, $"Wake-on-LAN sent to {device.Hostname} ({device.MacAddress}) via {target}",
+                new { action, device.Hostname, mac = device.MacAddress, target = target.ToString() });
+            return Ok(new PowerView(action, device.Hostname, null, device.MacAddress, target.ToString(), session != null));
+        }
+
+        var type = action == "shutdown" ? CommandTypes.Shutdown : CommandTypes.Restart;
+        var cmd = _devices.EnqueueCommand(deviceId, new EnqueueCommandRequest(type, null));
+        if (cmd == null) return NotFound();
+        await AuditAsync(AuditActions.DevicePower, deviceId, $"{(action == "shutdown" ? "Shutdown" : "Reboot")} sent to {device.Hostname}{during}",
+            new { action, device.Hostname, commandId = cmd.Id, sessionId = session?.Id, player });
+        return Ok(new PowerView(action, device.Hostname, cmd.Id, null, null, session != null));
     }
 
     [HttpGet("{deviceId:guid}/commands")]
@@ -330,7 +389,12 @@ public sealed record DeviceRegistrationResult(DeviceRegistrationKind Kind, Devic
     public static DeviceRegistrationResult Unauthorized(string error) => new(DeviceRegistrationKind.Unauthorized, null, error);
     public static DeviceRegistrationResult Invalid(string error) => new(DeviceRegistrationKind.Invalid, null, error);
 }
-public record DeviceHeartbeatRequest(double CpuPercent, double MemPercent, string? ActiveUser, string Ip, TimeSpan Uptime);
+/// <summary>Mac: MAC address of the network card that the agent uses (for Wake-on-LAN); optional.</summary>
+public record DeviceHeartbeatRequest(double CpuPercent, double MemPercent, string? ActiveUser, string Ip, TimeSpan Uptime, string? Mac = null);
+/// <summary>Action: shutdown, reboot or wake (Wake-on-LAN).</summary>
+public record PowerRequest(string? Action);
+/// <summary>CommandId: the queued shutdown or reboot; Mac and Target: where the Wake-on-LAN packet went.</summary>
+public record PowerView(string Action, string Hostname, Guid? CommandId, string? Mac, string? Target, bool ActiveSession);
 public record DeviceView(Guid Id, string Hostname, string OsVersion, string AgentVersion, DateTimeOffset? LastSeenUtc, string? LastIp, string Status);
 public record DeviceDetailView(
     Guid Id, string Hostname, string OsVersion, string AgentVersion,
@@ -352,6 +416,8 @@ public record DeviceDetailView(
     public bool SessionIsPackage { get; init; }
     /// <summary>Game that runs in the active session (reported by the lock screen), its tile colour and start.</summary>
     public string? CurrentGame { get; init; }
+    /// <summary>MAC address from the heartbeat (Wake-on-LAN); null until the agent reported it.</summary>
+    public string? MacAddress { get; init; }
     public string? CurrentGameColor { get; init; }
     public DateTimeOffset? CurrentGameStartedUtc { get; init; }
 }

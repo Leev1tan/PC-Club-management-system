@@ -29,6 +29,8 @@ public static class AuditActions
     public const string DeviceRevoked = "device.revoked";
     public const string DeviceZoneChanged = "device.zone_changed";
     public const string DeviceCommand = "device.command";
+    /// <summary>Shutdown, reboot or Wake-on-LAN of a PC (Owner, Manager, Tech).</summary>
+    public const string DevicePower = "device.power";
     /// <summary>Unlock of a PC that has no active session: time without payment.</summary>
     public const string UnlockWithoutSession = "device.unlock_without_session";
     /// <summary>Staff PIN typed on the lock screen (Ctrl+Shift+U), reported by the agent afterwards.</summary>

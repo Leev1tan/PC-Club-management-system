@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Cms.Server.Demo;
 
 /// <summary>A seeded PC that the demo simulator drives.</summary>
-public sealed record SimulatedPc(Guid Id, string Hostname, string DeviceKey, string Ip, bool AlwaysOffline, bool? Locked);
+public sealed record SimulatedPc(Guid Id, string Hostname, string DeviceKey, string Ip, bool AlwaysOffline, bool? Locked, string? Mac = null);
 
 /// <summary>PausedSessions: seeded paused sessions (the simulator resumes them after a few minutes).</summary>
 public sealed record DemoSeedResult(IReadOnlyList<SimulatedPc> Pcs, IReadOnlyList<Guid>? PausedSessions = null);
@@ -345,6 +345,7 @@ public static partial class DemoSeeder
                     var offline = hostname == OfflineHostname;
                     var ip = $"10.3.3.{ipSuffix++}";
                     var deviceKey = $"demo-{Guid.NewGuid():N}"; // the database stores only its hash
+                    var mac = $"02:CC:4D:53:{z:X2}:{i:X2}";     // locally administered: no real card has it
                     var device = new DeviceEntity
                     {
                         Id = Guid.NewGuid(),
@@ -358,11 +359,12 @@ public static partial class DemoSeeder
                         LastIp = ip,
                         ZoneId = zone.Id,
                         PositionX = (i - 1) % 6,
-                        PositionY = row + (i - 1) / 6
+                        PositionY = row + (i - 1) / 6,
+                        MacAddress = mac
                     };
                     Club.Add(device);
                     _pcs.Add(new PcInfo(device, tariff, pricing, packs, spec.Demand));
-                    pcs.Add(new SimulatedPc(device.Id, hostname, deviceKey, ip, offline, null));
+                    pcs.Add(new SimulatedPc(device.Id, hostname, deviceKey, ip, offline, null, mac));
                 }
                 row += (spec.Count + 5) / 6 + 1;
             }
