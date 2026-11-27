@@ -401,6 +401,23 @@ $inboxDir = Join-Path $programDataConfigDir "inbox"
 if (!(Test-Path $inboxDir)) { New-Item -ItemType Directory -Path $inboxDir -Force | Out-Null }
 icacls $inboxDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" "*S-1-5-32-545:(WD,S)" "*S-1-3-4:(OI)(IO)(RC)" | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the permissions of $inboxDir" }
+#   ClubAgent\logs    the text log of the agent (agent.log, at most 4 files of 1 MB): SYSTEM, Administrators: full;
+#                     agent: modify; no access for players.
+$logsDir = Join-Path $programDataConfigDir "logs"
+if (!(Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -Force | Out-Null }
+icacls $logsDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)M" | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Warning "Could not set the permissions of $logsDir" }
+
+# The event source of the agent in the Application log. LocalService cannot create it; without it Windows drops the
+# warnings and errors of the agent ("The source Cms.Agent.Service was not found").
+try {
+    if (-not [System.Diagnostics.EventLog]::SourceExists('Cms.Agent.Service')) {
+        [System.Diagnostics.EventLog]::CreateEventSource('Cms.Agent.Service', 'Application')
+        Write-Host "   Event source Cms.Agent.Service registered (Application log)" -ForegroundColor Gray
+    }
+} catch {
+    Write-Warning "Could not register the event source Cms.Agent.Service: $($_.Exception.Message). The agent still writes $logsDir\agent.log"
+}
 
 # Earlier versions kept the device key in the readable folder; the agent moves it, remove a stale copy
 $legacyDeviceFile = Join-Path $programDataConfigDir "device.json"

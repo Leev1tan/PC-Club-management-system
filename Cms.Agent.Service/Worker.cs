@@ -79,6 +79,8 @@ public partial class Worker : BackgroundService
     /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _logger.LogInformation("ClubAgent {Version} started (process {Pid}; log folder {LogDir})",
+            typeof(Worker).Assembly.GetName().Version?.ToString() ?? "?", Environment.ProcessId, AgentLog.Directory);
         // Each start step logs its own error; a failed step never stops the agent (the PC stays locked)
         Step("create the agent folder", () => Directory.CreateDirectory(AgentDir));
         Step("create the private folder", EnsurePrivateDirectory);

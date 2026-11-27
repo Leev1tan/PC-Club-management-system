@@ -98,6 +98,8 @@ public static class AgentFiles
     /// read, change or delete them; the agent reads them and sends them to the server (audit log).
     /// </summary>
     public const string InboxDirectoryName = "inbox";
+    /// <summary>The text log of the agent (agent.log and older files): SYSTEM, Administrators and the agent only.</summary>
+    public const string LogDirectoryName = "logs";
 
     /// <summary>The launcher locks the PC when the agent heartbeat file is older than this.</summary>
     public static readonly TimeSpan AgentSilentAfter = TimeSpan.FromSeconds(15);
