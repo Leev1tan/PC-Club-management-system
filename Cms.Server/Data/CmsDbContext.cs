@@ -17,6 +17,39 @@ public class CmsDbContext : DbContext
     public DbSet<StaffUserEntity> StaffUsers => Set<StaffUserEntity>();
     public DbSet<ClubSettingEntity> ClubSettings => Set<ClubSettingEntity>();
 
+    public const string ActiveSessionIndex = "IX_Sessions_DeviceId_Active";
+
+    /// <summary>
+    /// Ends all but the newest active session of each PC. Runs before the unique index
+    /// IX_Sessions_DeviceId_Active is created on an existing database (PostgreSQL migration, SQLite upgrade).
+    /// </summary>
+    public const string EndDuplicateActiveSessionsSql =
+        "UPDATE \"Sessions\" SET \"Status\" = 'ended' WHERE \"Status\" = 'active' AND EXISTS (" +
+        "SELECT 1 FROM \"Sessions\" AS o WHERE o.\"DeviceId\" = \"Sessions\".\"DeviceId\" AND o.\"Status\" = 'active' " +
+        "AND (o.\"StartUtc\" > \"Sessions\".\"StartUtc\" OR (o.\"StartUtc\" = \"Sessions\".\"StartUtc\" AND o.\"Id\" > \"Sessions\".\"Id\")))";
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        BeforeSave();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        BeforeSave();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void BeforeSave()
+    {
+        // Every change of a session gets a new stamp; EF checks the old one in the UPDATE
+        foreach (var entry in ChangeTracker.Entries<SessionEntity>())
+        {
+            if (entry.State == EntityState.Modified)
+                entry.Entity.ConcurrencyStamp = Guid.NewGuid();
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<DeviceEntity>(entity =>
@@ -67,6 +100,13 @@ public class CmsDbContext : DbContext
             entity.HasOne<TariffEntity>().WithMany().HasForeignKey(e => e.TariffId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne<UserEntity>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(e => new { e.DeviceId, e.Status });
+            // At most ONE active session per PC, enforced by the database (partial unique index)
+            entity.HasIndex(e => e.DeviceId)
+                .IsUnique()
+                .HasFilter("\"Status\" = 'active'")
+                .HasDatabaseName(ActiveSessionIndex);
+            // Optimistic concurrency: a session changed by someone else in between cannot be saved
+            entity.Property(e => e.ConcurrencyStamp).IsConcurrencyToken();
         });
 
         modelBuilder.Entity<HeartbeatEntity>(entity =>
@@ -179,6 +219,8 @@ public class SessionEntity
     public string Status { get; set; } = "active"; // active, paused, ended
     public decimal TotalCost { get; set; }
     public bool IsPrepaid { get; set; }  // true = fixed duration, false = open-ended (pay on exit)
+    /// <summary>Concurrency token; changes on every update (see CmsDbContext.BeforeSave).</summary>
+    public Guid ConcurrencyStamp { get; set; } = Guid.NewGuid();
 }
 
 public class HeartbeatEntity

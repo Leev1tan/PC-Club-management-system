@@ -181,6 +181,10 @@ namespace Cms.Server.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("DeviceId")
                         .HasColumnType("uuid");
 
@@ -208,6 +212,11 @@ namespace Cms.Server.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DeviceId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Sessions_DeviceId_Active")
+                        .HasFilter("\"Status\" = 'active'");
 
                     b.HasIndex("TariffId");
 

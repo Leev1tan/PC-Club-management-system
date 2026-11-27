@@ -44,4 +44,37 @@ public sealed class SqliteSchemaUpgradeTests : IDisposable
             Assert.Empty(await SqliteSchemaUpgrader.UpgradeAsync(db));
         }
     }
+
+    [Fact]
+    public async Task Upgrade_ends_duplicate_active_sessions_before_the_unique_index()
+    {
+        var deviceId = Guid.NewGuid();
+        await using (var db = _testDb.NewContext())
+        {
+            await db.Database.ExecuteSqlRawAsync("DROP INDEX \"IX_Sessions_DeviceId_Active\"");
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Sessions\" DROP COLUMN \"ConcurrencyStamp\"");
+            db.Devices.Add(new DeviceEntity { Id = deviceId, Hostname = "PC-01", DeviceKey = "k" });
+            await db.SaveChangesAsync();
+            var now = DateTimeOffset.UtcNow;
+            foreach (var minutes in new[] { 90, 60, 30 })
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "INSERT INTO \"Sessions\" (\"Id\", \"DeviceId\", \"StartUtc\", \"Status\", \"TotalCost\", \"IsPrepaid\") VALUES ({0}, {1}, {2}, 'active', '0.0', 0)",
+                    Guid.NewGuid().ToString().ToUpperInvariant(), deviceId.ToString().ToUpperInvariant(), now.AddMinutes(-minutes));
+            }
+        }
+
+        await using (var db = _testDb.NewContext())
+        {
+            var changes = await SqliteSchemaUpgrader.UpgradeAsync(db);
+            Assert.Contains("index IX_Sessions_DeviceId_Active", changes);
+            Assert.Contains("column Sessions.ConcurrencyStamp", changes);
+        }
+
+        await using (var db = _testDb.NewContext())
+        {
+            var sessions = (await db.Sessions.AsNoTracking().ToListAsync()).OrderBy(s => s.StartUtc).ToList();
+            Assert.Equal(new[] { "ended", "ended", "active" }, sessions.Select(s => s.Status));
+        }
+    }
 }

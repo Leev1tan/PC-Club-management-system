@@ -63,10 +63,13 @@ public class DevicesController : ControllerBase
         var zones = await _db.Zones.AsNoTracking().ToDictionaryAsync(z => z.Id);
 
         // Get active sessions for each device
-        var activeSessions = await _db.Sessions
-            .Where(s => s.Status == "active")
-            .AsNoTracking()
-            .ToDictionaryAsync(s => s.DeviceId);
+        // The database allows one active session per PC; GroupBy keeps the list working on any data
+        var activeSessions = (await _db.Sessions
+                .Where(s => s.Status == "active")
+                .AsNoTracking()
+                .ToListAsync())
+            .GroupBy(s => s.DeviceId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.StartUtc).First());
 
         // Commands queued for a device but not yet acknowledged by its agent
         var pendingCommands = await _db.Commands.AsNoTracking()

@@ -23,31 +23,18 @@ public class SessionsController : ControllerBase
 
     /// <summary>
     /// Start a new session. Supports two modes:
-    /// 1. Prepaid: specify durationMinutes — cost calculated upfront
+    /// 1. Prepaid: specify durationMinutes — cost calculated upfront and taken from the player balance
     /// 2. Open-ended: no durationMinutes — runs until manually ended, cost calculated at end
+    /// The balance debit, the ledger row and the session are one transaction. The database allows only
+    /// one active session per PC (unique index), so two cashiers cannot start two sessions on one PC.
     /// </summary>
     [HttpPost]
     public async Task<ActionResult<SessionDetailView>> Start([FromBody] StartSessionRequest req)
     {
         var device = await _db.Devices.FindAsync(req.DeviceId);
         if (device == null) return NotFound("Device not found");
-
-        var now = DateTimeOffset.UtcNow;
-        var activeForDevice = await _db.Sessions
-            .Where(s => s.DeviceId == req.DeviceId && s.Status == "active")
-            .ToListAsync();
-
-        foreach (var expired in activeForDevice.Where(s =>
-                     s.IsPrepaid && s.EndUtc.HasValue && s.EndUtc.Value <= now))
-        {
-            expired.Status = "ended";
-        }
-
-        var blockingSession = activeForDevice.FirstOrDefault(s =>
-            s.Status == "active" &&
-            (!s.IsPrepaid || !s.EndUtc.HasValue || s.EndUtc.Value > now));
-        if (blockingSession != null)
-            return Conflict("Device already has an active session.");
+        if (device.Status != Cms.Server.Auth.DeviceStatuses.Approved) return Conflict("The PC is not approved.");
+        if (req.DurationMinutes is < 0 or > 24 * 60) return BadRequest("Duration must be between 1 and 1440 minutes");
 
         // Resolve tariff: explicit > zone default > system default
         TariffEntity? tariff = null;
@@ -60,34 +47,17 @@ public class SessionsController : ControllerBase
         if (tariff == null)
             return BadRequest("No tariff configured. Create a tariff first.");
 
-        bool isPrepaid = req.DurationMinutes.HasValue && req.DurationMinutes > 0;
-        var endUtc = isPrepaid ? now.AddMinutes(req.DurationMinutes!.Value) : (DateTimeOffset?)null;
-        decimal totalCost = isPrepaid ? Math.Round(tariff.PricePerHour * req.DurationMinutes!.Value / 60m, 2) : 0;
-
-        // If user is specified and prepaid, check/deduct balance
         UserEntity? user = null;
         if (req.UserId.HasValue)
         {
-            user = await _db.Users.FindAsync(req.UserId.Value);
+            user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == req.UserId.Value);
             if (user == null) return NotFound("User not found");
-
-            if (isPrepaid && user.Balance < totalCost)
-                return BadRequest($"Insufficient balance. Need {totalCost} ₴, have {user.Balance} ₴");
-
-            if (isPrepaid)
-            {
-                user.Balance -= totalCost;
-                _db.Transactions.Add(new TransactionEntity
-                {
-                    Id = Guid.NewGuid(),
-                    UserId = user.Id,
-                    Amount = -totalCost,
-                    Type = "session_charge",
-                    Description = $"Сесія на {device.Hostname} ({req.DurationMinutes} хв) — {totalCost} ₴",
-                    CreatedUtc = now
-                });
-            }
         }
+
+        var now = DateTimeOffset.UtcNow;
+        bool isPrepaid = req.DurationMinutes.HasValue && req.DurationMinutes > 0;
+        var endUtc = isPrepaid ? now.AddMinutes(req.DurationMinutes!.Value) : (DateTimeOffset?)null;
+        decimal totalCost = isPrepaid ? Math.Round(tariff.PricePerHour * req.DurationMinutes!.Value / 60m, 2) : 0;
 
         var session = new SessionEntity
         {
@@ -102,8 +72,45 @@ public class SessionsController : ControllerBase
             IsPrepaid = isPrepaid
         };
 
-        _db.Sessions.Add(session);
-        await _db.SaveChangesAsync();
+        await using (var tx = await _db.Database.BeginTransactionAsync())
+        {
+            // A prepaid session that has run out but is not closed yet does not block the PC
+            var activeForDevice = await _db.Sessions
+                .Where(s => s.DeviceId == req.DeviceId && s.Status == "active")
+                .ToListAsync();
+            var expired = activeForDevice.Where(s => s.IsPrepaid && s.EndUtc.HasValue && s.EndUtc.Value <= now).ToList();
+            if (activeForDevice.Count > expired.Count)
+                return Conflict("Device already has an active session.");
+            foreach (var old in expired) old.Status = "ended";
+
+            if (user != null && isPrepaid)
+            {
+                if (!await Balances.TryDebitAsync(_db, user.Id, totalCost))
+                    return BadRequest($"Insufficient balance. Need {totalCost} ₴, have {await Balances.GetAsync(_db, user.Id)} ₴");
+                _db.Transactions.Add(new TransactionEntity
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = user.Id,
+                    Amount = -totalCost,
+                    Type = "session_charge",
+                    Description = $"Сесія на {device.Hostname} ({req.DurationMinutes} хв) — {totalCost} ₴",
+                    CreatedUtc = now
+                });
+            }
+
+            try
+            {
+                if (expired.Count > 0) await _db.SaveChangesAsync(); // free the unique index first
+                _db.Sessions.Add(session);
+                await _db.SaveChangesAsync();
+                await tx.CommitAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // Another session was started on this PC at the same moment; the debit is rolled back
+                return Conflict("Device already has an active session.");
+            }
+        }
 
         // Send commands to agent
         if (endUtc.HasValue)
@@ -114,7 +121,9 @@ public class SessionsController : ControllerBase
     }
 
     /// <summary>
-    /// End a session. Calculates final cost for open-ended sessions.
+    /// End a session. Calculates the final cost of open-ended sessions and takes it from the player
+    /// balance, but never more than the balance: the rest is due at the desk (AmountDue).
+    /// Ending the same session twice at the same moment charges once (concurrency token).
     /// </summary>
     [HttpPost("{id:guid}/end")]
     public async Task<ActionResult<SessionDetailView>> End(Guid id)
@@ -124,52 +133,67 @@ public class SessionsController : ControllerBase
         if (session.Status == "ended") return BadRequest("Session already ended");
 
         var now = DateTimeOffset.UtcNow;
-        session.EndUtc = now;
-        session.Status = "ended";
-
-        // Calculate cost for open-ended sessions
-        if (!session.IsPrepaid && session.TariffId.HasValue)
+        decimal amountDue = 0;
+        await using (var tx = await _db.Database.BeginTransactionAsync())
         {
-            var tariff = await _db.Tariffs.FindAsync(session.TariffId.Value);
-            if (tariff != null)
-            {
-                var minutes = (decimal)(now - session.StartUtc).TotalMinutes;
-                session.TotalCost = Math.Round(tariff.PricePerHour * minutes / 60m, 2);
+            session.EndUtc = now;
+            session.Status = "ended";
 
-                // Deduct from user balance if applicable
-                if (session.UserId.HasValue)
+            // Calculate cost for open-ended sessions
+            TariffEntity? tariff = null;
+            var minutes = 0m;
+            if (!session.IsPrepaid && session.TariffId.HasValue)
+            {
+                tariff = await _db.Tariffs.FindAsync(session.TariffId.Value);
+                if (tariff != null)
                 {
-                    var user = await _db.Users.FindAsync(session.UserId.Value);
-                    if (user != null)
-                    {
-                        var device = await _db.Devices.FindAsync(session.DeviceId);
-                        user.Balance -= session.TotalCost;
-                        _db.Transactions.Add(new TransactionEntity
-                        {
-                            Id = Guid.NewGuid(),
-                            UserId = user.Id,
-                            Amount = -session.TotalCost,
-                            Type = "session_charge",
-                            Description = $"Сесія на {device?.Hostname ?? "?"} ({(int)minutes} хв) — {session.TotalCost} ₴",
-                            CreatedUtc = now
-                        });
-                    }
+                    minutes = (decimal)(now - session.StartUtc).TotalMinutes;
+                    session.TotalCost = Math.Round(tariff.PricePerHour * minutes / 60m, 2);
                 }
             }
-        }
 
-        await _db.SaveChangesAsync();
+            try
+            {
+                await _db.SaveChangesAsync(); // fails if someone else ended or changed the session
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict("The session was changed at the same time. Reload and try again.");
+            }
+
+            if (tariff != null && session.UserId.HasValue && session.TotalCost > 0)
+            {
+                var charged = await Balances.DebitUpToAsync(_db, session.UserId.Value, session.TotalCost);
+                amountDue = session.TotalCost - charged;
+                var device = await _db.Devices.FindAsync(session.DeviceId);
+                if (charged > 0)
+                {
+                    _db.Transactions.Add(new TransactionEntity
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = session.UserId.Value,
+                        Amount = -charged,
+                        Type = "session_charge",
+                        Description = $"Сесія на {device?.Hostname ?? "?"} ({(int)minutes} хв) — {charged} ₴" +
+                                      (amountDue > 0 ? $" (до сплати на касі: {amountDue} ₴)" : ""),
+                        CreatedUtc = now
+                    });
+                    await _db.SaveChangesAsync();
+                }
+            }
+            await tx.CommitAsync();
+        }
 
         // Lock the device + inform agent
         _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest("session_set", new { endUtc = now }));
         _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest("lock", null));
 
-        return Ok(ToDetailView(session, null, null, null, null));
+        return Ok(ToDetailView(session, null, null, null, null) with { AmountDue = amountDue });
     }
 
     /// <summary>
-    /// Extend a prepaid (fixed-duration) session by N minutes. The extra time is
-    /// charged at the session tariff and deducted from the player balance if a player is set.
+    /// Extend a prepaid (fixed-duration) session by N minutes. The extra time is charged at the session
+    /// tariff and taken from the player balance if a player is set (atomic, never below zero).
     /// </summary>
     [HttpPost("{id:guid}/extend")]
     public async Task<ActionResult<SessionDetailView>> Extend(Guid id, [FromBody] ExtendSessionRequest req)
@@ -186,16 +210,14 @@ public class SessionsController : ControllerBase
         var tariff = session.TariffId.HasValue ? await _db.Tariffs.FindAsync(session.TariffId.Value) : null;
         var extraCost = tariff != null ? Math.Round(tariff.PricePerHour * req.Minutes / 60m, 2) : 0m;
         var device = await _db.Devices.FindAsync(session.DeviceId);
+        var user = session.UserId.HasValue ? await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == session.UserId.Value) : null;
 
-        UserEntity? user = null;
-        if (session.UserId.HasValue)
+        await using (var tx = await _db.Database.BeginTransactionAsync())
         {
-            user = await _db.Users.FindAsync(session.UserId.Value);
             if (user != null)
             {
-                if (user.Balance < extraCost)
-                    return BadRequest($"Insufficient balance. Need {extraCost} ₴, have {user.Balance} ₴");
-                user.Balance -= extraCost;
+                if (!await Balances.TryDebitAsync(_db, user.Id, extraCost))
+                    return BadRequest($"Insufficient balance. Need {extraCost} ₴, have {await Balances.GetAsync(_db, user.Id)} ₴");
                 _db.Transactions.Add(new TransactionEntity
                 {
                     Id = Guid.NewGuid(),
@@ -206,13 +228,21 @@ public class SessionsController : ControllerBase
                     CreatedUtc = DateTimeOffset.UtcNow
                 });
             }
-        }
 
-        var now = DateTimeOffset.UtcNow;
-        var baseEnd = session.EndUtc.Value > now ? session.EndUtc.Value : now;
-        session.EndUtc = baseEnd.AddMinutes(req.Minutes);
-        session.TotalCost += extraCost;
-        await _db.SaveChangesAsync();
+            var now = DateTimeOffset.UtcNow;
+            var baseEnd = session.EndUtc.Value > now ? session.EndUtc.Value : now;
+            session.EndUtc = baseEnd.AddMinutes(req.Minutes);
+            session.TotalCost += extraCost;
+            try
+            {
+                await _db.SaveChangesAsync(); // fails if the session was ended or extended in between
+                await tx.CommitAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict("The session was changed at the same time. Reload and try again.");
+            }
+        }
 
         _devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest("session_set", new { endUtc = session.EndUtc }));
 
@@ -312,6 +342,7 @@ public record SessionDetailView(
     Guid? TariffId, string? TariffName, decimal? PricePerHour,
     Guid? UserId, string? Username,
     DateTimeOffset StartUtc, DateTimeOffset? EndUtc, string Status,
-    decimal TotalCost, bool IsPrepaid);
+    decimal TotalCost, bool IsPrepaid,
+    decimal AmountDue = 0); // End: part of the cost that the balance did not cover (pay at the desk)
 
 public record RevenueSummary(decimal Today, decimal Week, decimal Month, string Currency);

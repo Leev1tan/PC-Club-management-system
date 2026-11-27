@@ -47,20 +47,25 @@ public sealed class SessionExpiryService : BackgroundService
         var expired = active.Where(s => s.EndUtc!.Value <= now).ToList();
         if (expired.Count == 0) return;
 
+        var closed = 0;
         foreach (var session in expired)
         {
             session.Status = "ended";
-            session.EndUtc = session.EndUtc ?? now;
-        }
-
-        await db.SaveChangesAsync(ct);
-
-        foreach (var session in expired)
-        {
+            try
+            {
+                await db.SaveChangesAsync(ct); // one by one: a session that staff changed right now is skipped
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                db.Entry(session).State = EntityState.Detached;
+                continue; // changed by staff at the same moment (for example extended); checked again in 5 s
+            }
+            closed++;
             devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest("session_set", new { endUtc = now }));
             devices.EnqueueCommand(session.DeviceId, new EnqueueCommandRequest("lock", null));
         }
+        if (closed == 0) return;
 
-        _logger.LogInformation("Closed {Count} expired prepaid session(s)", expired.Count);
+        _logger.LogInformation("Closed {Count} expired prepaid session(s)", closed);
     }
 }

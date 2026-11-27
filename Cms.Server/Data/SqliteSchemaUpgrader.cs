@@ -21,7 +21,10 @@ public static class SqliteSchemaUpgrader
 {
     /// <summary>SQL that runs once, right before the named index is created on an existing database.</summary>
     public static readonly IReadOnlyDictionary<string, string> BeforeIndexSql =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [CmsDbContext.ActiveSessionIndex] = CmsDbContext.EndDuplicateActiveSessionsSql,
+        };
 
     public static async Task<IReadOnlyList<string>> UpgradeAsync(CmsDbContext db, CancellationToken ct = default)
     {

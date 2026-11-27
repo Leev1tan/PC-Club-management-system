@@ -116,27 +116,69 @@ public class UsersController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Cash top-up at the desk (atomic; ledger row in the same transaction).</summary>
     [HttpPost("{id:guid}/topup")]
     public async Task<ActionResult<UserView>> TopUp(Guid id, [FromBody] TopUpRequest req)
     {
-        if (req.Amount <= 0) return BadRequest("Amount must be positive");
+        if (req.Amount <= 0 || req.Amount > 100_000) return BadRequest("Amount must be positive (at most 100000)");
 
-        var user = await _db.Users.FindAsync(id);
-        if (user == null) return NotFound();
-
-        user.Balance += req.Amount;
-
-        _db.Transactions.Add(new TransactionEntity
+        await using (var tx = await _db.Database.BeginTransactionAsync())
         {
-            Id = Guid.NewGuid(),
-            UserId = user.Id,
-            Amount = req.Amount,
-            Type = "topup",
-            Description = req.Description ?? $"Поповнення балансу +{req.Amount} ₴",
-            CreatedUtc = DateTimeOffset.UtcNow
-        });
+            if (!await Balances.CreditAsync(_db, id, req.Amount)) return NotFound();
+            _db.Transactions.Add(new TransactionEntity
+            {
+                Id = Guid.NewGuid(),
+                UserId = id,
+                Amount = req.Amount,
+                Type = "topup",
+                Description = string.IsNullOrWhiteSpace(req.Description) ? $"Поповнення балансу +{req.Amount} ₴" : req.Description.Trim(),
+                CreatedUtc = DateTimeOffset.UtcNow
+            });
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        }
 
-        await _db.SaveChangesAsync();
+        var user = await _db.Users.AsNoTracking().FirstAsync(u => u.Id == id);
+        return Ok(new UserView(user.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc));
+    }
+
+    /// <summary>
+    /// Balance correction with a mandatory reason (Owner, Manager): positive or negative. A negative
+    /// correction cannot take the balance below zero.
+    /// </summary>
+    [HttpPost("{id:guid}/adjust")]
+    [Authorize(Policy = Policies.Management)]
+    public async Task<ActionResult<UserView>> Adjust(Guid id, [FromBody] AdjustBalanceRequest req)
+    {
+        if (req.Amount == 0 || Math.Abs(req.Amount) > 100_000) return BadRequest("Amount must not be 0 (at most 100000)");
+        var reason = req.Reason?.Trim();
+        if (string.IsNullOrEmpty(reason) || reason.Length < 3) return BadRequest("A reason is required");
+        if (reason.Length > 300) reason = reason[..300];
+
+        await using (var tx = await _db.Database.BeginTransactionAsync())
+        {
+            var ok = req.Amount > 0
+                ? await Balances.CreditAsync(_db, id, req.Amount)
+                : await Balances.TryDebitAsync(_db, id, -req.Amount);
+            if (!ok)
+            {
+                if (!await _db.Users.AnyAsync(u => u.Id == id)) return NotFound();
+                return BadRequest("The balance is too low for this correction");
+            }
+            _db.Transactions.Add(new TransactionEntity
+            {
+                Id = Guid.NewGuid(),
+                UserId = id,
+                Amount = req.Amount,
+                Type = "adjustment",
+                Description = $"Коригування {req.Amount:+0.##;-0.##} ₴: {reason}",
+                CreatedUtc = DateTimeOffset.UtcNow
+            });
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        }
+
+        var user = await _db.Users.AsNoTracking().FirstAsync(u => u.Id == id);
         return Ok(new UserView(user.Id, user.Username, user.DisplayName, user.Balance, user.BonusPoints, user.CreatedUtc));
     }
 
@@ -160,5 +202,6 @@ public record RegisterUserRequest(string? Username, string? Password, string? Di
 public record LoginRequest(string? Username, string? Password);
 public record SetPlayerPasswordRequest(string? Password);
 public record TopUpRequest(decimal Amount, string? Description);
+public record AdjustBalanceRequest(decimal Amount, string? Reason);
 public record UserView(Guid Id, string Username, string DisplayName, decimal Balance, decimal BonusPoints, DateTimeOffset CreatedUtc);
 public record TransactionView(Guid Id, Guid UserId, decimal Amount, string Type, string? Description, DateTimeOffset CreatedUtc);
