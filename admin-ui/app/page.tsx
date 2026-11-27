@@ -9,6 +9,7 @@ import { cash, fmt as fmtText, lang, locale, methodLabel, money, setCurrency, t 
 import { PlayerCard } from './player-card';
 import { PosTab } from './pos-tab';
 import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-dialogs';
+import { GamesTab } from './games-tab';
 import { ShiftTab } from './shift-tab';
 import { StockTab } from './stock-tab';
 import { TariffsTab } from './tariffs-tab';
@@ -25,6 +26,7 @@ type Device = {
   isLocked?: boolean | null; pendingCommands?: number;
   enrollment?: string; // pending (waits for approval), approved, revoked
   sessionPausedUtc?: string | null; sessionCutoffUtc?: string | null; sessionLabel?: string | null; sessionIsPackage?: boolean;
+  currentGame?: string | null; currentGameColor?: string | null; currentGameStartedUtc?: string | null;
 };
 type Session = {
   id: string; deviceId: string; deviceHostname: string | null;
@@ -41,7 +43,7 @@ type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' }
 type DemoInfo = { enabled: boolean; resetIntervalHours: number | null; lastResetUtc: string | null; nextResetUtc: string | null };
 
 // ===== Tab IDs =====
-type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'analytics' | 'audit' | 'staff' | 'settings';
+type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'games' | 'analytics' | 'audit' | 'staff' | 'settings';
 type Need = 'any' | 'frontDesk' | 'management' | 'owner';
 
 // Each tab is shown only to the roles that may use it (the server checks every request again)
@@ -55,6 +57,7 @@ const allTabs: { id: Tab; label: string; icon: string; section?: string; need: N
   { id: 'devices', label: t.nav.devices, icon: '🖥️', section: t.nav.sectionManage, need: 'any' },
   { id: 'users', label: t.nav.users, icon: '👥', need: 'frontDesk' },
   { id: 'tariffs', label: t.nav.tariffs, icon: '💰', need: 'frontDesk' },
+  { id: 'games', label: t.nav.games, icon: '🎮', need: 'management' },
   { id: 'analytics', label: t.analytics.title, icon: '📈', section: t.nav.sectionAnalytics, need: 'management' },
   { id: 'audit', label: t.nav.audit, icon: '📜', need: 'management' },
   { id: 'staff', label: t.nav.staff, icon: '🧑‍💼', section: t.nav.sectionAdmin, need: 'owner' },
@@ -325,6 +328,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'pos': return <PosTab can={can} players={users} toast={toast} onChanged={fetchAll} />;
       case 'shift': return <ShiftTab can={can} toast={toast} onChanged={fetchAll} />;
       case 'stock': return <StockTab can={can} toast={toast} />;
+      case 'games': return <GamesTab zones={zones} toast={toast} />;
       case 'analytics': return <AnalyticsTab />;
       case 'audit': return <AuditTab owner={can.owner} />;
       case 'staff': return <StaffTab me={me} toast={toast} />;
@@ -483,6 +487,12 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 </div>
                 {d.sessionEndUtc && <div className="pc-card-timer">{d.sessionPausedUtc ? '⏸ ' : ''}{timeRemaining(d.sessionEndUtc, d.sessionPausedUtc)}</div>}
                 {d.sessionLabel && <div className="pc-card-zone" title={d.sessionLabel}>{d.sessionIsPackage ? '🎟️ ' : ''}{d.sessionLabel}</div>}
+                {d.currentGame && (
+                  <div className="pc-card-game" title={`${t.map.currentGame}: ${d.currentGame}`}>
+                    <span className="game-dot" style={{ background: d.currentGameColor || 'var(--neon-cyan)' }} aria-hidden="true" />
+                    <span>🎮 {d.currentGame}</span>
+                  </div>
+                )}
                 {d.zoneName && <div className="pc-card-zone">{d.zoneName}</div>}
                 <div className="pc-card-flags">
                   {d.isLocked === true && <span title={t.map.locked}>🔒</span>}

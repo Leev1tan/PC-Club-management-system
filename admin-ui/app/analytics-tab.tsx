@@ -31,7 +31,9 @@ export type Analytics = {
   shifts: { closed: number; variance: number; shortage: number; surplus: number;
     withVariance: { id: number; closedUtc: string; closedBy: string | null; variance: number; note: string | null }[] };
   check: { ledgerRows: number; reconciled: boolean; shiftsInside: number; zReports: Sums; outsideShifts: Sums; shiftsAddUp: boolean };
+  topGames?: GameStat[];
 };
+type GameStat = { gameId: string; name: string; category: string; color: string; plays: number; hours: number; share: number | null };
 
 type Period = 'today' | '7d' | '30d';
 
@@ -204,6 +206,29 @@ function ZoneBars({ a }: { a: Analytics }) {
   );
 }
 
+/** Most played games: hours in the period as bars in the tile colour of the game, with the plays and the share. */
+function TopGames({ games }: { games: GameStat[] }) {
+  if (games.length === 0) return <div className="auth-sub">{t.analytics.noGames}</div>;
+  const max = Math.max(...games.map(g => g.hours), 0.1);
+  return (
+    <div className="viz-zones viz-games">
+      {games.map(g => (
+        <div key={g.gameId} className="viz-zone-row">
+          <div className="viz-zone-label">
+            <span className="zone-dot" style={{ background: g.color }} />
+            <span title={g.category}>{g.name}</span>
+            <span className="viz-muted">{fmt(t.analytics.gamePlays, { n: g.plays })}</span>
+          </div>
+          <div className="viz-zone-track" title={g.share != null ? `${g.share}%` : ''}>
+            <div className="viz-zone-fill" style={{ width: `${Math.max(2, g.hours / max * 100)}%`, background: g.color }} />
+          </div>
+          <div className="viz-zone-value">{fmt(t.analytics.gameHours, { hours: amount(g.hours, 1) })}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Heatmap({ a }: { a: Analytics }) {
   const [numbers, setNumbers] = useState(false);
   const hours = Array.from({ length: 24 }, (_, h) => h);
@@ -350,6 +375,10 @@ export function AnalyticsTab() {
                   </table>
                 </div>
               )}
+            </div>
+            <div className="section-card">
+              <div className="section-card-header"><span className="section-card-title">{t.analytics.topGames}</span></div>
+              <TopGames games={a.topGames ?? []} />
             </div>
             <div className="section-card">
               <div className="section-card-header"><span className="section-card-title">{t.analytics.shifts}</span></div>
