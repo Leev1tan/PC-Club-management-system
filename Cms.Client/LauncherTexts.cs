@@ -45,6 +45,17 @@ public sealed class LauncherTexts
     public required string ExtendHint { get; init; }
     public required string LowTimeBanner { get; init; }
 
+    // Game grid (the catalog of the PC's zone, only during a session)
+    public required string GamesTitle { get; init; }
+    public required string GamesSearch { get; init; }
+    public required string GamesAll { get; init; }
+    public required string GamesEmpty { get; init; }
+    public required string GamesNoMatch { get; init; }
+    public required string GameStartTitle { get; init; }
+    public required string GameStarting { get; init; }
+    public required string GameStartFailed { get; init; }
+    public required string GameNow { get; init; }
+
     // Staff PIN unlock (Ctrl+Shift+U)
     public required string UnlockTitle { get; init; }
     public required string PinWait { get; init; }
@@ -91,6 +102,16 @@ public sealed class LauncherTexts
         ExtendHint = "Щоб подовжити сесію, зверніться до адміністратора або поповніть баланс.",
         LowTimeBanner = "⚠ Залишилось {0} хв! Поповніть баланс або подовжте сесію",
 
+        GamesTitle = "// ІГРИ",
+        GamesSearch = "Пошук гри",
+        GamesAll = "Усі",
+        GamesEmpty = "Каталог ігор порожній. Зверніться до адміністратора.",
+        GamesNoMatch = "Нічого не знайдено",
+        GameStartTitle = "Запуск гри",
+        GameStarting = "Запуск: {0}",
+        GameStartFailed = "Не вдалося запустити «{0}»: {1}",
+        GameNow = "Зараз: {0}",
+
         UnlockTitle = "Розблокування",
         PinWait = "Забагато невірних спроб. Зачекайте {0} с.",
         PinNotSet = "PIN персоналу не задано. Власник задає його в адмін-панелі (Налаштування).",
@@ -136,6 +157,16 @@ public sealed class LauncherTexts
         ExtendTitle = "Extend the session",
         ExtendHint = "To extend the session, ask the staff or top up your balance.",
         LowTimeBanner = "⚠ {0} min left! Top up your balance or extend the session",
+
+        GamesTitle = "// GAMES",
+        GamesSearch = "Search games",
+        GamesAll = "All",
+        GamesEmpty = "The game catalog is empty. Ask the staff.",
+        GamesNoMatch = "Nothing found",
+        GameStartTitle = "Start a game",
+        GameStarting = "Starting: {0}",
+        GameStartFailed = "Could not start {0}: {1}",
+        GameNow = "Now: {0}",
 
         UnlockTitle = "Unlock",
         PinWait = "Too many wrong attempts. Wait {0} s.",

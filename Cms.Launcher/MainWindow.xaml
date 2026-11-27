@@ -272,10 +272,17 @@
             </StackPanel>
         </Grid>
 
-        <!-- ========== SESSION MODE ========== -->
+        <!-- ========== SESSION MODE: time, tariff and the game grid ========== -->
         <Grid x:Name="SessionPanel" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="52"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="32"/>
+            </Grid.RowDefinitions>
+
             <!-- Top bar -->
-            <Border VerticalAlignment="Top" Height="52" Padding="24,0" BorderBrush="#222235" BorderThickness="0,0,0,1">
+            <Border Grid.Row="0" Padding="24,0" BorderBrush="#222235" BorderThickness="0,0,0,1">
                 <Border.Background>
                     <SolidColorBrush Color="#0a0a10" Opacity="0.95"/>
                 </Border.Background>
@@ -292,6 +299,8 @@
                                 <DropShadowEffect Color="#39ff14" BlurRadius="6" ShadowDepth="0" Opacity="0.5"/>
                             </TextBlock.Effect>
                         </TextBlock>
+                        <TextBlock x:Name="GameNowText" Foreground="#bf5af2" FontSize="12" Margin="16,0,0,0"
+                                   VerticalAlignment="Center" FontFamily="Consolas"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <TextBlock x:Name="SessionUser" Foreground="#8888a8" FontSize="12"
@@ -306,42 +315,53 @@
                 </Grid>
             </Border>
 
-            <!-- Center countdown -->
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+            <!-- Countdown, tariff, extend -->
+            <StackPanel Grid.Row="1" HorizontalAlignment="Center" Margin="0,24,0,8">
                 <TextBlock x:Name="SessionTimeLabel" Foreground="#555570"
                            FontSize="12" HorizontalAlignment="Center" FontFamily="Consolas"/>
                 <TextBlock x:Name="SessionCountdown" Text="00:00:00" Foreground="#00f0ff"
-                           FontSize="84" FontWeight="Bold" HorizontalAlignment="Center"
-                           FontFamily="Consolas" Margin="0,4,0,8">
+                           FontSize="64" FontWeight="Bold" HorizontalAlignment="Center"
+                           FontFamily="Consolas" Margin="0,4,0,4">
                     <TextBlock.Effect>
                         <DropShadowEffect Color="#00f0ff" BlurRadius="32" ShadowDepth="0" Opacity="0.5"/>
                     </TextBlock.Effect>
                 </TextBlock>
-
-                <!-- ── Divider ── -->
-                <Border Height="1" Width="200" Margin="0,4,0,16">
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                            <GradientStop Color="Transparent" Offset="0"/>
-                            <GradientStop Color="#222235" Offset="0.5"/>
-                            <GradientStop Color="Transparent" Offset="1"/>
-                        </LinearGradientBrush>
-                    </Border.Background>
-                </Border>
-
                 <TextBlock x:Name="SessionTariff" Text="" Foreground="#bf5af2" FontSize="13"
                            HorizontalAlignment="Center" FontFamily="Consolas" Margin="0,0,0,4"/>
                 <TextBlock x:Name="SessionCost" Text="" Foreground="#8888a8" FontSize="12"
-                           HorizontalAlignment="Center" FontFamily="Consolas" Margin="0,0,0,36"/>
-
-                <!-- Action buttons -->
+                           HorizontalAlignment="Center" FontFamily="Consolas" Margin="0,0,0,12"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <Button x:Name="ExtendButton" Style="{StaticResource CyberButton}" Click="OnExtendClick"/>
                 </StackPanel>
             </StackPanel>
 
+            <!-- Game grid: the catalog of this PC's zone; a tile starts the game -->
+            <Grid Grid.Row="2" Margin="48,8,48,8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,10">
+                    <TextBlock x:Name="GamesTitleText" DockPanel.Dock="Left" Foreground="#555570" FontSize="13"
+                               FontFamily="Consolas" VerticalAlignment="Center"/>
+                    <TextBox x:Name="GameSearchBox" DockPanel.Dock="Right" Width="280" Style="{StaticResource CyberTextBox}"
+                             FontSize="14" Padding="10,6" TextChanged="OnGameSearchChanged"/>
+                    <TextBlock x:Name="GameSearchHint" DockPanel.Dock="Right" Foreground="#555570" FontSize="11"
+                               FontFamily="Consolas" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                </DockPanel>
+                <WrapPanel x:Name="GameCategories" Grid.Row="1" Margin="0,0,0,10"/>
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel>
+                        <WrapPanel x:Name="GameTiles"/>
+                        <TextBlock x:Name="GamesEmptyText" Foreground="#555570" FontSize="13" FontFamily="Consolas"
+                                   HorizontalAlignment="Center" Margin="0,24,0,0" Visibility="Collapsed"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
             <!-- Bottom bar -->
-            <Border VerticalAlignment="Bottom" Height="32" Padding="24,0" BorderBrush="#222235" BorderThickness="0,1,0,0">
+            <Border Grid.Row="3" Padding="24,0" BorderBrush="#222235" BorderThickness="0,1,0,0">
                 <Border.Background>
                     <SolidColorBrush Color="#0a0a10" Opacity="0.8"/>
                 </Border.Background>

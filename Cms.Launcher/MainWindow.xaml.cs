@@ -174,9 +174,7 @@ public partial class MainWindow : Window
         {
             var reason = _lock.Evaluate(_lastState == null ? null : new AgentLockSnapshot(_lastState.IsLocked, _lastState.LockChangedUtc),
                 ReadAgentHeartbeat(), DateTimeOffset.UtcNow).Reason;
-            var e = new LauncherEvent { LockReason = reason.ToString(), WindowsUser = Environment.UserName };
-            var path = Path.Combine(AgentFiles.Directory, AgentFiles.InboxDirectoryName, LauncherEvent.FileName(e.Id));
-            File.WriteAllText(path, JsonSerializer.Serialize(e));
+            WriteInboxEvent(new LauncherEvent { LockReason = reason.ToString(), WindowsUser = Environment.UserName });
         }
         catch
         {
@@ -367,6 +365,7 @@ public partial class MainWindow : Window
         if (_lockStaffHint != null) _lockStaffHint.Text = _texts.StaffHint;
         if (_languageButton != null) _languageButton.Content = _texts.LanguageSwitch;
         UpdateSessionHeader();
+        RenderGames();
         if (_lastDecision != null) UpdateLockReason(_lastDecision);
         UpdateCountdowns(_lastState?.RemainingSeconds ?? 0);
     }
@@ -525,10 +524,17 @@ public partial class MainWindow : Window
                 heartbeat, now);
             _lastDecision = decision;
 
-            // A new lock ends the player's language choice: back to the club language
-            if (decision.Locked && !_wasLocked) _languageOverride = null;
+            // A new lock ends the session on this PC: the player's language choice and the games
+            if (decision.Locked && !_wasLocked)
+            {
+                _languageOverride = null;
+                ReportGameEvents(_gameTracker.StopAll(now));
+                GameNowText.Text = string.Empty;
+            }
             _wasLocked = decision.Locked;
             RefreshClientSettings();
+            RefreshCatalog();
+            TrackGames();
 
             if (state != null && !string.IsNullOrWhiteSpace(state.ServerUrl))
                 _serverUrl = state.ServerUrl.TrimEnd('/');

@@ -49,6 +49,11 @@ public class Worker : BackgroundService
     private bool _pendingLogged;
     private DateTimeOffset _nextHeartbeatUtc;
 
+    // Game catalog of this PC (games.json for the launcher), fetched every 30 s with If-None-Match
+    private static readonly TimeSpan CatalogInterval = TimeSpan.FromSeconds(30);
+    private DateTimeOffset _nextCatalogUtc;
+    private string? _catalogETag;
+
     // Performance counters for real metrics
     private PerformanceCounter? _cpuCounter;
 
@@ -217,7 +222,14 @@ public class Worker : BackgroundService
                         _nextHeartbeatUtc = DateTimeOffset.UtcNow + HeartbeatInterval;
                         var hb = await SendHeartbeatAsync(http, stoppingToken);
                         if (hb == HeartbeatResult.Ok && _enrollmentStatus == "approved")
+                        {
                             await SendLauncherEventsAsync(http, stoppingToken);
+                            if (DateTimeOffset.UtcNow >= _nextCatalogUtc)
+                            {
+                                _nextCatalogUtc = DateTimeOffset.UtcNow + CatalogInterval;
+                                await SyncCatalogAsync(http, stoppingToken);
+                            }
+                        }
                         if (hb == HeartbeatResult.Unauthorized)
                         {
                             _logger.LogWarning("The server does not know this device key any more; registering again");
@@ -625,6 +637,34 @@ public class Worker : BackgroundService
             {
                 break; // 429 (too many) or server trouble: keep the files for the next heartbeat
             }
+        }
+    }
+
+    /// <summary>
+    /// Keeps games.json equal to the catalog of this PC on the server (active entries of its zone). The
+    /// file stays when the server is down, so the game grid works offline with the last catalog.
+    /// </summary>
+    private async Task SyncCatalogAsync(HttpClient http, CancellationToken ct)
+    {
+        var path = Path.Combine(AgentDir, AgentFiles.CatalogFile);
+        try
+        {
+            _catalogETag ??= File.Exists(path) ? CatalogFile.Parse(File.ReadAllText(path))?.ETag : null;
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"api/devices/{_deviceId}/games");
+            req.Headers.Add("X-Device-Key", _deviceKey);
+            if (_catalogETag != null) req.Headers.TryAddWithoutValidation("If-None-Match", _catalogETag);
+            using var resp = await http.SendAsync(req, ct);
+            if (resp.StatusCode == HttpStatusCode.NotModified || !resp.IsSuccessStatusCode) return;
+            var games = CatalogFile.ParseList(await resp.Content.ReadAsStringAsync(ct));
+            if (games == null) return;
+            var etag = resp.Headers.ETag?.ToString();
+            WriteAtomic(path, new CatalogFile { ETag = etag, ReceivedUtc = DateTimeOffset.UtcNow, Games = games }.ToJson());
+            _catalogETag = etag;
+            _logger.LogInformation("Game catalog updated: {Count} entries", games.Count);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _logger.LogWarning(ex, "Failed to update {Path}", path);
         }
     }
 
