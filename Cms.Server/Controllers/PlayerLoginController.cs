@@ -134,6 +134,17 @@ public class PlayerLoginController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
+        // A player plays on one PC at a time (sessions from the balance would spend the same money)
+        var elsewhere = await _db.Sessions.AsNoTracking().Where(s => s.UserId == user!.Id && s.Status == "active" && s.DeviceId != deviceId)
+            .Select(s => s.DeviceId).FirstOrDefaultAsync();
+        if (elsewhere != Guid.Empty)
+        {
+            var host = await _db.Devices.AsNoTracking().Where(d => d.Id == elsewhere).Select(d => d.Hostname).FirstOrDefaultAsync() ?? "?";
+            await _audit.WriteAsync(AuditActions.PlayerLogin, "player", user!.Id,
+                $"@{user.Username} logged in on {device.Hostname}, no session: player_busy (plays on {host})", new { device.Hostname, offer, error = "player_busy", playsOn = host });
+            return BillingErrors.PlayerBusy.With(host).ToActionResult();
+        }
+
         var service = new SessionService(_db, _devices, _clock, _audit);
         var start = await service.StartAsync(new StartSessionRequest(deviceId, null, user!.Id,
             offer == OfferMinutes ? req.Minutes : null, offer == OfferPackage ? req.PackageId : null,

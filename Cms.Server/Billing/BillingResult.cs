@@ -79,5 +79,6 @@ public static class BillingErrors
     public static readonly BillingError DebtNeedsPlayer = new("debt_needs_player", "Only a registered player can owe money; a guest pays at the desk.");
     public static readonly BillingError PlayerHasDebt = new("player_has_debt", "The player owes {0}. Take the debt first; open-ended sessions are blocked until then.", Conflict);
     public static readonly BillingError DebtTooHigh = new("debt_too_high", "The player owes only {0}.", Conflict);
+    public static readonly BillingError PlayerBusy = new("player_busy", "The player already plays on {0}. End that session first.", Conflict);
     public static readonly BillingError BalanceLimitNeedsPlayer = new("balance_limit_needs_player", "Time from the balance needs a registered player, open-ended time and payment from the balance.");
 }

@@ -112,6 +112,26 @@ public sealed class PlayerLoginTests : ApiTestBase, IClassFixture<CmsFactory>
     }
 
     [Fact]
+    public async Task A_player_plays_on_one_pc_at_a_time()
+    {
+        var (owner, zone) = await ClubAsync();
+        var pc = await TestPc.AddAsync(_factory, Guid.Parse(zone));
+        var second = await TestPc.AddAsync(_factory, Guid.Parse(zone));
+        var username = await PlayerAsync(owner, 200);
+        await JsonAsync(await LoginAsync(pc, username, Pin));
+        var busy = await LoginAsync(second, username, Pin, new { offer = "minutes", minutes = 60 });
+        Assert.Equal(HttpStatusCode.Conflict, busy.StatusCode);
+        var body = await busy.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(("player_busy", pc.Hostname), (body.GetProperty("code").GetString(), body.GetProperty("args")[0].GetString()));
+        // A session of the desk for the same player elsewhere blocks a login too
+        await JsonAsync(await pc.PostAsync($"/api/devices/{pc.Id}/player-logout"));
+        var players = await owner.GetFromJsonAsync<JsonElement>("/api/users");
+        var id = players.EnumerateArray().Single(u => u.GetProperty("username").GetString() == username).GetProperty("id").GetString();
+        await JsonAsync(await owner.PostAsJsonAsync("/api/sessions", new { deviceId = pc.Id, userId = id, durationMinutes = 30 }));
+        Assert.Equal("player_busy", await CodeAsync(await LoginAsync(second, username, Pin)));
+    }
+
+    [Fact]
     public async Task Wrong_names_and_secrets_get_the_same_answer_and_lock_the_account_after_five_failures()
     {
         var (owner, zone) = await ClubAsync();

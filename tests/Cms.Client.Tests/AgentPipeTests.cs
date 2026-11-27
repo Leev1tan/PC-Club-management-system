@@ -149,6 +149,7 @@ public sealed class LoginMessagesTests
     [InlineData(429, "login_locked", "15", "LoginLocked")]
     [InlineData(400, "insufficient_balance", null, "InsufficientBalance")]
     [InlineData(409, "player_has_debt", null, "PlayerHasDebt")]
+    [InlineData(409, "player_busy", "VIP-02", "PlayerBusy")]
     [InlineData(409, "device_busy", null, "DeviceBusy")]
     [InlineData(400, "package_outside_window", null, "PackageUnavailable")]
     [InlineData(400, "no_tariff", null, "NoTariff")]

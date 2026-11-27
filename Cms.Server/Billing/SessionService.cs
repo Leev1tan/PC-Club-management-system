@@ -128,6 +128,11 @@ public sealed class SessionService
         {
             if (prepaid || user == null || IsFree(req.PaymentMethod) ||
                 (PaymentMethods.Normalize(req.PaymentMethod) is { } m && m != PaymentMethods.Balance)) return BillingErrors.BalanceLimitNeedsPlayer;
+            // Two sessions would spend the same balances: one session from the balance per player
+            var other = await _db.Sessions.AsNoTracking().Where(s => s.UserId == user.Id && s.Status == "active" && s.DeviceId != device.Id)
+                .Select(s => s.DeviceId).FirstOrDefaultAsync();
+            if (other != Guid.Empty)
+                return BillingErrors.PlayerBusy.With(await _db.Devices.AsNoTracking().Where(d => d.Id == other).Select(d => d.Hostname).FirstOrDefaultAsync() ?? "?");
             var pricing = await PricingAsync(tariff!);
             var available = user.Balance + (req.UseBonus ? user.BonusPoints : 0m);
             balanceEnd = ProjectEnd(until => TariffCalculator.QuotePlayed(new[] { (pricing, now, until) }, pricing, _clock.Zone).Total, available, now);

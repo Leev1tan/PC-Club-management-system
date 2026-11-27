@@ -755,6 +755,7 @@ export const uk = {
   },
 
   errors: {
+    player_busy: 'Гравець уже грає на {0}. Спершу завершіть ту сесію',
     power_forbidden: 'Вимикати, перезавантажувати й вмикати ПК можуть лише власник, менеджер і технік',
     no_mac: 'ПК ще не повідомив свою MAC-адресу',
     wake_not_configured: 'Wake-on-LAN вимкнено: перевірте Power:WakeBroadcast і Power:WakePort на сервері',
@@ -1597,6 +1598,7 @@ export const en: typeof uk = {
   },
 
   errors: {
+    player_busy: 'The player already plays on {0}. End that session first',
     power_forbidden: 'Only the owner, a manager or a technician may shut down, reboot or start a PC',
     no_mac: 'The PC has not reported its MAC address yet',
     wake_not_configured: 'Wake-on-LAN is off: check Power:WakeBroadcast and Power:WakePort on the server',

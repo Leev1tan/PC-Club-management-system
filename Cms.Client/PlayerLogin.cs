@@ -31,6 +31,7 @@ public static class LoginMessages
         {
             "insufficient_balance" or "balance_too_low" => t.InsufficientBalance,
             "player_has_debt" => t.PlayerHasDebt,
+            "player_busy" => LauncherTexts.Format(t.PlayerBusy, r.FirstArg ?? "?"),
             "device_busy" => t.DeviceBusy,
             "no_tariff" => t.NoTariff,
             "bad_offer" or "package_not_found" or "package_inactive" or "package_other_zone" or "package_outside_window"

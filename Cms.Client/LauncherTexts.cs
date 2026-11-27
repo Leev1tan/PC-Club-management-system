@@ -38,6 +38,7 @@ public sealed class LauncherTexts
     public required string LoginStarting { get; init; }
     public required string InsufficientBalance { get; init; }
     public required string PlayerHasDebt { get; init; }
+    public required string PlayerBusy { get; init; }
     public required string DeviceBusy { get; init; }
     public required string PackageUnavailable { get; init; }
     public required string NoTariff { get; init; }
@@ -124,6 +125,7 @@ public sealed class LauncherTexts
         LoginStarting = "Вхід виконано. Сесія починається…",
         InsufficientBalance = "Недостатньо коштів на балансі. Поповніть баланс на рецепції.",
         PlayerHasDebt = "На вашому рахунку борг. Сплатіть його на рецепції або виберіть передоплачений час.",
+        PlayerBusy = "Ви вже граєте на ПК {0}. Спершу завершіть ту сесію.",
         DeviceBusy = "На цьому ПК вже йде сесія.",
         PackageUnavailable = "Цей варіант зараз недоступний. Виберіть інший.",
         NoTariff = "Для цього ПК не задано тариф. Зверніться до адміністратора.",
@@ -207,6 +209,7 @@ public sealed class LauncherTexts
         LoginStarting = "Logged in. The session starts…",
         InsufficientBalance = "There is not enough money on your balance. Top up at the desk.",
         PlayerHasDebt = "Your account has a debt. Pay it at the desk or choose prepaid time.",
+        PlayerBusy = "You already play on PC {0}. End that session first.",
         DeviceBusy = "This PC already has a session.",
         PackageUnavailable = "This choice is not available now. Choose another one.",
         NoTariff = "This PC has no tariff. Ask the staff.",
