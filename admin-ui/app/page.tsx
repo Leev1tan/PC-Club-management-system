@@ -3,10 +3,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthStatus, Me, api, errorText, getJson, permissions, postJson, setUnauthorizedHandler } from './api';
 import { LoginScreen, SetupScreen, roleLabel } from './auth';
 import { AuditTab, SettingsTab, StaffTab } from './admin-tabs';
+import { Tariff } from './billing';
+import { fmt as fmtText, methodLabel, money, t } from './i18n';
+import { PlayerCard } from './player-card';
+import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-dialogs';
+import { TariffsTab } from './tariffs-tab';
 
 // ===== Types =====
 type Zone = { id: string; name: string; color: string; sortOrder: number };
-type Tariff = { id: string; name: string; pricePerHour: number; isDefault: boolean; zoneId: string | null; zoneName: string | null };
 type User = { id: string; username: string; displayName: string; balance: number; bonusPoints: number; createdUtc: string };
 type Device = {
   id: string; hostname: string; osVersion: string; agentVersion: string;
@@ -16,6 +20,7 @@ type Device = {
   occupancyStatus: string; activeSessionId: string | null; activeUserId: string | null; sessionEndUtc: string | null;
   isLocked?: boolean | null; pendingCommands?: number;
   enrollment?: string; // pending (waits for approval), approved, revoked
+  sessionPausedUtc?: string | null; sessionCutoffUtc?: string | null; sessionLabel?: string | null; sessionIsPackage?: boolean;
 };
 type Session = {
   id: string; deviceId: string; deviceHostname: string | null;
@@ -23,6 +28,8 @@ type Session = {
   userId: string | null; username: string | null;
   startUtc: string; endUtc: string | null; status: string;
   totalCost: number; isPrepaid: boolean;
+  packageId?: string | null; packageName?: string | null; pausedUtc?: string | null; cutoffUtc?: string | null;
+  paymentMethod?: string | null; paidMinutes?: number | null; currentCost?: number | null;
 };
 type Revenue = { today: number; week: number; month: number; currency: string };
 type Transaction = { id: string; userId: string; amount: number; type: string; description: string | null; createdUtc: string };
@@ -53,9 +60,10 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('uk-UA', { hou
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const fmtDateTime = (iso: string) => `${fmtDate(iso)} ${fmtTime(iso)}`;
 
-function timeRemaining(endUtc: string | null): string {
+/** Remaining time; a paused session keeps the time it had at the pause. */
+function timeRemaining(endUtc: string | null, pausedUtc?: string | null): string {
   if (!endUtc) return 'Відкрита';
-  const diff = new Date(endUtc).getTime() - Date.now();
+  const diff = new Date(endUtc).getTime() - (pausedUtc ? new Date(pausedUtc).getTime() : Date.now());
   if (diff <= 0) return 'Завершено';
   const m = Math.floor(diff / 60000);
   const h = Math.floor(m / 60);
@@ -127,11 +135,13 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [sessionFilter, setSessionFilter] = useState<'all' | 'active' | 'ended'>('all');
 
   // Modal state
-  const [sessionModal, setSessionModal] = useState<{ deviceId: string; hostname: string } | null>(null);
   const [zoneModal, setZoneModal] = useState(false);
-  const [tariffModal, setTariffModal] = useState(false);
-  const [topUpModal, setTopUpModal] = useState<{ userId: string; username: string } | null>(null);
   const [playerModal, setPlayerModal] = useState(false);
+  // Billing dialogs (top-level components: background refreshes do not reset them)
+  const [startDialog, setStartDialog] = useState<{ id: string; hostname: string; zoneId: string | null } | null>(null);
+  const [transferTarget, setTransferTarget] = useState<Session | null>(null);
+  const [endTarget, setEndTarget] = useState<Session | null>(null);
+  const [playerCard, setPlayerCard] = useState<{ user: User; form?: 'topup' } | null>(null);
   const [pcPopover, setPcPopover] = useState<string | null>(null);
 
   const toast = useCallback((message: string, type: Toast['type'] = 'info') => {
@@ -162,7 +172,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   // The tab and modal components below are declared inside this component, so every
   // re-render remounts them and resets their inputs. Auto-refresh therefore pauses
   // while a modal is open.
-  const modalOpen = !!(sessionModal || zoneModal || tariffModal || topUpModal || playerModal);
+  const modalOpen = !!(zoneModal || playerModal);
   const modalOpenRef = useRef(false);
   useEffect(() => { modalOpenRef.current = modalOpen; }, [modalOpen]);
 
@@ -192,24 +202,28 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
   const extendSession = async (sessionId: string, minutes: number) => {
     const res = await postJson(`/api/sessions/${sessionId}/extend`, { minutes });
-    if (res.ok) { toast(`Сесію продовжено на ${minutes} хв ✓`, 'success'); fetchAll(); }
+    if (res.ok) { toast(fmtText(t.session.extended, { minutes }), 'success'); fetchAll(); }
     else toast(`Помилка: ${await errorText(res)}`, 'error');
   };
 
-  const startSession = async (deviceId: string, tariffId: string, userId: string | null, duration: number | null) => {
-    const res = await postJson('/api/sessions', { deviceId, tariffId, userId, durationMinutes: duration });
-    if (res.ok) { toast('Сесію розпочато ✓', 'success'); fetchAll(); }
+  const pauseOrResume = async (sessionId: string, paused: boolean) => {
+    const res = await postJson(`/api/sessions/${sessionId}/${paused ? 'resume' : 'pause'}`);
+    if (res.ok) { toast(paused ? t.session.resumedToast : t.session.pausedToast, 'success'); fetchAll(); }
     else toast(`Помилка: ${await errorText(res)}`, 'error');
   };
 
+  // The end dialog asks how an open-ended session is paid; it needs the session row
   const endSession = async (sessionId: string) => {
-    const res = await postJson(`/api/sessions/${sessionId}/end`);
-    if (res.ok) {
-      const ended = await res.json();
-      toast(ended.amountDue > 0 ? `Сесію завершено. До сплати на касі: ${fmt(ended.amountDue)} ₴` : 'Сесію завершено ✓', ended.amountDue > 0 ? 'info' : 'success');
-      fetchAll();
-    }
-    else toast(`Не вдалося завершити сесію: ${await errorText(res)}`, 'error');
+    const session = sessions.find(x => x.id === sessionId)
+      ?? (await getJson<Session[]>('/api/sessions/active'))?.find(x => x.id === sessionId);
+    if (session) { setEndTarget(session); return; }
+    toast(t.errors.session_not_found, 'error');
+  };
+
+  const transferSession = async (sessionId: string) => {
+    const session = sessions.find(x => x.id === sessionId)
+      ?? (await getJson<Session[]>('/api/sessions/active'))?.find(x => x.id === sessionId);
+    if (session) setTransferTarget(session);
   };
 
   const createZone = async (name: string, color: string) => {
@@ -223,20 +237,6 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     const res = await api(`/api/zones/${id}`, { method: 'DELETE' });
     if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
     toast('Зону видалено', 'info');
-    fetchAll();
-  };
-
-  const createTariff = async (name: string, pricePerHour: number, zoneId: string | null) => {
-    const res = await postJson('/api/tariffs', { name, pricePerHour, isDefault: tariffs.length === 0, zoneId });
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast(`Тариф "${name}" створено ✓`, 'success');
-    fetchAll();
-  };
-
-  const deleteTariff = async (id: string) => {
-    const res = await api(`/api/tariffs/${id}`, { method: 'DELETE' });
-    if (!res.ok) { toast(`Помилка: ${await errorText(res)}`, 'error'); return; }
-    toast('Тариф видалено', 'info');
     fetchAll();
   };
 
@@ -272,23 +272,6 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
     toast(res.ok ? 'Пароль гравця змінено ✓' : `Помилка: ${await errorText(res)}`, res.ok ? 'success' : 'error');
   };
 
-  const adjustBalance = async (userId: string, username: string) => {
-    const amountText = window.prompt(`Коригування балансу @${username} (₴, напр. -50 або 100):`);
-    if (!amountText) return;
-    const amount = parseFloat(amountText.replace(',', '.'));
-    if (!amount) { toast('Невірна сума', 'error'); return; }
-    const reason = window.prompt('Причина (обов\'язково, записується в журнал дій):');
-    if (!reason || reason.trim().length < 3) { toast('Потрібна причина', 'error'); return; }
-    const res = await postJson(`/api/users/${userId}/adjust`, { amount, reason });
-    toast(res.ok ? 'Баланс скориговано ✓' : `Помилка: ${await errorText(res)}`, res.ok ? 'success' : 'error');
-    if (res.ok) fetchAll();
-  };
-
-  const topUpUser = async (userId: string, amount: number) => {
-    const res = await postJson(`/api/users/${userId}/topup`, { amount, description: null });
-    if (res.ok) { toast(`Баланс поповнено на ${amount} ₴ ✓`, 'success'); fetchAll(); }
-    else toast(`Помилка поповнення: ${await errorText(res)}`, 'error');
-  };
 
   // ===== Computed =====
   const activeSessions = sessions.filter(s => s.status === 'active');
@@ -297,6 +280,23 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const occupiedDevices = devices.filter(d => d.occupancyStatus === 'occupied');
 
   // ===== Render Helpers =====
+  const sessionLabel = (s: Session) => s.packageName
+    ? <><span className="badge badge-amber">{t.session.packageBadge}</span> {s.packageName}</>
+    : <span className="badge badge-blue">{s.tariffName || '—'}</span>;
+  const sessionLeft = (s: Session) => s.pausedUtc
+    ? <span style={{ color: 'var(--amber)' }}>⏸ {t.session.paused} · {timeRemaining(s.endUtc, s.pausedUtc)}</span>
+    : <span style={{ color: 'var(--blue)' }}>{timeRemaining(s.endUtc)}</span>;
+  const sessionCost = (s: Session) => s.status === 'active' && !s.isPrepaid
+    ? <span title={t.session.current}>{money(s.currentCost ?? 0)} ₴ …</span>
+    : <>{money(s.totalCost)} ₴</>;
+  const sessionActions = (s: Session) => (
+    <div style={{ display: 'flex', gap: 4 }}>
+      <button className="btn btn-sm" title={s.pausedUtc ? t.session.resume : t.session.pause} onClick={() => pauseOrResume(s.id, !!s.pausedUtc)}>{s.pausedUtc ? '▶️' : '⏸️'}</button>
+      <button className="btn btn-sm" title={t.session.transfer} onClick={() => transferSession(s.id)}>🔀</button>
+      <button className="btn btn-danger btn-sm" onClick={() => endSession(s.id)}>{t.session.end}</button>
+    </div>
+  );
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'dashboard': return <DashboardTab />;
@@ -304,7 +304,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'devices': return <DevicesTab />;
       case 'sessions': return <SessionsTab />;
       case 'users': return <UsersTab />;
-      case 'tariffs': return <TariffsTab />;
+      case 'tariffs': return <TariffsTab can={can} zones={zones} devices={devices} tariffs={tariffs} toast={toast}
+        onChanged={fetchAll} onAddZone={() => setZoneModal(true)} onDeleteZone={deleteZone} />;
       case 'finance': return <FinanceTab />;
       case 'audit': return <AuditTab />;
       case 'staff': return <StaffTab me={me} toast={toast} />;
@@ -373,10 +374,10 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                     <tr key={s.id}>
                       <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.deviceHostname || '—'}</td>
                       <td>{s.username || 'Гість'}</td>
-                      <td><span className="badge badge-blue">{s.tariffName || '—'}</span></td>
-                      <td style={{ color: 'var(--blue)' }}>{timeRemaining(s.endUtc)}</td>
-                      <td>{fmt(s.totalCost)} ₴</td>
-                      <td><button className="btn btn-danger btn-sm" onClick={() => endSession(s.id)}>Завершити</button></td>
+                      <td>{sessionLabel(s)}</td>
+                      <td>{sessionLeft(s)}</td>
+                      <td>{sessionCost(s)}</td>
+                      <td>{sessionActions(s)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -450,15 +451,16 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
         ) : (
           <div className="pc-map">
             {filtered.map(d => (
-              <div key={d.id} className={`pc-card status-${d.occupancyStatus}`}
+              <div key={d.id} className={`pc-card status-${d.occupancyStatus} ${d.sessionPausedUtc ? 'paused' : ''}`}
                 style={{ borderLeftColor: d.zoneColor || undefined }}
                 onClick={() => setPcPopover(pcPopover === d.id ? null : d.id)}>
                 <div className="pc-card-name">{d.hostname}</div>
                 <div className="pc-card-status">
-                  <span className={`dot ${d.occupancyStatus === 'free' ? 'green' : d.occupancyStatus === 'occupied' ? 'blue' : 'red'}`} />
-                  {d.occupancyStatus === 'free' ? 'Вільний' : d.occupancyStatus === 'occupied' ? 'Зайнятий' : 'Офлайн'}
+                  <span className={`dot ${d.sessionPausedUtc ? 'amber' : d.occupancyStatus === 'free' ? 'green' : d.occupancyStatus === 'occupied' ? 'blue' : 'red'}`} />
+                  {d.sessionPausedUtc ? t.session.paused : d.occupancyStatus === 'free' ? 'Вільний' : d.occupancyStatus === 'occupied' ? 'Зайнятий' : 'Офлайн'}
                 </div>
-                {d.sessionEndUtc && <div className="pc-card-timer">{timeRemaining(d.sessionEndUtc)}</div>}
+                {d.sessionEndUtc && <div className="pc-card-timer">{d.sessionPausedUtc ? '⏸ ' : ''}{timeRemaining(d.sessionEndUtc, d.sessionPausedUtc)}</div>}
+                {d.sessionLabel && <div className="pc-card-zone" title={d.sessionLabel}>{d.sessionIsPackage ? '🎟️ ' : ''}{d.sessionLabel}</div>}
                 {d.zoneName && <div className="pc-card-zone">{d.zoneName}</div>}
                 <div className="pc-card-flags">
                   {d.isLocked === true && <span title="Заблоковано">🔒</span>}
@@ -469,13 +471,23 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 {pcPopover === d.id && (
                   <div className="popover" onClick={e => e.stopPropagation()}>
                     {can.frontDesk && d.occupancyStatus === 'free' && d.enrollment !== 'pending' && (
-                      <button className="popover-item" onClick={() => { setPcPopover(null); setSessionModal({ deviceId: d.id, hostname: d.hostname }); }}>
+                      <button className="popover-item" onClick={() => { setPcPopover(null); setStartDialog({ id: d.id, hostname: d.hostname, zoneId: d.zoneId }); }}>
                         🎮 Розпочати сесію
                       </button>
                     )}
-                    {can.frontDesk && d.activeSessionId && d.sessionEndUtc && (
+                    {can.frontDesk && d.activeSessionId && d.sessionEndUtc && !d.sessionPausedUtc && (
                       <button className="popover-item" onClick={() => { setPcPopover(null); extendSession(d.activeSessionId!, 30); }}>
-                        ➕ Продовжити +30 хв
+                        {t.session.extend30}
+                      </button>
+                    )}
+                    {can.frontDesk && d.activeSessionId && (
+                      <button className="popover-item" onClick={() => { setPcPopover(null); pauseOrResume(d.activeSessionId!, !!d.sessionPausedUtc); }}>
+                        {d.sessionPausedUtc ? t.session.resume : t.session.pause}
+                      </button>
+                    )}
+                    {can.frontDesk && d.activeSessionId && (
+                      <button className="popover-item" onClick={() => { setPcPopover(null); transferSession(d.activeSessionId!); }}>
+                        {t.session.transfer}
                       </button>
                     )}
                     {can.frontDesk && d.activeSessionId && (
@@ -597,22 +609,19 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 <tr key={s.id}>
                   <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.deviceHostname || '—'}</td>
                   <td>{s.username || 'Гість'}</td>
-                  <td>{s.tariffName || '—'} {s.pricePerHour ? `(${s.pricePerHour} ₴/г)` : ''}</td>
+                  <td>{sessionLabel(s)}</td>
                   <td>{fmtDateTime(s.startUtc)}</td>
                   <td style={{ color: s.status === 'active' ? 'var(--blue)' : 'var(--text-muted)' }}>
-                    {s.status === 'active' ? timeRemaining(s.endUtc) : s.endUtc ? fmtTime(s.endUtc) : '—'}
+                    {s.status === 'active' ? sessionLeft(s) : s.endUtc ? fmtTime(s.endUtc) : '—'}
                   </td>
-                  <td style={{ fontWeight: 600 }}>{fmt(s.totalCost)} ₴</td>
+                  <td style={{ fontWeight: 600 }}>{sessionCost(s)}</td>
                   <td>
-                    <span className={`badge ${s.status === 'active' ? 'badge-green' : 'badge-amber'}`}>
-                      {s.status === 'active' ? 'Активна' : 'Завершена'}
+                    <span className={`badge ${s.status !== 'active' ? 'badge-amber' : s.pausedUtc ? 'badge-amber' : 'badge-green'}`}>
+                      {s.status !== 'active' ? 'Завершена' : s.pausedUtc ? t.session.paused : 'Активна'}
                     </span>
+                    <div className="user-chip">{methodLabel(s.paymentMethod)}</div>
                   </td>
-                  <td>
-                    {s.status === 'active' && (
-                      <button className="btn btn-danger btn-sm" onClick={() => endSession(s.id)}>Завершити</button>
-                    )}
-                  </td>
+                  <td>{s.status === 'active' && sessionActions(s)}</td>
                 </tr>
               ))}
             </tbody>
@@ -652,15 +661,15 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                     <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>@{u.username}</td>
                     <td>{u.displayName}</td>
                     <td style={{ fontWeight: 600, color: u.balance > 0 ? 'var(--green)' : 'var(--text-muted)' }}>{fmt(u.balance)} ₴</td>
-                    <td>{u.bonusPoints} 🏆</td>
+                    <td style={{ color: u.bonusPoints > 0 ? 'var(--amber)' : 'var(--text-muted)' }}>{money(u.bonusPoints)} ₴ 🎁</td>
                     <td>{fmtDate(u.createdUtc)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-success btn-sm" onClick={() => setTopUpModal({ userId: u.id, username: u.username })}>
-                          💳 Поповнити
+                        <button className="btn btn-sm" onClick={() => setPlayerCard({ user: u })}>{t.player.card}</button>
+                        <button className="btn btn-success btn-sm" onClick={() => setPlayerCard({ user: u, form: 'topup' })}>
+                          {t.player.topUp}
                         </button>
                         <button className="btn btn-sm" onClick={() => setPlayerPin(u.id, u.username)} title="Пароль / PIN">🔑</button>
-                        {can.management && <button className="btn btn-sm" onClick={() => adjustBalance(u.id, u.username)} title="Коригування балансу (з причиною)">±</button>}
                       </div>
                     </td>
                   </tr>
@@ -669,71 +678,6 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
             </table>
           </div>
         )}
-      </>
-    );
-  }
-
-  // ===== Tariffs Tab =====
-  function TariffsTab() {
-    return (
-      <>
-        {/* Zones */}
-        <div className="section-card">
-          <div className="section-card-header">
-            <span className="section-card-title">🗺️ Зони</span>
-            {can.management && <button className="btn btn-primary btn-sm" onClick={() => setZoneModal(true)}>+ Додати зону</button>}
-          </div>
-          {zones.length === 0 ? (
-            <div className="empty-state" style={{ padding: 30 }}>
-              <div className="empty-state-sub">Зони дозволяють групувати ПК за локацією та ціною</div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              {zones.map(z => {
-                const count = devices.filter(d => d.zoneId === z.id).length;
-                return (
-                  <div key={z.id} className="stat-card" style={{ minWidth: 160, flex: '1 1 160px', borderLeftColor: z.color, borderLeftWidth: 3 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>{z.name}</span>
-                      {can.management && <button className="btn btn-sm btn-danger" onClick={() => deleteZone(z.id)} style={{ padding: '2px 6px', fontSize: 11 }}>✕</button>}
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{count} ПК</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Tariffs */}
-        <div className="section-card">
-          <div className="section-card-header">
-            <span className="section-card-title">💰 Тарифи</span>
-            {can.management && <button className="btn btn-primary btn-sm" onClick={() => setTariffModal(true)}>+ Додати тариф</button>}
-          </div>
-          {tariffs.length === 0 ? (
-            <div className="empty-state" style={{ padding: 30 }}>
-              <div className="empty-state-sub">Створіть тариф щоб почати виставляти рахунки</div>
-            </div>
-          ) : (
-            <div className="table-wrapper">
-              <table className="data-table">
-                <thead><tr><th>Назва</th><th>Ціна/год</th><th>Зона</th><th>За замовчуванням</th><th></th></tr></thead>
-                <tbody>
-                  {tariffs.map(t => (
-                    <tr key={t.id}>
-                      <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{t.name}</td>
-                      <td style={{ fontWeight: 600, color: 'var(--green)' }}>{fmt(t.pricePerHour)} ₴/год</td>
-                      <td>{t.zoneName || 'Всі зони'}</td>
-                      <td>{t.isDefault ? <span className="badge badge-green">Так</span> : '—'}</td>
-                      <td>{can.management && <button className="btn btn-sm btn-danger" onClick={() => deleteTariff(t.id)}>✕</button>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
       </>
     );
   }
@@ -849,79 +793,6 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   }
 
   // ===== Modals =====
-  function SessionModal() {
-    if (!sessionModal) return null;
-    const [selectedTariff, setSelectedTariff] = useState(tariffs.find(t => t.isDefault)?.id || tariffs[0]?.id || '');
-    const [selectedUser, setSelectedUser] = useState('');
-    const [duration, setDuration] = useState<number | null>(60);
-    const durations = [
-      { min: 30, label: '30 хв' },
-      { min: 60, label: '1 год' },
-      { min: 120, label: '2 год' },
-      { min: 180, label: '3 год' },
-      { min: 300, label: '5 год' },
-      { min: null as number | null, label: 'Відкрита' },
-    ];
-    const tariff = tariffs.find(t => t.id === selectedTariff);
-    const cost = duration && tariff ? (tariff.pricePerHour * duration / 60) : 0;
-
-    return (
-      <div className="modal-overlay" onClick={() => setSessionModal(null)}>
-        <div className="modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-title">🎮 Нова сесія — {sessionModal.hostname}</div>
-
-          <div className="form-group">
-            <label className="form-label">Тариф</label>
-            <select className="form-select" value={selectedTariff} onChange={e => setSelectedTariff(e.target.value)}>
-              {tariffs.map(t => (
-                <option key={t.id} value={t.id}>{t.name} — {fmt(t.pricePerHour)} ₴/год</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Тривалість</label>
-            <div className="quick-select-grid">
-              {durations.map(d => (
-                <div key={d.label} className={`quick-select-item ${duration === d.min ? 'selected' : ''}`}
-                  onClick={() => setDuration(d.min)}>
-                  <div className="quick-select-label">{d.label}</div>
-                  {d.min && tariff && (
-                    <div className="quick-select-sub">{fmt(tariff.pricePerHour * d.min / 60)} ₴</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Гравець (необов&apos;язково)</label>
-            <select className="form-select" value={selectedUser} onChange={e => setSelectedUser(e.target.value)}>
-              <option value="">Гість</option>
-              {users.map(u => (
-                <option key={u.id} value={u.id}>{u.displayName} (@{u.username}) — {fmt(u.balance)} ₴</option>
-              ))}
-            </select>
-          </div>
-
-          {cost > 0 && (
-            <div style={{ padding: '12px 16px', background: 'var(--accent-glow)', borderRadius: 'var(--radius-sm)', marginBottom: 12, fontSize: 14 }}>
-              💰 Вартість: <strong>{fmt(cost)} ₴</strong>
-            </div>
-          )}
-
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setSessionModal(null)}>Скасувати</button>
-            <button className="btn btn-primary" onClick={() => {
-              startSession(sessionModal.deviceId, selectedTariff, selectedUser || null, duration);
-              setSessionModal(null);
-            }}>Розпочати</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function ZoneModal() {
     if (!zoneModal) return null;
     const [name, setName] = useState('');
@@ -952,75 +823,6 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
             <button className="btn" onClick={() => setZoneModal(false)}>Скасувати</button>
             <button className="btn btn-primary" disabled={!name.trim()} onClick={() => { createZone(name.trim(), color); setZoneModal(false); }}>
               Створити
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function TariffModal() {
-    if (!tariffModal) return null;
-    const [name, setName] = useState('');
-    const [price, setPrice] = useState('60');
-    const [zoneId, setZoneId] = useState('');
-
-    return (
-      <div className="modal-overlay" onClick={() => setTariffModal(false)}>
-        <div className="modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-title">💰 Новий тариф</div>
-          <div className="form-group">
-            <label className="form-label">Назва</label>
-            <input className="form-input" placeholder="напр. Стандарт, VIP, Нічний..." value={name} onChange={e => setName(e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Ціна за годину (₴)</label>
-            <input className="form-input" type="number" min="1" step="5" value={price} onChange={e => setPrice(e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Зона (необов&apos;язково)</label>
-            <select className="form-select" value={zoneId} onChange={e => setZoneId(e.target.value)}>
-              <option value="">Всі зони</option>
-              {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
-            </select>
-          </div>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setTariffModal(false)}>Скасувати</button>
-            <button className="btn btn-primary" disabled={!name.trim() || !price}
-              onClick={() => { createTariff(name.trim(), parseFloat(price), zoneId || null); setTariffModal(false); }}>
-              Створити
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function TopUpModal() {
-    if (!topUpModal) return null;
-    const [amount, setAmount] = useState('100');
-    const presets = [50, 100, 200, 500];
-
-    return (
-      <div className="modal-overlay" onClick={() => setTopUpModal(null)}>
-        <div className="modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-title">💳 Поповнення — @{topUpModal.username}</div>
-          <div className="form-group">
-            <label className="form-label">Сума (₴)</label>
-            <div className="quick-select-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-              {presets.map(p => (
-                <div key={p} className={`quick-select-item ${amount === String(p) ? 'selected' : ''}`}
-                  onClick={() => setAmount(String(p))}>
-                  <div className="quick-select-label">{p} ₴</div>
-                </div>
-              ))}
-            </div>
-            <input className="form-input" type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} />
-          </div>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setTopUpModal(null)}>Скасувати</button>
-            <button className="btn btn-success" onClick={() => { topUpUser(topUpModal.userId, parseFloat(amount)); setTopUpModal(null); }}>
-              Поповнити {amount} ₴
             </button>
           </div>
         </div>
@@ -1132,11 +934,24 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       </main>
 
       {/* Modals */}
-      <SessionModal />
       <ZoneModal />
-      <TariffModal />
-      <TopUpModal />
       <PlayerModal />
+      {startDialog && (
+        <StartSessionDialog device={startDialog} tariffs={tariffs} players={users} toast={toast}
+          onClose={() => setStartDialog(null)} onDone={() => { setStartDialog(null); fetchAll(); }} />
+      )}
+      {transferTarget && (
+        <TransferDialog session={transferTarget} devices={devices} players={users} toast={toast}
+          onClose={() => setTransferTarget(null)} onDone={() => { setTransferTarget(null); fetchAll(); }} />
+      )}
+      {endTarget && (
+        <EndSessionDialog session={endTarget} players={users} toast={toast}
+          onClose={() => setEndTarget(null)} onDone={() => { setEndTarget(null); fetchAll(); }} />
+      )}
+      {playerCard && (
+        <PlayerCard key={playerCard.user.id} player={playerCard.user} can={can} toast={toast} initialForm={playerCard.form ?? null}
+          onClose={() => setPlayerCard(null)} onChanged={fetchAll} />
+      )}
 
       {/* Toasts */}
       <div className="toast-container">

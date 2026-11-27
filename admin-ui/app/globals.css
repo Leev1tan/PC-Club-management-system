@@ -1154,3 +1154,153 @@ body::after {
   gap: 8px;
   align-items: center;
 }
+
+/* ══════════════════════════
+   BILLING (tariffs, packages, sessions, player card)
+   ══════════════════════════ */
+.modal {
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.modal-wide {
+  max-width: 920px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 12px;
+  align-items: end;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 6px 0 12px;
+  cursor: pointer;
+}
+
+.rule-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.3fr) auto minmax(190px, 1fr) 90px auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.rule-times {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rule-times .form-input {
+  padding: 6px 8px;
+  min-width: 76px;
+}
+
+.rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rule-line {
+  display: grid;
+  grid-template-columns: 28px minmax(160px, 1fr) 160px 110px 100px;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.day-chips {
+  display: flex;
+  gap: 3px;
+}
+
+.day-chips .filter-chip {
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+.cost-box {
+  padding: 12px 16px;
+  background: var(--accent-glow);
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.quote-slices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.package-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.quick-select-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.money-plus {
+  color: var(--neon-green);
+  font-family: var(--font-mono);
+}
+
+.money-minus {
+  color: var(--neon-magenta);
+  font-family: var(--font-mono);
+}
+
+.ledger-table {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.pc-card.paused {
+  border-left-color: var(--neon-yellow);
+}
+
+.dot.amber {
+  background: var(--neon-yellow);
+  box-shadow: 0 0 6px var(--neon-yellow);
+}
+
+@media (max-width: 760px) {
+  .modal {
+    min-width: 0;
+  }
+  .rule-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.tier-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.tier-row .form-input {
+  width: 110px;
+}
+
+.tier-row .rule-times {
+  white-space: nowrap;
+}

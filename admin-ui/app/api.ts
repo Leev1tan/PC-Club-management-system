@@ -1,3 +1,5 @@
+import { errorMessage } from './i18n';
+
 // API access for the admin UI.
 // Same origin by default: the API is served under /api on the host that serves this UI
 // (Cms.Server wwwroot, the admin-ui container proxy, or an ingress path split).
@@ -52,6 +54,9 @@ export async function errorText(res: Response): Promise<string> {
   const text = await res.text();
   try {
     const json = JSON.parse(text);
+    // Billing errors carry a code with a translated text (app/i18n.ts)
+    const translated = json.code ? errorMessage(json.code, json.args) : null;
+    if (translated) return translated;
     return json.error ?? json.title ?? text;
   } catch {
     return text || `HTTP ${res.status}`;

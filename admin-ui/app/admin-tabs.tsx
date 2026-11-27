@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Me, api, errorText, getJson, postJson } from './api';
 import { roleLabel } from './auth';
+import { t } from './i18n';
 
 type ToastFn = (message: string, type?: 'success' | 'error' | 'info') => void;
 
@@ -22,13 +23,16 @@ const auditFilters: { prefix: string; label: string }[] = [
   { prefix: 'player.', label: 'Баланси / Balances' },
   { prefix: 'session.', label: 'Сесії / Sessions' },
   { prefix: 'tariff.', label: 'Тарифи / Tariffs' },
+  { prefix: 'package.', label: t.audit.packages },
+  { prefix: 'billing.', label: t.audit.billing },
   { prefix: 'auth.', label: 'Входи / Logins' },
   { prefix: 'staff.', label: 'Персонал / Staff' },
   { prefix: 'device.', label: 'ПК / PCs' },
   { prefix: 'settings.', label: 'Налаштування / Settings' },
 ];
 
-const alertActions = new Set(['device.unlock_without_session', 'auth.login_failed', 'player.balance_adjusted', 'settings.staff_pin_removed']);
+const alertActions = new Set(['device.unlock_without_session', 'auth.login_failed', 'player.balance_adjusted', 'player.bonus_adjusted',
+  'player.refund', 'settings.staff_pin_removed']);
 
 export function AuditTab() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
