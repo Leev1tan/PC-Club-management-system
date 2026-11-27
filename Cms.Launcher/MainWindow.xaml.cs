@@ -50,6 +50,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         Loaded += OnLoaded;
         Closing += OnWindowClosing;
+        if (Application.Current != null) Application.Current.SessionEnding += (_, _) => ReportSessionEnd();
         KeyDown += OnKeyDown;
 
         // Allow Enter in login form

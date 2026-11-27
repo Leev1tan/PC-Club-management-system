@@ -21,7 +21,19 @@ public partial class MainWindow
     private void LogOffWindowsSession()
     {
         _loggingOff = true;
+        ReportSessionEnd();
         if (!ExitWindowsEx(EwxLogoff | EwxForce, ShtdnReasonMajorOther | ShtdnReasonFlagPlanned))
             _loggingOff = false; // refused: the PC stays as it is (the staff can reboot it)
+    }
+
+    /// <summary>
+    /// The Windows session ends (log off, shut down, restart): its games end with it. The lock screen reports them as
+    /// stopped first, so the admin view does not keep the old current game (Windows test 2026-11-27, defect 9). A forced
+    /// log off sends no notice to the programs, so LogOffWindowsSession calls this before it.
+    /// </summary>
+    private void ReportSessionEnd()
+    {
+        try { ReportGameEvents(_gameTracker.StopAll(DateTimeOffset.UtcNow)); }
+        catch (Exception) { /* best effort: the session ends anyway */ }
     }
 }
