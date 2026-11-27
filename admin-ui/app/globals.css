@@ -417,6 +417,12 @@ body::after {
   position: relative;
 }
 
+/* The open action menu must not be clipped by the card shape or covered by the next cards */
+.pc-card:has(> .popover) {
+  clip-path: none;
+  z-index: 200;
+}
+
 .pc-card:hover {
   border-color: var(--neon-cyan);
   box-shadow: 0 0 12px rgba(0, 240, 255, 0.15);
