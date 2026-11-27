@@ -71,6 +71,13 @@ public class DevicesController : ControllerBase
         var key = Request.Headers[DeviceKeyAuthenticationHandler.HeaderName].ToString();
         var status = _devices.Heartbeat(key, request);
         if (status == null) return Unauthorized();
+        // The real lock state of the PC in every heartbeat (also a lock of the agent at its start, which no command
+        // acknowledges, and a staff PIN unlock on the screen), and the state of the lock screen
+        if (User.DeviceId() is { } reporter)
+        {
+            if (request.IsLocked is { } locked) _runtime?.SetLocked(reporter, locked);
+            _runtime?.SetLockScreen(reporter, request.LockScreen);
+        }
         // Approved PCs get the hash of the staff PIN for the offline emergency unlock (null = no PIN set)
         // and the club settings of the lock screen (language, currency)
         if (status != DeviceStatuses.Approved) return Ok(new DeviceHeartbeatResponse(status, null));
@@ -156,7 +163,8 @@ public class DevicesController : ControllerBase
                 CurrentGameColor = game?.Color,
                 CurrentGameStartedUtc = game?.StartUtc,
                 Reservation = reservations.TryGetValue(d.Id, out var next) ? next : null,
-                Event = events.TryGetValue(d.Id, out var ev) ? ev : null
+                Event = events.TryGetValue(d.Id, out var ev) ? ev : null,
+                LockScreen = _runtime?.LockScreen(d.Id)
             };
         }));
     }
@@ -429,8 +437,12 @@ public sealed record DeviceRegistrationResult(DeviceRegistrationKind Kind, Devic
     public static DeviceRegistrationResult Unauthorized(string error) => new(DeviceRegistrationKind.Unauthorized, null, error);
     public static DeviceRegistrationResult Invalid(string error) => new(DeviceRegistrationKind.Invalid, null, error);
 }
-/// <summary>Mac: MAC address of the network card that the agent uses (for Wake-on-LAN); optional.</summary>
-public record DeviceHeartbeatRequest(double CpuPercent, double MemPercent, string? ActiveUser, string Ip, TimeSpan Uptime, string? Mac = null);
+/// <summary>
+/// Mac: MAC address of the network card that the agent uses (for Wake-on-LAN); optional. IsLocked: what the screen of the
+/// PC shows now (agent 0.9.1 and newer; null = an older agent). LockScreen: "ok", "staff_unlock", "silent" or "unknown".
+/// </summary>
+public record DeviceHeartbeatRequest(double CpuPercent, double MemPercent, string? ActiveUser, string Ip, TimeSpan Uptime, string? Mac = null,
+    bool? IsLocked = null, string? LockScreen = null);
 /// <summary>Action: shutdown, reboot or wake (Wake-on-LAN).</summary>
 public record PowerRequest(string? Action);
 /// <summary>CommandId: the queued shutdown or reboot; Mac and Target: where the Wake-on-LAN packet went.</summary>
@@ -468,6 +480,8 @@ public record DeviceDetailView(
     public Cms.Server.Reservations.PcReservationView? Reservation { get; init; }
     /// <summary>The next open event that books the PC (held or running now, or within 12 hours); null = none.</summary>
     public Cms.Server.Events.PcEventView? Event { get; init; }
+    /// <summary>The lock screen from the heartbeat: "ok", "staff_unlock", "silent", "unknown"; null = not reported (older agent).</summary>
+    public string? LockScreen { get; init; }
 }
 public record EnqueueCommandRequest(string Type, object? Payload);
 /// <summary>Event of the PC (Cms.Shared.LauncherEvent): Id (for de-duplication), Type staff_unlock, when, why the PC was locked.</summary>

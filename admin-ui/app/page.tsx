@@ -33,6 +33,7 @@ type Device = {
   positionX: number | null; positionY: number | null;
   occupancyStatus: string; activeSessionId: string | null; activeUserId: string | null; sessionEndUtc: string | null;
   isLocked?: boolean | null; pendingCommands?: number;
+  lockScreen?: string | null; // ok, staff_unlock, silent, unknown (from the heartbeat of the agent)
   enrollment?: string; // pending (waits for approval), approved, revoked
   sessionPausedUtc?: string | null; sessionCutoffUtc?: string | null; sessionLabel?: string | null; sessionIsPackage?: boolean;
   currentGame?: string | null; currentGameColor?: string | null; currentGameStartedUtc?: string | null;
@@ -558,7 +559,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 {d.zoneName && <div className="pc-card-zone">{d.zoneName}</div>}
                 <div className="pc-card-flags">
                   {d.isLocked === true && <span title={t.map.locked}>🔒</span>}
-                  {d.isLocked === false && <span title={t.map.unlocked}>🔓</span>}
+                  {d.isLocked === false && <span title={d.lockScreen === 'staff_unlock' ? t.map.staffUnlocked : t.map.unlocked}>🔓{d.lockScreen === 'staff_unlock' ? ' PIN' : ''}</span>}
+                  {d.status === 'online' && d.lockScreen === 'silent' && <span title={t.map.lockScreenSilent}>⚠️</span>}
                   {(d.pendingCommands ?? 0) > 0 && <span title={t.map.pendingCommands}>⏳ {d.pendingCommands}</span>}
                 </div>
 

@@ -808,8 +808,20 @@ public partial class Worker : BackgroundService
         using var req = new HttpRequestMessage(HttpMethod.Post, "api/devices/heartbeat");
         req.Headers.Add("X-Device-Key", _deviceKey);
         var ip = GetLocalIpAddress();
+        // The real lock state in every heartbeat (known issue of the Windows test 2026-11-27: a lock of the agent at its start
+        // was unknown to the server, so the admin UI could show "unlocked"); a staff PIN unlock on the screen counts as unlocked
+        bool reportedLocked;
+        string lockScreen;
+        lock (_gate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            reportedLocked = _screen.ReportedLocked(_lock.Evaluate(now).Locked, now);
+            lockScreen = _screen.State(now);
+        }
         var payload = new DeviceHeartbeatRequest
         {
+            IsLocked = reportedLocked,
+            LockScreen = lockScreen,
             CpuPercent = GetCpuPercent(),
             MemPercent = GetMemPercent(),
             ActiveUser = Environment.UserName,
@@ -1309,5 +1321,9 @@ public partial class Worker : BackgroundService
         public string Ip { get; set; } = string.Empty;
         public TimeSpan Uptime { get; set; }
         public string? Mac { get; set; }
+        /// <summary>What the screen shows now: locked (the agent's decision), or unlocked by a staff PIN on the lock screen.</summary>
+        public bool? IsLocked { get; set; }
+        /// <summary>"ok", "staff_unlock", "silent" or "unknown" (Cms.Client.LockScreenStates).</summary>
+        public string? LockScreen { get; set; }
     }
 }
