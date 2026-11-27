@@ -1933,3 +1933,5 @@ body::after {
 /* ===== Club game-account pool (phase 8) ===== */
 .mono-cell { font-family: var(--font-mono); letter-spacing: 0.04em; }
 .account-security { border-left: 3px solid var(--neon-yellow); }
+.account-actions { min-width: 250px; }
+.account-actions > div { display: flex; flex-wrap: wrap; gap: 4px; max-width: 300px; }

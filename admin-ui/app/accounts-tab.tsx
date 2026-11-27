@@ -90,15 +90,17 @@ export function AccountsTab({ toast, management }: { toast: ToastFn; management:
                         <div className="user-chip">
                           {a.lease.username ? <span className="data">@{a.lease.username}</span> : t.guest}
                           {a.lease.game && <> · <span className="data">{a.lease.game}</span></>}
-                          {' · '}{fmt(t.accounts.leasedAt, { when: clubDateTime(a.lease.startedUtc) })}
+                        </div>
+                        <div className="user-chip">
+                          {fmt(t.accounts.leasedAt, { when: clubDateTime(a.lease.startedUtc) })}
                           {' · '}{a.lease.delivered ? t.accounts.delivered : t.accounts.notDelivered}
                         </div>
                       </>
                     ) : '—'}
                   </td>
                   <td>{a.leases}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <td className="account-actions">
+                    <div>
                       {a.lease && <button className="btn btn-sm" onClick={() => act(a, 'release')}>{t.accounts.release}</button>}
                       {management && !a.removed && <button className="btn btn-sm" onClick={() => setRotating(a)}>{a.hasSecret ? t.accounts.rotate : t.accounts.setSecret}</button>}
                       {management && !a.removed && <button className="btn btn-sm" onClick={() => act(a, a.isActive ? 'off' : 'on')}>{a.isActive ? t.accounts.turnOff : t.accounts.turnOn}</button>}
