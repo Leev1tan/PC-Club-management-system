@@ -61,6 +61,8 @@ public static class AuditActions
     public const string PlayerLoginFailed = "player.login_failed";
     /// <summary>The player login of an account or a PC is locked after repeated failures.</summary>
     public const string PlayerLoginLocked = "player.login_locked";
+    /// <summary>A manager or the owner cleared the player login lockout of a name or of a PC.</summary>
+    public const string PlayerLoginLockoutCleared = "player.login_lockout_cleared";
     /// <summary>The player ended the session on the lock screen.</summary>
     public const string PlayerLogout = "player.logout";
 

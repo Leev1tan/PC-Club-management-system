@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Cms.Server.Devices;
 
@@ -8,7 +10,9 @@ namespace Cms.Server.Devices;
 ///    tell which names exist): 5 failures in 15 minutes lock the name for 15 minutes on every PC;
 ///  - per PC: 10 failures in 15 minutes lock the login of that PC for 15 minutes (one PC cannot try
 ///    many accounts). The club PCs share one IP behind the router, so there is no per-IP limit here.
-/// A successful login clears both counters.
+/// A successful login clears both counters. A manager or the owner can clear a lockout in the admin UI
+/// (PlayerLockoutsController); the list shows a name only when it is an account (players type their password
+/// into the name field), otherwise only an opaque id of the name.
 /// </summary>
 public sealed class PlayerLoginLimiter
 {
@@ -73,6 +77,41 @@ public sealed class PlayerLoginLimiter
             c.WindowStartUtc = now;
             return true;
         }
+    }
+
+    /// <summary>Opaque id of a typed user name: the first 16 hex digits of its SHA-256 (the list never shows unknown names).</summary>
+    public static string AccountId(string? username) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(AccountKey(username))))[..16].ToLowerInvariant();
+
+    public sealed record LockedAccount(string Id, string Name, DateTimeOffset LockedUntilUtc);
+    public sealed record LockedDevice(Guid DeviceId, DateTimeOffset LockedUntilUtc);
+
+    /// <summary>Names locked now (the name as typed; show it only when it is an account).</summary>
+    public IReadOnlyList<LockedAccount> LockedAccounts(DateTimeOffset now) =>
+        _accounts.Select(kv => (kv.Key, Until: Until(kv.Value, now))).Where(x => x.Until.HasValue)
+            .Select(x => new LockedAccount(AccountId(x.Key), x.Key, x.Until!.Value)).OrderBy(x => x.LockedUntilUtc).ToList();
+
+    /// <summary>PCs whose player login is locked now.</summary>
+    public IReadOnlyList<LockedDevice> LockedDevices(DateTimeOffset now) =>
+        _devices.Select(kv => (kv.Key, Until: Until(kv.Value, now))).Where(x => x.Until.HasValue)
+            .Select(x => new LockedDevice(x.Key, x.Until!.Value)).OrderBy(x => x.LockedUntilUtc).ToList();
+
+    /// <summary>Clears the lockout and the failures of a name (as typed or by its opaque id). Returns the name, or null when it was not locked.</summary>
+    public string? ClearAccount(string? username, string? id, DateTimeOffset now)
+    {
+        var key = username != null ? AccountKey(username)
+            : _accounts.Keys.FirstOrDefault(k => string.Equals(AccountId(k), id?.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (key == null || !_accounts.TryGetValue(key, out var c) || Until(c, now) == null) return null;
+        return _accounts.TryRemove(key, out _) ? key : null;
+    }
+
+    /// <summary>Clears the lockout and the failures of a PC. False when it was not locked.</summary>
+    public bool ClearDevice(Guid deviceId, DateTimeOffset now) =>
+        _devices.TryGetValue(deviceId, out var c) && Until(c, now) != null && _devices.TryRemove(deviceId, out _);
+
+    private static DateTimeOffset? Until(Counter c, DateTimeOffset now)
+    {
+        lock (c) return c.LockedUntilUtc is { } until && now < until ? until : null;
     }
 
     private static void Prune<TKey>(ConcurrentDictionary<TKey, Counter> map, DateTimeOffset now) where TKey : notnull

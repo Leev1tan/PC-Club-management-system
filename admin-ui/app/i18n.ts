@@ -607,6 +607,18 @@ export const uk = {
     password: 'Пароль або PIN (мін. 4) — для входу на екрані блокування',
   },
 
+  lockouts: {
+    title: '🔐 Блокування входу на ПК',
+    hint: 'Після 5 невдалих спроб ім\'я блокується на 15 хв на всіх ПК, після 10 спроб на одному ПК — вхід на цьому ПК. Блокування зберігаються до перезапуску сервера.',
+    empty: 'Зараз нічого не заблоковано',
+    account: 'Гравець',
+    unknownName: 'невідоме ім\'я (не акаунт)',
+    pc: 'ПК',
+    until: 'До',
+    clear: 'Зняти блокування',
+    cleared: 'Блокування знято ✓',
+  },
+
   zones: {
     title: '🗺️ Зони',
     add: '+ Додати зону',
@@ -760,6 +772,7 @@ export const uk = {
     no_mac: 'ПК ще не повідомив свою MAC-адресу',
     wake_not_configured: 'Wake-on-LAN вимкнено: перевірте Power:WakeBroadcast і Power:WakePort на сервері',
     wake_failed: 'Не вдалося надіслати Wake-on-LAN',
+    lockout_not_found: 'Цей вхід уже не заблоковано',
     bad_power_action: 'Невідома дія живлення',
     balance_limit_needs_player: 'Час з балансу — лише для гравця, без передоплати, з оплатою з балансу',
     game_not_found: 'Гру не знайдено',
@@ -1450,6 +1463,18 @@ export const en: typeof uk = {
     password: 'Password or PIN (min. 4) — for the sign-in on the lock screen',
   },
 
+  lockouts: {
+    title: '🔐 Login lockouts on the PCs',
+    hint: 'After 5 failed tries a name is locked for 15 min on all PCs; after 10 tries on one PC the login of that PC is locked. Lockouts last until the server restarts.',
+    empty: 'Nothing is locked now',
+    account: 'Player',
+    unknownName: 'unknown name (no account)',
+    pc: 'PC',
+    until: 'Until',
+    clear: 'Clear the lockout',
+    cleared: 'Lockout cleared ✓',
+  },
+
   zones: {
     title: '🗺️ Zones',
     add: '+ Add a zone',
@@ -1603,6 +1628,7 @@ export const en: typeof uk = {
     no_mac: 'The PC has not reported its MAC address yet',
     wake_not_configured: 'Wake-on-LAN is off: check Power:WakeBroadcast and Power:WakePort on the server',
     wake_failed: 'Wake-on-LAN could not be sent',
+    lockout_not_found: 'This login is not locked any more',
     bad_power_action: 'Unknown power action',
     balance_limit_needs_player: 'Time from the balance needs a player, no prepaid time and payment from the balance',
     game_not_found: 'Game not found',
@@ -1784,6 +1810,31 @@ export const dateTime = (iso: string, seconds = false) => {
   return `${d.toLocaleDateString(locale)} ${d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) })}`;
 };
 export const clock = (iso: string) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+
+// ===== Club time zone (from /api/auth/me): reservations, orders and lockouts show club times =====
+let clubZone: string | undefined;
+/** Sets the club time zone (IANA id); an unknown id keeps the browser's zone. */
+export function setClubZone(zone: string | null | undefined) {
+  try {
+    if (zone) new Intl.DateTimeFormat('en', { timeZone: zone }).format(0);
+    clubZone = zone || undefined;
+  } catch {
+    clubZone = undefined;
+  }
+}
+export const clubZoneId = () => clubZone;
+/** HH:mm in the club time zone. */
+export const clubClock = (iso: string) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: clubZone });
+/** Date and HH:mm in the club time zone. */
+export const clubDateTime = (iso: string) =>
+  `${new Date(iso).toLocaleDateString(locale, { timeZone: clubZone })} ${clubClock(iso)}`;
+/** Today's date in the club time zone as YYYY-MM-DD. */
+export const clubToday = (offsetDays = 0) => {
+  const d = new Date(Date.now() + offsetDays * 86400000);
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: clubZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+};
 
 export function methodLabel(method: string | null | undefined): string {
   if (!method) return t.none;

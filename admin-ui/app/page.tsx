@@ -5,11 +5,12 @@ import { LangSwitch, LoginScreen, SetupScreen, roleLabel } from './auth';
 import { AnalyticsTab } from './analytics-tab';
 import { AuditTab, SettingsTab, StaffTab } from './admin-tabs';
 import { Tariff } from './billing';
-import { cash, fmt as fmtText, lang, locale, methodLabel, money, setCurrency, t } from './i18n';
+import { cash, fmt as fmtText, lang, locale, methodLabel, money, setClubZone, setCurrency, t } from './i18n';
 import { PlayerCard } from './player-card';
 import { PosTab } from './pos-tab';
 import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-dialogs';
 import { GamesTab } from './games-tab';
+import { LoginLockouts } from './lockouts';
 import { PowerAction, PowerDialog, PowerTarget } from './power-dialog';
 import { ShiftTab } from './shift-tab';
 import { StockTab } from './stock-tab';
@@ -100,7 +101,7 @@ export default function Page() {
 
   // The club currency comes with the signed-in staff member; set it before the admin page renders
   const accept = useCallback((who: Me | null) => {
-    if (who) setCurrency(who.currency);
+    if (who) { setCurrency(who.currency); setClubZone(who.timeZone); }
     setMe(who);
   }, []);
 
@@ -340,7 +341,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'map': return <MapTab />;
       case 'devices': return <DevicesTab />;
       case 'sessions': return <SessionsTab />;
-      case 'users': return <UsersTab />;
+      case 'users': return <>{can.management && <LoginLockouts toast={toast} />}<UsersTab /></>;
       case 'tariffs': return <TariffsTab can={can} zones={zones} devices={devices} tariffs={tariffs} toast={toast}
         onChanged={fetchAll} onAddZone={() => setZoneModal(true)} onDeleteZone={deleteZone} />;
       case 'pos': return <PosTab can={can} players={users} toast={toast} onChanged={fetchAll} />;

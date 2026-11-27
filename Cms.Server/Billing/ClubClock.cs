@@ -63,6 +63,13 @@ public static class ClubTimeZone
         return TimeZoneInfo.Utc;
     }
 
+    /// <summary>IANA id of the zone (Windows ids are converted), for browsers; UTC when there is none.</summary>
+    public static string IanaId(TimeZoneInfo zone)
+    {
+        if (zone.HasIanaId) return zone.Id;
+        return TimeZoneInfo.TryConvertWindowsIdToIanaId(zone.Id, out var iana) ? iana : "UTC";
+    }
+
     private static TimeZoneInfo? TryFind(string id)
     {
         try { return TimeZoneInfo.FindSystemTimeZoneById(id); }

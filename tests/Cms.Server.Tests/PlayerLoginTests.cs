@@ -179,6 +179,50 @@ public sealed class PlayerLoginTests : ApiTestBase, IClassFixture<CmsFactory>
     }
 
     [Fact]
+    public async Task A_manager_clears_the_lockout_of_a_name_and_of_a_pc_and_it_is_audited()
+    {
+        var (owner, zone) = await ClubAsync();
+        var pc = await TestPc.AddAsync(_factory, Guid.Parse(zone));
+        var second = await TestPc.AddAsync(_factory, Guid.Parse(zone));
+        var sprayed = await TestPc.AddAsync(_factory, Guid.Parse(zone));
+        var username = await PlayerAsync(owner, 100);
+        var ghost = "ghost" + Guid.NewGuid().ToString("N")[..6];
+        for (var i = 0; i < 5; i++) await LoginAsync(pc, username, "0000");
+        for (var i = 0; i < 5; i++) await LoginAsync(second, ghost, "0000");
+        for (var i = 0; i < 10; i++) await LoginAsync(sprayed, $"spray{i}-{Guid.NewGuid():N}"[..14], "1111");
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await LoginAsync(sprayed, await PlayerAsync(owner, 10), Pin)).StatusCode);
+
+        // A cashier and a technician may not see or clear lockouts
+        var cashier = await StaffAsync("Cashier");
+        Assert.Equal(HttpStatusCode.Forbidden, (await cashier.GetAsync("/api/player-lockouts")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await (await StaffAsync("Tech")).PostAsJsonAsync("/api/player-lockouts/clear", new { username })).StatusCode);
+
+        var manager = await StaffAsync("Manager");
+        var list = await JsonAsync(await manager.GetAsync("/api/player-lockouts"));
+        var accounts = list.GetProperty("accounts").EnumerateArray().ToList();
+        Assert.Contains(accounts, a => a.GetProperty("username").GetString() == username);
+        // The name that is no account is listed only with its id (it can be a typed password)
+        var unknown = Assert.Single(accounts, a => a.GetProperty("id").GetString() == Cms.Server.Devices.PlayerLoginLimiter.AccountId(ghost));
+        Assert.Equal(JsonValueKind.Null, unknown.GetProperty("username").ValueKind);
+        Assert.DoesNotContain(ghost, list.GetRawText());
+        Assert.Contains(list.GetProperty("devices").EnumerateArray(), d => d.GetProperty("hostname").GetString() == sprayed.Hostname);
+
+        await JsonAsync(await manager.PostAsJsonAsync("/api/player-lockouts/clear", new { username = username.ToUpperInvariant() }));
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(pc, username, Pin)).StatusCode);
+        await JsonAsync(await manager.PostAsJsonAsync("/api/player-lockouts/clear", new { id = unknown.GetProperty("id").GetString() }));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(second, ghost, "0000")).StatusCode); // counted again from zero
+        await JsonAsync(await owner.PostAsJsonAsync("/api/player-lockouts/clear", new { deviceId = sprayed.Id }));
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(sprayed, await PlayerAsync(owner, 10), Pin)).StatusCode);
+        Assert.Equal("lockout_not_found", await CodeAsync(await owner.PostAsJsonAsync("/api/player-lockouts/clear", new { deviceId = sprayed.Id })));
+
+        var cleared = await AuditAsync(owner, "player.login_lockout_cleared");
+        Assert.Contains(cleared, a => a.GetProperty("summary").GetString() == $"Player login lockout cleared for account @{username}");
+        Assert.Contains(cleared, a => a.GetProperty("summary").GetString() == "Player login lockout cleared for an unknown user name");
+        Assert.Contains(cleared, a => a.GetProperty("summary").GetString() == $"Player login lockout cleared for PC {sprayed.Hostname}");
+        Assert.DoesNotContain(cleared, a => a.GetRawText().Contains(ghost));
+    }
+
+    [Fact]
     public async Task Only_the_agent_of_an_approved_pc_logs_in_for_its_own_pc()
     {
         var (owner, zone) = await ClubAsync();

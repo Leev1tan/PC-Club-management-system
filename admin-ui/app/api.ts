@@ -10,7 +10,7 @@ export const API = process.env.NEXT_PUBLIC_API_URL ||
 
 export type Role = 'Owner' | 'Manager' | 'Cashier' | 'Tech';
 /** The signed-in staff member; currency = ISO code of the club currency (UAH, EUR, USD, PLN). */
-export type Me = { id: string; username: string; displayName: string; role: Role; currency?: string };
+export type Me = { id: string; username: string; displayName: string; role: Role; currency?: string; timeZone?: string };
 export type DemoAccount = { username: string; password: string; role: Role };
 export type AuthStatus = { setupRequired: boolean; demoMode: boolean; demoAccounts: DemoAccount[] | null };
 
