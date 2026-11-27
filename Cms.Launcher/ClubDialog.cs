@@ -48,6 +48,7 @@ internal sealed class ClubDialog : Window
             }
         };
         Loaded += (_, _) => ok.Focus();
+        ContentRendered += (_, _) => (Owner as MainWindow)?.OnDialogShown(this); // in front while the PC is locked
     }
 
     /// <summary>A message with the OK button of the club language.</summary>

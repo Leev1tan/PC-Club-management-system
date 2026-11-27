@@ -445,7 +445,11 @@ public partial class MainWindow : Window
             EnsureWatchdog();
 
             // A new lock ends the player's language choice; the teardown runs when the session is over
-            if (decision.Locked && !_wasLocked) _languageOverride = null;
+            if (decision.Locked && !_wasLocked)
+            {
+                _languageOverride = null;
+                _lockedSinceUtc = now; // the guard closes the programs of the player 10 s after a lock without a session
+            }
             _wasLocked = decision.Locked;
             CheckTeardown(decision, state);
             if (_logoff.ShouldLogOff(state?.Logoff, now)) LogOffWindowsSession();

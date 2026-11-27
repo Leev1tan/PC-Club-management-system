@@ -57,5 +57,12 @@ internal sealed class StaffPinDialog : Window
         };
 
         Loaded += (_, _) => { _pin.Focus(); Keyboard.Focus(_pin); };
+        // While locked, the dialog takes the foreground at once, also from another program (Windows test 2026-11-27 night,
+        // defects 1 and 2); then the PIN box has the keyboard
+        ContentRendered += (_, _) =>
+        {
+            (Owner as MainWindow)?.OnDialogShown(this);
+            Keyboard.Focus(_pin);
+        };
     }
 }
