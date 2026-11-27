@@ -93,8 +93,40 @@ function Find-ReparsePoint([string]$Path) {
     return $null
 }
 
+# What to do with a link that must not be used: remove the link only. "rmdir" removes a folder link and "del" a file
+# link; neither touches the target of the link.
+function Get-LinkAdvice([string]$Path) {
+    return ("$Path is a junction or a symbolic link. A player may have made it. Remove the link only with " +
+        "cmd /c rmdir `"$Path`" (a link to a file: cmd /c del `"$Path`"): the folder or file that it points to stays.")
+}
+
+# The message for a folder that must not be used (Get-FolderProblem): what is wrong and what to do. Advice to change the
+# owner applies only to a real folder: it cannot help for a link.
+function Get-FolderAdvice([string]$Path, [string]$Problem) {
+    if ($Problem -match 'junction') { return Get-LinkAdvice $Path }
+    return ("$Path cannot be used: $Problem. A player may have made it: check its content and remove it by hand. If an " +
+        "administrator made it, make Administrators its owner with icacls `"$Path`" /setowner *S-1-5-32-544 and run the installer again.")
+}
+
+# The attributes that a delete needs, or $null when nothing must change. Windows refuses to delete a read-only file or a
+# read-only folder ("Access to the path ... is denied"), and every user profile has read-only folders (Desktop, Documents,
+# Downloads, AppData\Local\Microsoft\Windows\WinX\Group1 ...): ReadOnly and System are removed. A reparse point is never
+# changed: the change could apply to the target of the link.
+function Get-DeletableAttributes([IO.FileAttributes]$Attributes) {
+    if (($Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $null }
+    $blocking = [int]([IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::System)
+    if (([int]$Attributes -band $blocking) -eq 0) { return $null }
+    $rest = [int]$Attributes -band (-bnot $blocking)
+    if ($rest -eq 0) { return [IO.FileAttributes]::Normal }
+    return [IO.FileAttributes]$rest
+}
+
 # Deletes a folder and its content without entering a reparse point: a junction or a link inside is removed as a link.
+# The ReadOnly and System attributes of the folders and files are removed first (Get-DeletableAttributes), never those
+# of a link.
 function Remove-TreeNoFollow([string]$Path) {
+    $own = Get-DeletableAttributes ([IO.File]::GetAttributes($Path))
+    if ($null -ne $own) { [IO.File]::SetAttributes($Path, $own) }
     foreach ($entry in [IO.Directory]::GetFileSystemEntries($Path)) {
         $attributes = [IO.File]::GetAttributes($entry)
         $isFolder = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
@@ -103,7 +135,8 @@ function Remove-TreeNoFollow([string]$Path) {
         } elseif ($isFolder) {
             Remove-TreeNoFollow $entry
         } else {
-            if (($attributes -band [IO.FileAttributes]::ReadOnly) -ne 0) { [IO.File]::SetAttributes($entry, [IO.FileAttributes]::Normal) }
+            $deletable = Get-DeletableAttributes $attributes
+            if ($null -ne $deletable) { [IO.File]::SetAttributes($entry, $deletable) }
             [IO.File]::Delete($entry)
         }
     }
@@ -172,10 +205,7 @@ function New-FolderSecurity([string[]]$Grants) {
 # existing one must be a plain folder of SYSTEM or an administrator (Get-FolderProblem). Throws otherwise.
 function Initialize-ProtectedFolder([string]$Path, [string[]]$Grants, [string[]]$TrustedOwners) {
     $problem = Get-FolderProblem $Path $TrustedOwners
-    if ($problem) {
-        throw ("$Path cannot be used: $problem. A player may have prepared it: check it and remove it by hand. If an " +
-            "administrator made it, make Administrators its owner: icacls `"$Path`" /setowner *S-1-5-32-544")
-    }
+    if ($problem) { throw (Get-FolderAdvice $Path $problem) }
     if (-not (Test-Path -LiteralPath $Path)) {
         $security = New-FolderSecurity $Grants
         if ([IO.Directory].GetMethod('CreateDirectory', [Type[]]@([string], [System.Security.AccessControl.DirectorySecurity]))) {
@@ -185,7 +215,7 @@ function Initialize-ProtectedFolder([string]$Path, [string[]]$Grants, [string[]]
         }
     }
     $problem = Get-FolderProblem $Path $TrustedOwners
-    if ($problem) { throw "$Path cannot be used: $problem" }
+    if ($problem) { throw (Get-FolderAdvice $Path $problem) }
 }
 # ---- END safe folders ----
 
@@ -213,7 +243,7 @@ try {
     foreach ($round in 1..2) {
         foreach ($folder in @($InstallPath, $DataPath)) {
             $inside = Find-ReparsePoint $folder
-            if ($inside) { throw "$inside is a junction or a symbolic link; check it and remove it by hand" }
+            if ($inside) { throw (Get-LinkAdvice $inside) }
         }
         if ($round -eq 1) {
             icacls $InstallPath /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
@@ -221,7 +251,9 @@ try {
         }
     }
 } catch {
-    Write-Host "ERROR: $($_.Exception.Message). Nothing was changed." -ForegroundColor Red
+    # Windows re-test 2026-11-27 late, LOW 8: new, empty folders made in this step can stay, so not "Nothing was changed"
+    Write-Host ("ERROR: $($_.Exception.Message.TrimEnd('.')). The server was not installed or changed. Only new, empty " +
+        "folders or stricter permissions of $InstallPath and $DataPath can stay.") -ForegroundColor Red
     exit 1
 }
 
