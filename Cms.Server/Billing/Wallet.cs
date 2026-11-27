@@ -46,6 +46,8 @@ public static class PaymentMethods
     public const string None = "none";
     /// <summary>Post-paid time the player could not pay: recorded on the player account (Users.Debt).</summary>
     public const string Debt = "debt";
+    /// <summary>Free PC time given by Owner or Manager with a reason (no money, audited as session.free_time).</summary>
+    public const string Free = "free";
 
     /// <summary>balance, cash or card; null for an empty value; "" for an unknown value.</summary>
     public static string? Normalize(string? method)

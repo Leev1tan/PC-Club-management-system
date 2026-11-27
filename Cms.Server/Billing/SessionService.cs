@@ -46,8 +46,22 @@ public sealed class SessionService
         _actor = actor;
     }
 
+    /// <summary>Owner or Manager: may give free PC time (payment method free, with a reason).</summary>
+    public bool CanGiveFreeTime { get; init; }
+
     private Task AuditAsync(string action, Guid sessionId, string summary, object details) =>
         _audit?.WriteAsync(action, "session", sessionId, summary, details) ?? Task.CompletedTask;
+
+    private static bool IsFree(string? method) => string.Equals(method?.Trim(), PaymentMethods.Free, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Free time: Owner or Manager, with a reason (at least 3 characters).</summary>
+    private BillingResult<string> CheckFree(string? reason)
+    {
+        if (!CanGiveFreeTime) return BillingErrors.FreeNeedsManager;
+        var why = reason?.Trim();
+        if (why is not { Length: >= 3 }) return BillingErrors.ReasonRequired;
+        return BillingResult<string>.Success(why.Length > 300 ? why[..300] : why);
+    }
 
     // ===== Start =====
 
@@ -108,7 +122,18 @@ public sealed class SessionService
         // A player who owes money plays prepaid until the debt is paid (an open-ended session could add to it)
         if (!prepaid && user is { Debt: > 0 }) return BillingErrors.PlayerHasDebt.With(user.Debt);
         string? method = null;
-        if (prepaid)
+        string? freeReason = null;
+        var value = price;
+        if (IsFree(req.PaymentMethod))
+        {
+            if (!prepaid) return BillingErrors.FreeNeedsPrepaid;
+            var free = CheckFree(req.Reason);
+            if (!free.Ok) return free.Error!;
+            freeReason = free.Value;
+            method = PaymentMethods.Free;
+            price = 0m;
+        }
+        else if (prepaid)
         {
             var resolved = ResolveMethod(req.PaymentMethod, user);
             if (!resolved.Ok) return resolved.Error!;
@@ -177,6 +202,13 @@ public sealed class SessionService
                     device.Hostname, deviceId = device.Id, tariff = tariff?.Name, package = package?.Name, minutes, cost = price,
                     prepaid, player = user?.Username, paymentMethod = method, endUtc = session.EndUtc, cutoffUtc = session.CutoffUtc
                 });
+            if (prepaid && price == 0)
+            {
+                // Time without payment: a free session with a reason, or a tariff / package that costs 0 ₴
+                await AuditAsync(AuditActions.SessionFreeTime, session.Id,
+                    $"Free time on {device.Hostname}: {what}, worth {value} ₴" + (freeReason != null ? $": {freeReason}" : " (price 0 ₴)"),
+                    new { device.Hostname, minutes, package = package?.Name, value, reason = freeReason, player = user?.Username });
+            }
             await tx.CommitAsync();
         }
 
@@ -245,7 +277,7 @@ public sealed class SessionService
                 var minutesText = $"{quote?.BilledMinutes ?? 0} хв";
                 if (method == PaymentMethods.Balance)
                 {
-                    charge = await Wallet.ChargeUpToAsync(_db, session.UserId.Value, session.TotalCost, SpendPurpose.PcTime, req?.UseBonus ?? true);
+                    charge = await Wallet.ChargeUpToAsync(_db, session.UserId!.Value, session.TotalCost, SpendPurpose.PcTime, req?.UseBonus ?? true);
                     if (charge.Total > 0)
                     {
                         await Ledger.AppendAsync(_db, new LedgerEntryEntity
@@ -347,10 +379,24 @@ public sealed class SessionService
         var extraCost = tariff != null
             ? TariffCalculator.QuoteFixed(await PricingAsync(tariff), baseEnd, req.Minutes, _clock.Zone, applyMinimum: false).Total
             : 0m;
+        var value = extraCost;
         var device = await _db.Devices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == session.DeviceId);
         var user = session.UserId.HasValue ? await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == session.UserId.Value) : null;
-        var resolved = ResolveMethod(req.PaymentMethod, user);
-        if (!resolved.Ok) return resolved.Error!;
+        string? freeReason = null;
+        BillingResult<string> resolved;
+        if (IsFree(req.PaymentMethod))
+        {
+            var free = CheckFree(req.Reason);
+            if (!free.Ok) return free.Error!;
+            freeReason = free.Value;
+            resolved = BillingResult<string>.Success(PaymentMethods.Free);
+            extraCost = 0m;
+        }
+        else
+        {
+            resolved = ResolveMethod(req.PaymentMethod, user);
+            if (!resolved.Ok) return resolved.Error!;
+        }
 
         await using (var tx = await _db.Database.BeginTransactionAsync())
         {
@@ -375,6 +421,13 @@ public sealed class SessionService
             await AuditAsync(AuditActions.SessionExtended, session.Id,
                 $"Session on {device?.Hostname ?? "?"} extended by {req.Minutes} min, {extraCost} ₴ " + PaidText(resolved.Value),
                 new { device?.Hostname, minutes = req.Minutes, cost = extraCost, player = user?.Username, paymentMethod = resolved.Value, newEndUtc = session.EndUtc });
+            if (extraCost == 0)
+            {
+                await AuditAsync(AuditActions.SessionFreeTime, session.Id,
+                    $"Free time on {device?.Hostname ?? "?"}: +{req.Minutes} min, worth {value} ₴" +
+                    (freeReason != null ? $": {freeReason}" : tariff == null ? " (no tariff)" : " (price 0 ₴)"),
+                    new { device?.Hostname, minutes = req.Minutes, value, reason = freeReason, player = user?.Username });
+            }
             await tx.CommitAsync();
         }
 
@@ -676,6 +729,7 @@ public sealed class SessionService
 
     private static string PaidText(string? method) => method switch
     {
+        PaymentMethods.Free => "free (no payment)",
         PaymentMethods.Balance => "from the balance",
         PaymentMethods.Card => "paid by card at the desk",
         PaymentMethods.Cash => "paid in cash at the desk",

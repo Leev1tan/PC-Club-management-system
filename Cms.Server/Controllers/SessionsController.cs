@@ -30,7 +30,10 @@ public class SessionsController : ControllerBase
         _clock = clock ?? ClubClock.System();
     }
 
-    private SessionService Service => new(_db, _devices, _clock, _audit, StaffActor.From(HttpContext?.User));
+    private SessionService Service => new(_db, _devices, _clock, _audit, StaffActor.From(HttpContext?.User))
+    {
+        CanGiveFreeTime = HttpContext?.User is { } u && (u.IsInRole(StaffRoles.Owner) || u.IsInRole(StaffRoles.Manager))
+    };
 
     /// <summary>
     /// Start a session:
@@ -206,12 +209,14 @@ public class SessionsController : ControllerBase
 
 /// <summary>
 /// DurationMinutes: prepaid tariff minutes (null/0 = open-ended); PackageId: a package instead of a tariff.
-/// PaymentMethod: balance | cash | card (default: balance for players, cash for guests).
+/// PaymentMethod: balance | cash | card (default: balance for players, cash for guests), or free
+/// (Owner, Manager; prepaid only; Reason required; audited as session.free_time).
 /// UseBonus: spend the bonus balance first (PC time only).
 /// </summary>
 public record StartSessionRequest(Guid DeviceId, Guid? TariffId, Guid? UserId, int? DurationMinutes,
-    Guid? PackageId = null, string? PaymentMethod = null, bool UseBonus = true);
-public record ExtendSessionRequest(int Minutes, string? PaymentMethod = null, bool UseBonus = true);
+    Guid? PackageId = null, string? PaymentMethod = null, bool UseBonus = true, string? Reason = null);
+/// <summary>PaymentMethod as for the start; free needs Owner or Manager and a Reason.</summary>
+public record ExtendSessionRequest(int Minutes, string? PaymentMethod = null, bool UseBonus = true, string? Reason = null);
 /// <summary>
 /// Open-ended sessions: PaymentMethod balance (default for players: bonus first unless UseBonus = false,
 /// then the real balance; the rest at the desk with DeskMethod cash | card, default cash, or with

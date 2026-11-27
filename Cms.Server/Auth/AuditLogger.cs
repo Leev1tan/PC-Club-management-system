@@ -38,6 +38,8 @@ public static class AuditActions
     public const string SessionPaused = "session.paused";
     public const string SessionResumed = "session.resumed";
     public const string SessionTransferred = "session.transferred";
+    /// <summary>PC time without payment: a free session or extension (with a reason), or a 0 ₴ price.</summary>
+    public const string SessionFreeTime = "session.free_time";
 
     public const string PlayerRegistered = "player.registered";
     public const string PlayerTopUp = "player.topup";

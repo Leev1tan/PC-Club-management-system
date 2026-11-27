@@ -74,6 +74,8 @@ public static class BillingErrors
     public static readonly BillingError PackageNoMatchInZone = new("package_no_match_in_zone", "Zone {0} has no package of the same kind; move the session within its zone.", Conflict);
     public static readonly BillingError BadAmount = new("bad_amount", "Amount must be positive (at most 100000)");
     public static readonly BillingError ReasonRequired = new("reason_required", "A reason is required");
+    public static readonly BillingError FreeNeedsManager = new("free_needs_manager", "Only the owner or a manager can give free time.", StatusCodes.Status403Forbidden);
+    public static readonly BillingError FreeNeedsPrepaid = new("free_needs_prepaid", "Free time needs a duration or a package.");
     public static readonly BillingError DebtNeedsPlayer = new("debt_needs_player", "Only a registered player can owe money; a guest pays at the desk.");
     public static readonly BillingError PlayerHasDebt = new("player_has_debt", "The player owes {0} ₴. Take the debt first; open-ended sessions are blocked until then.", Conflict);
     public static readonly BillingError DebtTooHigh = new("debt_too_high", "The player owes only {0} ₴.", Conflict);
