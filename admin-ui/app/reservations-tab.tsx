@@ -421,6 +421,20 @@ function SettingsCard({ toast, onSaved }: { toast: ToastFn; onSaved: () => void 
           <option value="return">{t.resv.return}</option>
         </select>
       </div>
+      <label className="check-row"><input type="checkbox" checked={s.publicBooking} onChange={e => setS({ ...s, publicBooking: e.target.checked })} /> {t.resv.publicBooking}</label>
+      <div className="form-hint" style={{ marginBottom: 8 }}>
+        {t.resv.publicHint} <a className="link-btn" href="/book" target="_blank" rel="noopener">/book</a>
+      </div>
+      <div className="form-row-2">
+        <div className="form-group">
+          <label className="form-label">{t.resv.eraseAfterDays}</label>
+          <input className="form-input" type="number" min={1} max={365} value={s.eraseAfterDays} onChange={e => setS({ ...s, eraseAfterDays: Number(e.target.value) })} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">{t.resv.maxOpenPerPhone}</label>
+          <input className="form-input" type="number" min={1} max={5} value={s.maxOpenPerPhone} onChange={e => setS({ ...s, maxOpenPerPhone: Number(e.target.value) })} />
+        </div>
+      </div>
       <button className="btn btn-primary btn-sm" onClick={save}>{t.save}</button>
     </div>
   );

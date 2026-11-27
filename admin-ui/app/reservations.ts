@@ -19,7 +19,10 @@ export type ReservationDay = {
   date: string; timeZone: string; holdMinutes: number; graceMinutes: number; noShowKeepsDeposit: boolean;
   zones: ZoneLane[]; reservations: Reservation[]; requests: Reservation[]; nowMinute: number | null;
 };
-export type ReservationSettings = { holdMinutes: number; graceMinutes: number; noShowKeepsDeposit: boolean };
+export type ReservationSettings = {
+  holdMinutes: number; graceMinutes: number; noShowKeepsDeposit: boolean;
+  publicBooking: boolean; eraseAfterDays: number; maxOpenPerPhone: number;
+};
 /** The next reservation of a PC on the PC map. */
 export type PcReservation = { id: number; name: string; startUtc: string; startLocal: string; endLocal: string; held: boolean };
 
