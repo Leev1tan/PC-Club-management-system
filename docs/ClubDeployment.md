@@ -351,6 +351,8 @@ front and publish **only** these paths:
 
 - `/book` (the page), `/_next/` (its scripts, styles and fonts), `/favicon.ico`
 - `/api/public/booking` (the three requests of the page)
+- `/api/public/theme` and `/api/public/theme/logo` (the club theme and logo of the page; without them the page shows the
+  Cyber theme without the logo)
 
 Everything else (the admin UI, `/api/...` of the staff and of the PCs, `/swagger`) stays inside the club. The server
 limits requests per client IP; behind a proxy set `ReverseProxy__TrustForwardedHeaders=true` and the right
@@ -362,6 +364,8 @@ location = /book                 { proxy_pass http://club-server:5081; }
 location /_next/                 { proxy_pass http://club-server:5081; }
 location = /api/public/booking   { proxy_pass http://club-server:5081; proxy_set_header X-Forwarded-For $remote_addr; }
 location /api/public/booking/    { proxy_pass http://club-server:5081; proxy_set_header X-Forwarded-For $remote_addr; }
+location = /api/public/theme     { proxy_pass http://club-server:5081; proxy_set_header X-Forwarded-For $remote_addr; }
+location = /api/public/theme/logo { proxy_pass http://club-server:5081; proxy_set_header X-Forwarded-For $remote_addr; }
 location /                       { return 404; }
 ```
 

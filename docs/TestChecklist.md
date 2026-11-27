@@ -411,9 +411,11 @@ px, below 512 KB); a GIF file; screens of 1366 × 768 and 1920 × 1080 if the cl
 - [ ] Upload the PNG: within 10 s `club-logo.img` exists, the login panel and the session top bar show the logo instead
       of "PC CLUB"; the agent log says "Club logo Downloaded"; the audit row `settings.logo_changed` has only 12 hex
       characters of the hash
-- [ ] Upload the GIF: refused ("PNG або JPEG"); the PC keeps the old logo
-- [ ] As an administrator, replace `club-logo.img` with other bytes: the lock screen shows "PC CLUB" (no error window);
-      within about 60 s the agent downloads the logo again and the logo comes back
+- [ ] Upload the GIF: refused ("PNG або JPG"); the PC keeps the old logo
+- [ ] As an administrator, replace `club-logo.img` with other bytes: the lock screen keeps the logo it already shows; within
+      about 60 s the agent writes the right file again (agent log "Club logo Downloaded"). Replace the file again and
+      restart the launcher at once: it shows "PC CLUB" (no error window) until the agent repairs the file, then the logo
+- [ ] Upload a logo of 1024 × 8 px: the lock screen shows it in one line, no slow start or memory jump of the launcher
 - [ ] Remove the logo in Settings: the file is deleted and the lock screen shows "PC CLUB"
 - [ ] Stop the server, restart the PC: the lock screen shows the last theme and logo
 - [ ] UA / EN on the lock screen: the texts stay in one language in every theme
