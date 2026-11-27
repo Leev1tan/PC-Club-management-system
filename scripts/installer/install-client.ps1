@@ -53,7 +53,14 @@ if (Test-Path $agentFiles) {
     # Stop existing service first
     try { Stop-Service -Name "ClubAgent" -Force -ErrorAction SilentlyContinue } catch {}
     Start-Sleep -Seconds 1
-    
+
+    # Keep the session teardown settings of an earlier install (an administrator may have changed them)
+    $previousTeardown = $null
+    $installedConfig = Join-Path $AgentPath "appsettings.json"
+    if (Test-Path $installedConfig) {
+        try { $previousTeardown = (Get-Content $installedConfig -Raw | ConvertFrom-Json).Teardown } catch {}
+    }
+
     Copy-Item -Path "$agentFiles\*" -Destination $AgentPath -Recurse -Force
 } else {
     Write-Error "Agent files not found at: $agentFiles"
@@ -64,19 +71,19 @@ if (Test-Path $agentFiles) {
 Write-Host "[3/6] Configuring Agent..." -ForegroundColor Yellow
 $agentConfig = Join-Path $AgentPath "appsettings.json"
 
-$config = @{
-    Logging = @{
-        LogLevel = @{
-            Default = "Information"
-            "Microsoft.Hosting.Lifetime" = "Information"
-        }
-    }
-    Server = @{
-        BaseUrl = $ServerUrl  # Empty = auto-discovery
-    }
+# The shipped appsettings.json has the session teardown defaults ("Teardown": processes to close at the
+# end of a session, cleanup OFF); only the server URL is set here, and an earlier "Teardown" is kept.
+try {
+    $config = Get-Content $agentConfig -Raw | ConvertFrom-Json
+} catch {
+    $config = [pscustomobject]@{ Logging = @{ LogLevel = @{ Default = "Information"; "Microsoft.Hosting.Lifetime" = "Information" } } }
 }
-
-$config | ConvertTo-Json -Depth 5 | Set-Content -Path $agentConfig
+$config | Add-Member -NotePropertyName Server -NotePropertyValue @{ BaseUrl = $ServerUrl } -Force  # Empty = auto-discovery
+if ($previousTeardown) {
+    $config | Add-Member -NotePropertyName Teardown -NotePropertyValue $previousTeardown -Force
+    Write-Host "   Kept the session teardown settings of the earlier install" -ForegroundColor Gray
+}
+$config | ConvertTo-Json -Depth 8 | Set-Content -Path $agentConfig -Encoding UTF8
 
 $programDataConfigDir = Join-Path $env:ProgramData "ClubAgent"
 $privateDir = Join-Path $programDataConfigDir "private"
@@ -138,6 +145,14 @@ if (Test-Path $launcherFiles) {
     Copy-Item -Path "$launcherFiles\*" -Destination $LauncherPath -Recurse -Force
 } else {
     Write-Warning "Launcher files not found at: $launcherFiles. Skipping launcher installation."
+}
+
+# Program folders: C:\ClubAgent and C:\ClubLauncher inherit "Authenticated Users: Modify" from C:\, so a
+# player could replace the service program or its settings. Only SYSTEM and Administrators may change them;
+# the agent (LocalService) and the players may read and run them.
+foreach ($path in @($AgentPath, $LauncherPath)) {
+    icacls $path /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-19:(OI)(CI)RX" "*S-1-5-32-545:(OI)(CI)RX" | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Could not restrict the permissions of $path" }
 }
 
 # Step 5: Install Agent Windows Service
