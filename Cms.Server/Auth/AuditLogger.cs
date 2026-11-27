@@ -54,6 +54,10 @@ public static class AuditActions
     public const string ZoneCreated = "zone.created";
     public const string ZoneUpdated = "zone.updated";
     public const string ZoneDeleted = "zone.deleted";
+
+    public const string ShiftOpened = "shift.opened";
+    public const string ShiftClosed = "shift.closed";
+    public const string ShiftCashPayout = "shift.cash_payout";
 }
 
 /// <summary>

@@ -26,6 +26,8 @@ public static class LedgerTypes
     public const string OpeningBalance = "opening_balance";
     /// <summary>History row of a version before the ledger with an unknown type.</summary>
     public const string Legacy = "legacy";
+    /// <summary>Cash taken out of the drawer during a shift (collection, supplier), with a reason (-desk).</summary>
+    public const string CashPayout = "cash_payout";
 }
 
 public static class PaymentMethods
@@ -181,7 +183,9 @@ public static class Ledger
 {
     /// <summary>
     /// Adds the row and saves. For a player row, BalanceAfter / BonusAfter are read right after the
-    /// balance change of the same transaction (the row lock keeps them stable until commit).
+    /// balance change of the same transaction (the row lock keeps them stable until commit). The row
+    /// gets the id of the open shift; a cash or card row without an open shift is refused when the
+    /// club requires shifts (ShiftRequiredException, see CmsDbContext). Call inside a transaction.
     /// </summary>
     public static async Task<LedgerEntryEntity> AppendAsync(CmsDbContext db, LedgerEntryEntity entry, StaffActor? actor,
         DateTimeOffset now, CancellationToken ct = default)
@@ -197,6 +201,9 @@ public static class Ledger
             entry.BalanceAfter = balances?.Balance;
             entry.BonusAfter = balances?.Bonus;
         }
+        // The open shift (if any) owns the row; on PostgreSQL the shift row is share-locked until the
+        // transaction ends, so a shift cannot close while a payment of it is being written
+        entry.ShiftId ??= await Cms.Server.Shifts.ShiftService.LockOpenShiftIdAsync(db, ct);
         if (entry.CreatedUtc == default) entry.CreatedUtc = now;
         entry.ActorId ??= actor?.Id;
         entry.ActorUsername ??= actor?.Username;

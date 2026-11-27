@@ -25,7 +25,8 @@ else if (!builder.Environment.IsDevelopment())
 var demo = DemoOptions.FromConfiguration(builder.Configuration);
 var paths = ServerPaths.Resolve(builder.Configuration, builder.Environment.ContentRootPath);
 
-builder.Services.AddControllers();
+// A cash or card payment without an open shift answers 409 { code: "shift_required" }
+builder.Services.AddControllers(o => o.Filters.Add<Cms.Server.Shifts.ShiftRequiredFilter>());
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -78,6 +79,9 @@ else
     builder.Services.AddDbContext<CmsDbContext>(options =>
         options.UseNpgsql(connectionString));
 }
+
+// Cash and card payments need an open shift (Shifts:RequireOpenShift, default true); used by CmsDbContext
+builder.Services.AddSingleton(ShiftOptions.FromConfiguration(builder.Configuration));
 
 // Club time zone for tariff rules and packages (Club:TimeZone, default Europe/Kyiv)
 builder.Services.AddSingleton(sp => Cms.Server.Billing.ClubClock.FromConfiguration(

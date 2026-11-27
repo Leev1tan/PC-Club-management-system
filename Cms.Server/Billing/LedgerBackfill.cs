@@ -29,6 +29,7 @@ public static class LedgerBackfill
                      (legacy.Count > 0 || users.Any(u => u.Balance != 0 || u.BonusPoints != 0));
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
+        db.SkipShiftCheck = true; // old cash top-ups have no shift
         var rows = 0;
         if (needed)
         {
@@ -84,6 +85,7 @@ public static class LedgerBackfill
         });
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
+        db.SkipShiftCheck = false;
         db.ChangeTracker.Clear();
         return rows;
     }

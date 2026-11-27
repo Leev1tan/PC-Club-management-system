@@ -324,9 +324,18 @@ public record LedgerEntryView(
     decimal BalanceDelta, decimal BonusDelta, decimal DeskAmount, decimal? BalanceAfter, decimal? BonusAfter,
     Guid? SessionId, Guid? PackageId, Guid? DeviceId, string? Description, string? Reason, string? ActorUsername)
 {
+    /// <summary>Shift that was open when the row was written.</summary>
+    public long? ShiftId { get; init; }
+    /// <summary>Bar receipt of a bar sale or refund.</summary>
+    public long? SaleId { get; init; }
+
     public static LedgerEntryView From(LedgerEntryEntity l) => new(
         l.Id, l.CreatedUtc, l.UserId, l.Type, l.Method, l.Amount, l.BalanceDelta, l.BonusDelta, l.DeskAmount,
-        l.BalanceAfter, l.BonusAfter, l.SessionId, l.PackageId, l.DeviceId, l.Description, l.Reason, l.ActorUsername);
+        l.BalanceAfter, l.BonusAfter, l.SessionId, l.PackageId, l.DeviceId, l.Description, l.Reason, l.ActorUsername)
+    {
+        ShiftId = l.ShiftId,
+        SaleId = l.SaleId
+    };
 }
 public record UserView(Guid Id, string Username, string DisplayName, decimal Balance, decimal BonusPoints, DateTimeOffset CreatedUtc);
 public record TransactionView(Guid Id, Guid UserId, decimal Amount, string Type, string? Description, DateTimeOffset CreatedUtc);

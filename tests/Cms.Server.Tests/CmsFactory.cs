@@ -17,10 +17,15 @@ public class CmsFactory : WebApplicationFactory<Program>
 
     public string DataDirectory { get; } = Path.Combine(Path.GetTempPath(), "ccms-tests-" + Guid.NewGuid().ToString("N"));
 
+    /// <summary>
+    /// The tests of phases 1-3 predate shifts: they run with Shifts:RequireOpenShift=false (a supported
+    /// club setting). <see cref="ShiftFactory"/> runs with the default (cash and card need an open shift).
+    /// </summary>
     protected virtual IDictionary<string, string?> Settings => new Dictionary<string, string?>
     {
         ["Setup:OwnerUsername"] = OwnerUsername,
         ["Setup:OwnerPassword"] = OwnerPassword,
+        ["Shifts:RequireOpenShift"] = "false",
     };
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -60,6 +65,16 @@ public class CmsFactory : WebApplicationFactory<Program>
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         try { Directory.Delete(DataDirectory, recursive: true); } catch { /* temp files */ }
     }
+}
+
+/// <summary>Default settings of a club: cash and card payments need an open shift.</summary>
+public sealed class ShiftFactory : CmsFactory
+{
+    protected override IDictionary<string, string?> Settings => new Dictionary<string, string?>
+    {
+        ["Setup:OwnerUsername"] = OwnerUsername,
+        ["Setup:OwnerPassword"] = OwnerPassword,
+    };
 }
 
 /// <summary>No initial owner: the server opens the one-time setup screen.</summary>

@@ -110,6 +110,7 @@ public static class DemoSeeder
         await db.Commands.ExecuteDeleteAsync(ct);
         await db.Heartbeats.ExecuteDeleteAsync(ct);
         await LedgerGuard.ClearForDemoResetAsync(db, ct);
+        await PosGuard.ClearForDemoResetAsync(db, ct);
         await db.Transactions.ExecuteDeleteAsync(ct);
         await db.SessionSegments.ExecuteDeleteAsync(ct);
         await db.Sessions.ExecuteDeleteAsync(ct);
@@ -126,6 +127,7 @@ public static class DemoSeeder
 
         var seed = new Seeding(db, now, rng, zone);
         var result = seed.Run();
+        db.SkipShiftCheck = true; // the seeded history writes its rows directly
         await db.SaveChangesAsync(ct);
         // Ledger rows one by one in date order, so that their ids follow the dates
         foreach (var row in seed.LedgerRows.OrderBy(r => r.CreatedUtc))
@@ -135,7 +137,14 @@ public static class DemoSeeder
         }
         await BonusRules.SaveAsync(db, BonusTiers, "demo", now, ct);
         db.ClubSettings.Add(new ClubSettingEntity { Key = ClubSettingKeys.LedgerBackfilled, Value = "demo", UpdatedUtc = now, UpdatedBy = "demo" });
+        // The shift of the demo cashier is open, so walk-in guests can pay at the desk
+        var cashier = await db.StaffUsers.AsNoTracking().FirstAsync(s => s.Role == StaffRoles.Cashier, ct);
+        db.Shifts.Add(new ShiftEntity
+        {
+            Status = ShiftStatuses.Open, OpenedUtc = now.AddHours(-3), OpenedById = cashier.Id, OpenedByUsername = cashier.Username, OpeningFloat = 1000m
+        });
         await db.SaveChangesAsync(ct);
+        db.SkipShiftCheck = false;
         await tx.CommitAsync(ct);
         db.ChangeTracker.Clear();
         return result;
