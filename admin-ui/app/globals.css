@@ -1793,3 +1793,44 @@ body::after {
 .power-facts dt { color: var(--text-muted); }
 .power-facts dd { margin: 0; color: var(--text-primary); }
 .power-facts .mono { font-family: var(--font-mono); }
+
+/* ===== Reservations (phase 7): day timeline, list, dialogs ===== */
+.resv-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.resv-date { width: 150px; padding: 4px 8px; font-size: 13px; }
+.resv-card { padding: 8px; }
+.resv-scroll { overflow-x: auto; overflow-y: hidden; max-width: 100%; -webkit-overflow-scrolling: touch; }
+.resv-grid { position: relative; }
+.resv-row { position: relative; display: flex; height: 34px; border-bottom: 1px solid var(--border-hard); }
+.resv-label { position: sticky; left: 0; z-index: 3; width: 118px; min-width: 118px; padding: 0 8px; display: flex; flex-direction: column;
+  justify-content: center; font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); background: var(--bg-card);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid var(--border-hard); }
+.resv-sub { font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.resv-track { position: relative; height: 100%; cursor: copy;
+  background-image: repeating-linear-gradient(90deg, var(--border-hard) 0 1px, transparent 1px 28px, rgba(255,255,255,0.03) 28px 29px, transparent 29px 56px); }
+.resv-track:hover { background-color: rgba(0, 240, 255, 0.04); }
+.resv-hours { height: 22px; }
+.resv-hour { position: absolute; top: 0; height: 22px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); padding-left: 3px;
+  border-left: 1px solid var(--border-hard); }
+.resv-zone-name { position: sticky; left: 0; z-index: 3; width: max-content; padding: 6px 8px 2px; font-weight: 700; font-size: 12px; letter-spacing: 0.04em;
+  color: var(--text-secondary); border-left: 3px solid var(--neon-cyan); background: var(--bg-card); }
+.resv-bar { position: absolute; top: 4px; height: 26px; z-index: 2; border-radius: 4px; padding: 0 6px; font-size: 11px; font-family: var(--font-mono);
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; color: #050508;
+  background: var(--neon-cyan); border: 1px solid transparent; }
+.resv-bar.held { background: var(--neon-yellow); box-shadow: 0 0 8px rgba(255, 224, 25, 0.5); }
+.resv-bar.status-checked_in { background: var(--neon-green); }
+.resv-bar.status-requested { background: transparent; color: var(--text-primary); border: 1px dashed var(--neon-yellow); }
+.resv-bar.status-no_show { background: repeating-linear-gradient(135deg, var(--neon-magenta) 0 6px, #a01e50 6px 12px); color: #fff; }
+.resv-bar.status-cancelled, .resv-bar.status-declined, .resv-bar.status-expired { background: var(--bg-hover); color: var(--text-muted); text-decoration: line-through; }
+.resv-now { position: absolute; top: 22px; bottom: 0; width: 2px; background: var(--neon-magenta); z-index: 2; pointer-events: none; }
+.resv-detail { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border-hard); font-size: 13px; }
+.resv-detail span { color: var(--text-secondary); }
+.resv-detail strong { text-align: right; overflow-wrap: anywhere; }
+.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.link-btn { background: none; border: none; padding: 0; color: var(--neon-cyan); font: inherit; cursor: pointer; text-decoration: underline dotted; }
+.pc-card-resv { font-size: 11px; font-family: var(--font-mono); color: var(--neon-cyan); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-card-resv.held { color: var(--neon-yellow); font-weight: 700; }
+.resv-hold-box { border: 1px solid var(--neon-yellow); background: var(--amber-glow); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-size: 13px; }
+@media (max-width: 520px) {
+  .form-row-2 { grid-template-columns: 1fr; }
+  .resv-table td, .resv-table th { padding: 6px 4px; }
+}

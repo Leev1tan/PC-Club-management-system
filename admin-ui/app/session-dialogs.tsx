@@ -37,10 +37,14 @@ const durations = [
 ];
 
 /** Start a session on a free PC: tariff time (prepaid or open-ended) or a package of the PC's zone. */
-export function StartSessionDialog({ device, tariffs, players, toast, onClose, onDone, canGiveFree = false }: {
+export function StartSessionDialog({ device, tariffs, players, toast, onClose, onDone, canGiveFree = false, reservation = null, canOverride = false }: {
   device: { id: string; hostname: string; zoneId: string | null }; tariffs: Tariff[]; players: PlayerLite[];
   toast: ToastFn; onClose: () => void; onDone: () => void; canGiveFree?: boolean;
+  /** The reservation that holds the PC (a start needs the override of a manager). */
+  reservation?: { name: string; startLocal: string; held: boolean } | null; canOverride?: boolean;
 }) {
+  const held = !!reservation?.held;
+  const [override, setOverride] = useState(false);
   const zoneTariffs = useMemo(() => tariffs.filter(x => !x.zoneId || x.zoneId === device.zoneId), [tariffs, device.zoneId]);
   const defaultTariff = zoneTariffs.find(x => x.zoneId === device.zoneId && x.isDefault) ?? zoneTariffs.find(x => x.zoneId === device.zoneId)
     ?? zoneTariffs.find(x => x.isDefault) ?? zoneTariffs[0];
@@ -85,8 +89,8 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
   const start = async () => {
     setBusy(true);
     const body = mode === 'package'
-      ? { deviceId: device.id, userId: playerId || null, packageId, paymentMethod: method, useBonus, reason: free ? reason : null }
-      : { deviceId: device.id, tariffId, userId: playerId || null, durationMinutes: duration, paymentMethod: prepaid ? method : null, useBonus, reason: free ? reason : null };
+      ? { deviceId: device.id, userId: playerId || null, packageId, paymentMethod: method, useBonus, reason: free ? reason : null, overrideReservation: held && override }
+      : { deviceId: device.id, tariffId, userId: playerId || null, durationMinutes: duration, paymentMethod: prepaid ? method : null, useBonus, reason: free ? reason : null, overrideReservation: held && override };
     const res = await postJson('/api/sessions', body);
     setBusy(false);
     if (!res.ok) { toast(`${t.common.errorPrefix}: ${await errorText(res)}`, 'error'); return; }
@@ -98,6 +102,12 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-title">{fmt(t.session.startTitle, { host: device.hostname })}</div>
+        {held && (
+          <div className="resv-hold-box">
+            {fmt(t.resv.heldWarning, { name: reservation!.name, time: reservation!.startLocal })}
+            {canOverride && <label className="check-row"><input type="checkbox" checked={override} onChange={e => setOverride(e.target.checked)} /> {t.resv.override}</label>}
+          </div>
+        )}
         <div className="filter-bar">
           <button className={`filter-chip ${mode === 'tariff' ? 'active' : ''}`} onClick={() => setMode('tariff')}>{t.session.modeTariff}</button>
           <button className={`filter-chip ${mode === 'package' ? 'active' : ''}`} onClick={() => setMode('package')}>
@@ -193,7 +203,7 @@ export function StartSessionDialog({ device, tariffs, players, toast, onClose, o
 
         <div className="modal-actions">
           <button className="btn" onClick={onClose}>{t.cancel}</button>
-          <button className="btn btn-primary" disabled={busy || (mode === 'package' ? !packageId : !tariffId) || !affordable || debtBlocks || (free && reason.trim().length < 3)} onClick={start}>{t.session.start}</button>
+          <button className="btn btn-primary" disabled={busy || (mode === 'package' ? !packageId : !tariffId) || !affordable || debtBlocks || (free && reason.trim().length < 3) || (held && !override)} onClick={start}>{t.session.start}</button>
         </div>
       </div>
     </div>

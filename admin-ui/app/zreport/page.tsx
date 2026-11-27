@@ -134,6 +134,14 @@ export default function ZReportPage() {
             <Row label="+" value={money(z.adjustments.balancePlus)} />
             <Row label="−" value={money(z.adjustments.balanceMinus)} />
           </tbody></table>
+          {z.holds && (z.holds.depositsHeld > 0 || z.holds.depositsReleased > 0 || z.holds.depositsKept > 0) && <>
+            <h2>{t.z.deposits}</h2>
+            <table><tbody>
+              <Row label={t.z.depositsHeld} value={money(z.holds.depositsHeld)} />
+              <Row label={t.z.depositsReleased} value={money(z.holds.depositsReleased)} />
+              <Row label={t.z.depositsKept} value={money(z.holds.depositsKept)} />
+            </tbody></table>
+          </>}
           {z.other.rows > 0 && <><h2>{t.z.other}</h2><table><tbody><Row label={`${methodLabel('cash')} / ${methodLabel('card')} (${z.other.rows})`} value={money(z.other.cash + z.other.card)} /></tbody></table></>}
         </section>
       </div>

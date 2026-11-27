@@ -32,6 +32,7 @@ const auditFilters = (): { prefix: string; label: string }[] => [
   { prefix: 'player.debt', label: t.audit.debt },
   { prefix: 'player.', label: t.auditPage.balances },
   { prefix: 'session.', label: t.auditPage.sessions },
+  { prefix: 'reservation.', label: '📅 ' + t.resv.title },
   { prefix: 'tariff.', label: t.auditPage.tariffs },
   { prefix: 'package.', label: t.audit.packages },
   { prefix: 'billing.', label: t.audit.billing },
@@ -43,7 +44,8 @@ const auditFilters = (): { prefix: string; label: string }[] => [
 
 const alertActions = new Set(['device.unlock_without_session', 'auth.login_failed', 'player.balance_adjusted', 'player.bonus_adjusted',
   'player.refund', 'settings.staff_pin_removed', 'device.emergency_unlock', 'session.free_time', 'stock.corrected', 'sale.refunded',
-  'shift.cash_payout', 'player.debt_written_off', 'product.price_changed', 'settings.currency_changed']);
+  'shift.cash_payout', 'player.debt_written_off', 'product.price_changed', 'settings.currency_changed', 'reservation.hold_overridden',
+  'player.login_lockout_cleared']);
 
 /** Owner: recomputes the hash chain of the whole audit log on the server. */
 function VerifyChain() {

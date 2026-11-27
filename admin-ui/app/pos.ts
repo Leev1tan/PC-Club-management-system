@@ -43,6 +43,8 @@ export type ZReport = {
   byStaff: { username: string; rows: number; cashNet: number; cardNet: number; timeSales: number; barSales: number; barRefunds: number;
     topUps: number; refunds: number; payouts: number; debtRecorded: number }[];
   ledger: { rows: number; firstId: number | null; lastId: number | null; reconciled: boolean };
+  /** Reservation deposits of the shift (a kept deposit is in the PC time too). */
+  holds?: { depositsHeld: number; depositsReleased: number; depositsKept: number };
 };
 
 export type AuditVerify = {

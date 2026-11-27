@@ -11,6 +11,8 @@ import { PosTab } from './pos-tab';
 import { EndSessionDialog, StartSessionDialog, TransferDialog } from './session-dialogs';
 import { GamesTab } from './games-tab';
 import { LoginLockouts } from './lockouts';
+import { CheckInDialog, ReservationsTab } from './reservations-tab';
+import { PcReservation } from './reservations';
 import { PowerAction, PowerDialog, PowerTarget } from './power-dialog';
 import { ShiftTab } from './shift-tab';
 import { StockTab } from './stock-tab';
@@ -30,6 +32,7 @@ type Device = {
   sessionPausedUtc?: string | null; sessionCutoffUtc?: string | null; sessionLabel?: string | null; sessionIsPackage?: boolean;
   currentGame?: string | null; currentGameColor?: string | null; currentGameStartedUtc?: string | null;
   macAddress?: string | null;
+  reservation?: PcReservation | null;
 };
 type Session = {
   id: string; deviceId: string; deviceHostname: string | null;
@@ -47,7 +50,7 @@ type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' }
 type DemoInfo = { enabled: boolean; resetIntervalHours: number | null; lastResetUtc: string | null; nextResetUtc: string | null };
 
 // ===== Tab IDs =====
-type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'games' | 'analytics' | 'audit' | 'staff' | 'settings';
+type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'reservations' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'games' | 'analytics' | 'audit' | 'staff' | 'settings';
 type Need = 'any' | 'frontDesk' | 'management' | 'owner';
 
 // Each tab is shown only to the roles that may use it (the server checks every request again)
@@ -55,6 +58,7 @@ const allTabs: { id: Tab; label: string; icon: string; section?: string; need: N
   { id: 'dashboard', label: t.nav.dashboard, icon: '📊', section: t.nav.sectionMain, need: 'frontDesk' },
   { id: 'map', label: t.nav.map, icon: '🗺️', need: 'any' },
   { id: 'sessions', label: t.nav.sessions, icon: '⏱️', need: 'frontDesk' },
+  { id: 'reservations', label: t.nav.reservations, icon: '📅', need: 'frontDesk' },
   { id: 'pos', label: t.nav.pos, icon: '🛒', section: t.nav.sectionDesk, need: 'frontDesk' },
   { id: 'shift', label: t.nav.shift, icon: '🧾', need: 'frontDesk' },
   { id: 'stock', label: t.nav.stock, icon: '📦', need: 'frontDesk' },
@@ -160,7 +164,8 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [zoneModal, setZoneModal] = useState(false);
   const [playerModal, setPlayerModal] = useState(false);
   // Billing dialogs (top-level components: background refreshes do not reset them)
-  const [startDialog, setStartDialog] = useState<{ id: string; hostname: string; zoneId: string | null } | null>(null);
+  const [startDialog, setStartDialog] = useState<{ id: string; hostname: string; zoneId: string | null; reservation?: PcReservation | null } | null>(null);
+  const [checkInId, setCheckInId] = useState<number | null>(null);
   const [transferTarget, setTransferTarget] = useState<Session | null>(null);
   const [endTarget, setEndTarget] = useState<Session | null>(null);
   const [playerCard, setPlayerCard] = useState<{ user: User; form?: 'topup' } | null>(null);
@@ -341,6 +346,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'map': return <MapTab />;
       case 'devices': return <DevicesTab />;
       case 'sessions': return <SessionsTab />;
+      case 'reservations': return <ReservationsTab players={users} toast={toast} management={can.management} onChanged={fetchAll} />;
       case 'users': return <>{can.management && <LoginLockouts toast={toast} />}<UsersTab /></>;
       case 'tariffs': return <TariffsTab can={can} zones={zones} devices={devices} tariffs={tariffs} toast={toast}
         onChanged={fetchAll} onAddZone={() => setZoneModal(true)} onDeleteZone={deleteZone} />;
@@ -506,6 +512,11 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
                 </div>
                 {d.sessionEndUtc && <div className="pc-card-timer">{d.sessionPausedUtc ? '⏸ ' : ''}{timeRemaining(d.sessionEndUtc, d.sessionPausedUtc)}</div>}
                 {d.sessionLabel && <div className="pc-card-zone" title={d.sessionLabel}>{d.sessionIsPackage ? '🎟️ ' : ''}{d.sessionLabel}</div>}
+                {d.reservation && (
+                  <div className={`pc-card-resv ${d.reservation.held ? 'held' : ''}`} title={fmtText(t.resv.reservedFor, { name: d.reservation.name, time: d.reservation.startLocal })}>
+                    {fmtText(t.resv.reservedAt, { time: d.reservation.startLocal })}{d.reservation.held ? ` · ${d.reservation.name}` : ''}
+                  </div>
+                )}
                 {d.currentGame && (
                   <div className="pc-card-game" title={`${t.map.currentGame}: ${d.currentGame}`}>
                     <span className="game-dot" style={{ background: d.currentGameColor || 'var(--neon-cyan)' }} aria-hidden="true" />
@@ -521,8 +532,11 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
                 {pcPopover === d.id && (
                   <div className="popover" onClick={e => e.stopPropagation()}>
+                    {can.frontDesk && !d.activeSessionId && d.reservation?.held && (
+                      <button className="popover-item" onClick={() => { setPcPopover(null); setCheckInId(d.reservation!.id); }}>📅 {t.resv.checkIn}</button>
+                    )}
                     {can.frontDesk && d.occupancyStatus === 'free' && d.enrollment !== 'pending' && (
-                      <button className="popover-item" onClick={() => { setPcPopover(null); setStartDialog({ id: d.id, hostname: d.hostname, zoneId: d.zoneId }); }}>
+                      <button className="popover-item" onClick={() => { setPcPopover(null); setStartDialog({ id: d.id, hostname: d.hostname, zoneId: d.zoneId, reservation: d.reservation }); }}>
                         {t.map.start}
                       </button>
                     )}
@@ -894,6 +908,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       <PlayerModal />
       {startDialog && (
         <StartSessionDialog device={startDialog} tariffs={tariffs} players={users} toast={toast} canGiveFree={can.management}
+          reservation={startDialog.reservation} canOverride={can.management}
           onClose={() => setStartDialog(null)} onDone={() => { setStartDialog(null); fetchAll(); }} />
       )}
       {transferTarget && (
@@ -903,6 +918,10 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       {endTarget && (
         <EndSessionDialog session={endTarget} players={users} toast={toast}
           onClose={() => setEndTarget(null)} onDone={() => { setEndTarget(null); fetchAll(); }} />
+      )}
+      {checkInId !== null && (
+        <CheckInDialog reservationId={checkInId} players={users} toast={toast}
+          onClose={() => setCheckInId(null)} onDone={() => { setCheckInId(null); fetchAll(); }} />
       )}
       {power && (
         <PowerDialog target={power.target} action={power.action} toast={toast}
