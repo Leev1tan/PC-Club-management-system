@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AuthStatus, Me, api, errorText, getJson, permissions, postJson, setUnauthorizedHandler } from './api';
 import { LoginScreen, SetupScreen, roleLabel } from './auth';
+import { AnalyticsTab } from './analytics-tab';
 import { AuditTab, SettingsTab, StaffTab } from './admin-tabs';
 import { Tariff } from './billing';
 import { fmt as fmtText, lang, methodLabel, money, setLang, t } from './i18n';
@@ -40,7 +41,7 @@ type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' }
 type DemoInfo = { enabled: boolean; resetIntervalHours: number | null; lastResetUtc: string | null; nextResetUtc: string | null };
 
 // ===== Tab IDs =====
-type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'finance' | 'audit' | 'staff' | 'settings';
+type Tab = 'dashboard' | 'map' | 'devices' | 'sessions' | 'pos' | 'shift' | 'stock' | 'users' | 'tariffs' | 'analytics' | 'audit' | 'staff' | 'settings';
 type Need = 'any' | 'frontDesk' | 'management' | 'owner';
 
 // Each tab is shown only to the roles that may use it (the server checks every request again)
@@ -54,7 +55,7 @@ const allTabs: { id: Tab; label: string; icon: string; section?: string; need: N
   { id: 'devices', label: t.nav.devices, icon: '🖥️', section: t.nav.sectionManage, need: 'any' },
   { id: 'users', label: t.nav.users, icon: '👥', need: 'frontDesk' },
   { id: 'tariffs', label: t.nav.tariffs, icon: '💰', need: 'frontDesk' },
-  { id: 'finance', label: t.nav.finance, icon: '📈', section: t.nav.sectionAnalytics, need: 'management' },
+  { id: 'analytics', label: t.analytics.title, icon: '📈', section: t.nav.sectionAnalytics, need: 'management' },
   { id: 'audit', label: t.nav.audit, icon: '📜', need: 'management' },
   { id: 'staff', label: t.nav.staff, icon: '🧑‍💼', section: t.nav.sectionAdmin, need: 'owner' },
   { id: 'settings', label: t.nav.settings, icon: '⚙️', need: 'owner' },
@@ -316,7 +317,7 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
       case 'pos': return <PosTab can={can} players={users} toast={toast} onChanged={fetchAll} />;
       case 'shift': return <ShiftTab can={can} toast={toast} onChanged={fetchAll} />;
       case 'stock': return <StockTab can={can} toast={toast} />;
-      case 'finance': return <FinanceTab />;
+      case 'analytics': return <AnalyticsTab />;
       case 'audit': return <AuditTab owner={can.owner} />;
       case 'staff': return <StaffTab me={me} toast={toast} />;
       case 'settings': return <SettingsTab toast={toast} />;
@@ -691,116 +692,6 @@ function AdminPage({ me, onLogout }: { me: Me; onLogout: () => void }) {
             </table>
           </div>
         )}
-      </>
-    );
-  }
-
-  // ===== Finance Tab =====
-  function FinanceTab() {
-    return (
-      <>
-        <div className="page-header">
-          <span className="page-title">Фінанси</span>
-        </div>
-
-        <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-card-header">
-              <div className="stat-card-icon" style={{ background: 'var(--green-glow)' }}>📅</div>
-              <span className="stat-card-label">Сьогодні</span>
-            </div>
-            <div className="stat-card-value" style={{ color: 'var(--green)' }}>{revenue ? `${fmt(revenue.today)} ₴` : '—'}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-header">
-              <div className="stat-card-icon" style={{ background: 'var(--blue-glow)' }}>📊</div>
-              <span className="stat-card-label">Тиждень</span>
-            </div>
-            <div className="stat-card-value" style={{ color: 'var(--blue)' }}>{revenue ? `${fmt(revenue.week)} ₴` : '—'}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-header">
-              <div className="stat-card-icon" style={{ background: 'var(--accent-glow)' }}>💎</div>
-              <span className="stat-card-label">Місяць</span>
-            </div>
-            <div className="stat-card-value">{revenue ? `${fmt(revenue.month)} ₴` : '—'}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-header">
-              <div className="stat-card-icon" style={{ background: 'var(--amber-glow)' }}>👥</div>
-              <span className="stat-card-label">Гравців</span>
-            </div>
-            <div className="stat-card-value">{users.length}</div>
-            <div className="stat-card-sub">Зареєстровано</div>
-          </div>
-        </div>
-
-        {/* Session Revenue by Zone */}
-        {zones.length > 0 && (
-          <div className="section-card">
-            <div className="section-card-header">
-              <span className="section-card-title">Дохід по зонах</span>
-            </div>
-            <div className="table-wrapper">
-              <table className="data-table">
-                <thead><tr><th>Зона</th><th>ПК</th><th>Активних сесій</th><th>Завантаженість</th></tr></thead>
-                <tbody>
-                  {zones.map(z => {
-                    const zd = devices.filter(d => d.zoneId === z.id);
-                    const occupied = zd.filter(d => d.occupancyStatus === 'occupied').length;
-                    const util = zd.length > 0 ? Math.round(occupied / zd.length * 100) : 0;
-                    return (
-                      <tr key={z.id}>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span className="zone-dot" style={{ background: z.color }} />
-                            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{z.name}</span>
-                          </div>
-                        </td>
-                        <td>{zd.length}</td>
-                        <td>{occupied}</td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div style={{ flex: 1, height: 6, background: 'var(--bg-glass)', borderRadius: 3, overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${util}%`, background: z.color, borderRadius: 3, transition: 'width 0.3s' }} />
-                            </div>
-                            <span style={{ fontSize: 12, fontWeight: 600 }}>{util}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Recent ended sessions */}
-        <div className="section-card">
-          <div className="section-card-header">
-            <span className="section-card-title">Останні транзакції</span>
-          </div>
-          <div className="table-wrapper">
-            <table className="data-table">
-              <thead><tr><th>ПК</th><th>Гравець</th><th>Час</th><th>Тариф</th><th>Сума</th></tr></thead>
-              <tbody>
-                {sessions.filter(s => s.status === 'ended').slice(0, 20).map(s => (
-                  <tr key={s.id}>
-                    <td>{s.deviceHostname || '—'}</td>
-                    <td>{s.username || 'Гість'}</td>
-                    <td>{fmtDateTime(s.startUtc)}</td>
-                    <td>{s.tariffName || '—'}</td>
-                    <td style={{ fontWeight: 600, color: 'var(--green)' }}>{fmt(s.totalCost)} ₴</td>
-                  </tr>
-                ))}
-                {sessions.filter(s => s.status === 'ended').length === 0 && (
-                  <tr><td colSpan={5} style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>Ще немає транзакцій</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
       </>
     );
   }
