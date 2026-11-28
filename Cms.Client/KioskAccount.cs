@@ -58,4 +58,33 @@ public static class KioskAccount
             return true;
         }
     }
+
+    /// <summary>
+    /// True for the kiosk.json of a kiosk install: it names the kiosk user, and "KioskMode" is not false. The agent restarts
+    /// only such a PC when nobody is signed in (KioskRestartPolicy). uninstall-kiosk.ps1 deletes kiosk.json.
+    /// </summary>
+    public static bool IsKioskInstall(string? json)
+    {
+        if (KioskUser(json) == null) return false;
+        using var doc = JsonDocument.Parse(json!);
+        foreach (var property in doc.RootElement.EnumerateObject())
+        {
+            if (string.Equals(property.Name, "KioskMode", StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.False)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// kiosk.json in the folder of the lock screen (the agent setting AccountPool:LauncherPath, written by the installer);
+    /// C:\ClubLauncher\kiosk.json when the setting has no folder. A Windows path also on another OS (the tests).
+    /// </summary>
+    public static string ConfigPathFor(string? launcherExe)
+    {
+        const string fallback = @"C:\ClubLauncher";
+        var exe = launcherExe?.Trim() ?? "";
+        var cut = exe.LastIndexOfAny(new[] { '\\', '/' });
+        var folder = cut > 0 ? exe[..cut] : fallback;
+        return folder + (folder.Contains('/') && !folder.Contains('\\') ? "/" : "\\") + ConfigFile;
+    }
 }

@@ -94,7 +94,8 @@ public partial class Worker : BackgroundService
         await Task.WhenAll(
             Forever("local state loop", RunLocalStateLoopAsync, stoppingToken),
             Forever("launcher pipe", RunLauncherPipeAsync, stoppingToken),
-            Forever("server loop", RunServerLoopAsync, stoppingToken));
+            Forever("server loop", RunServerLoopAsync, stoppingToken),
+            Forever("kiosk sign-in check", RunKioskSignInLoopAsync, stoppingToken));
     }
 
     private void Step(string what, Action action)
@@ -820,6 +821,8 @@ public partial class Worker : BackgroundService
             reportedLocked = _screen.ReportedLocked(_lock.Evaluate(now).Locked, now);
             lockScreen = _screen.State(now);
         }
+        // A kiosk PC without a signed-in user after 3 restarts of the agent in 60 min (Worker.Kiosk.cs): staff must look at it
+        if (_kioskSignInFailed) lockScreen = LockScreenStates.KioskSignInFailed;
         var payload = new DeviceHeartbeatRequest
         {
             IsLocked = reportedLocked,
@@ -1200,11 +1203,18 @@ public partial class Worker : BackgroundService
     /// <summary>
     /// The agent is a service in session 0 (LocalService): "shutdown /l" there logs off nothing in the player's
     /// session. The lock screen runs in that session, so the agent hands the request to it through state.json
-    /// (for one minute); the lock screen logs the session off once.
+    /// (for one minute); the lock screen logs the session off once. On a kiosk PC Windows does not sign ClubUser in again
+    /// after a sign-out (Windows re-test 2026-11-28 night, defect 1): the agent restarts Windows when the session has ended
+    /// (Worker.Kiosk.cs). A PC without kiosk mode only logs off, as before.
     /// </summary>
     private string ForwardLogoff()
     {
         lock (_gate) _logoff = new LogoffRequest { Id = Guid.NewGuid(), RequestedUtc = DateTimeOffset.UtcNow };
+        if (NoteKioskStaffLogoff())
+        {
+            _logger.LogInformation("Log off: handed to the lock screen of the player's session; this kiosk PC restarts when the session has ended");
+            return "Sent to the lock screen: it logs off the player's Windows session; then the kiosk PC restarts and ClubUser signs in";
+        }
         _logger.LogInformation("Log off: handed to the lock screen of the player's session");
         return "Sent to the lock screen: it logs off the player's Windows session";
     }

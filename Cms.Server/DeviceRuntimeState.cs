@@ -10,7 +10,7 @@ namespace Cms.Server;
 public sealed class DeviceRuntimeState
 {
     /// <summary>The values of the heartbeat field "lockScreen" (Cms.Client.LockScreenStates).</summary>
-    public static readonly IReadOnlySet<string> LockScreenStates = new HashSet<string> { "ok", "staff_unlock", "silent", "unknown" };
+    public static readonly IReadOnlySet<string> LockScreenStates = new HashSet<string> { "ok", "staff_unlock", "silent", "unknown", "kiosk_signin_failed" };
 
     private readonly ConcurrentDictionary<Guid, bool> _locked = new();
     private readonly ConcurrentDictionary<Guid, string> _lockScreen = new();
@@ -20,7 +20,10 @@ public sealed class DeviceRuntimeState
 
     public void SetLocked(Guid deviceId, bool locked) => _locked[deviceId] = locked;
 
-    /// <summary>"ok", "staff_unlock" (staff PIN unlock on the screen), "silent" (no lock screen) or "unknown"; null = not reported.</summary>
+    /// <summary>
+    /// "ok", "staff_unlock" (staff PIN unlock on the screen), "silent" (no lock screen), "unknown", or "kiosk_signin_failed"
+    /// (a kiosk PC without a signed-in user after 3 restarts of the agent in 60 min); null = not reported.
+    /// </summary>
     public string? LockScreen(Guid deviceId) => _lockScreen.TryGetValue(deviceId, out var state) ? state : null;
 
     /// <summary>Keeps a known value of the heartbeat; anything else is ignored.</summary>

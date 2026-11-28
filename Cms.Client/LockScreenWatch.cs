@@ -11,6 +11,11 @@ public static class LockScreenStates
     public const string Silent = "silent";
     /// <summary>The agent started less than 2 minutes ago and has no status yet.</summary>
     public const string Unknown = "unknown";
+    /// <summary>
+    /// Kiosk PC: nobody is signed in, and the agent restarted Windows 3 times in 60 min without a sign-in of ClubUser
+    /// (Cms.Client.KioskRestartPolicy, guard full). Staff must look at the PC. An older server ignores this value.
+    /// </summary>
+    public const string KioskSignInFailed = "kiosk_signin_failed";
 }
 
 /// <summary>A change of the lock screen that the agent writes to its log.</summary>

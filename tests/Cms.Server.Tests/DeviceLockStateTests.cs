@@ -47,6 +47,12 @@ public sealed class DeviceLockStateTests : ApiTestBase, IClassFixture<CmsFactory
 
         await HeartbeatAsync(pc, Beat(true, "silent"));                                      // the lock screen is gone
         Assert.Equal("silent", (await DeviceAsync(staff, pc)).GetProperty("lockScreen").GetString());
+
+        // Windows re-test 2026-11-28 night, defect 1: a kiosk PC that 3 restarts did not bring back to ClubUser
+        await HeartbeatAsync(pc, Beat(true, "kiosk_signin_failed"));
+        Assert.Equal("kiosk_signin_failed", (await DeviceAsync(staff, pc)).GetProperty("lockScreen").GetString());
+        await HeartbeatAsync(pc, Beat(true, "ok"));                                          // ClubUser signed in again
+        Assert.Equal("ok", (await DeviceAsync(staff, pc)).GetProperty("lockScreen").GetString());
     }
 
     [Fact]

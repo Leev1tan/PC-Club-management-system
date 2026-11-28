@@ -41,7 +41,7 @@ function Test-IsAdmin {
 # A lock screen that this run stopped must not stay away: the watchdog task is switched on again and the sessions of the
 # kiosk user are signed out, so the automatic sign-in starts the lock screen (Resume-LockScreens).
 function Stop-Install([string]$Message) {
-    if (Get-Command Resume-LockScreens -ErrorAction SilentlyContinue) { Resume-LockScreens }
+    if (Get-Command Resume-LockScreens -ErrorAction SilentlyContinue) { Resume-LockScreens -OldAgent }
     # The staged files are not needed while the old version was never stopped (later the backup stays for a restore by hand)
     if ($script:workFolder -and $script:workDisposable) { Remove-FolderSafely $script:workFolder (Get-TrustedOwners) | Out-Null }
     Write-Host ""
@@ -690,9 +690,8 @@ function Invoke-SessionLogoff([object[]]$Sessions) {
     }
 }
 
-# True when a lock screen of the kiosk user runs again within the given seconds (its shell starts it after the automatic
-# sign-in). Windows signs ClubUser in only while nobody else uses the screen: when an administrator runs this installer
-# at the screen, ClubUser signs in after that administrator signs out.
+# True when a lock screen of the kiosk user runs again within the given seconds (its shell starts it after an automatic
+# sign-in). Windows 11 does not sign ClubUser in again after a sign-out (Windows re-test 2026-11-28 night, defect 1).
 function Wait-KioskLockScreen([string]$Folder, [string]$KioskUser, [int]$Seconds) {
     $prefix = ($Folder -replace '/', '\').TrimEnd('\') + '\'
     for ($i = 0; $i -lt $Seconds; $i++) {
@@ -719,8 +718,13 @@ function Wait-ServiceRunning([string]$Name, [int]$Seconds) {
 }
 
 # The lock screens that this run stopped come back: the watchdog task is on again, and the sessions of the kiosk user
-# are signed out (the automatic sign-in starts the lock screen). Runs once, at the end or on a failure.
-function Resume-LockScreens {
+# are signed out. Runs once, at the end or on a failure. Windows 11 does not sign ClubUser in again after a sign-out
+# (Windows re-test 2026-11-28 night, defect 1: 0 of 2, the PC stayed at the Windows sign-in screen); Windows signs it in at
+# the start of the PC. The agent of this version restarts a kiosk PC about 2 minutes after the last user signed out
+# (Cms.Client.KioskRestartPolicy). The installer never restarts the PC itself: an administrator may be signed in.
+# -OldAgent: after a failure the old agent may run, and an older agent does not restart the PC.
+# $script:kioskBack: ClubUser signed in again (the final text).
+function Resume-LockScreens([switch]$OldAgent) {
     if ($script:watchTask) {
         $script:watchTask | Enable-ScheduledTask -ErrorAction SilentlyContinue | Out-Null
         $script:watchTask = $null
@@ -729,10 +733,15 @@ function Resume-LockScreens {
         $sessions = $script:stoppedSessions
         $script:stoppedSessions = @()
         Invoke-SessionLogoff $sessions
-        if (-not (Wait-KioskLockScreen $LauncherPath $kioskUserName 45)) {
-            Write-Warning ("$kioskUserName did not sign in again within 45 s. If an administrator uses the screen, " +
-                "$kioskUserName signs in after that person signs out. If the PC shows the Windows sign-in screen, restart the PC: " +
-                "$kioskUserName signs in automatically at the start.")
+        $script:kioskBack = Wait-KioskLockScreen $LauncherPath $kioskUserName 20
+        if ($script:kioskBack) { return }
+        if ($OldAgent) {
+            Write-Warning ("$kioskUserName did not sign in again. Restart the PC: $kioskUserName signs in automatically at the start " +
+                "(an older version of the agent does not restart the PC by itself).")
+        } else {
+            Write-Host ("   $kioskUserName did not sign in again: Windows signs $kioskUserName in only at the start of the PC. The agent " +
+                "restarts this PC about 2 minutes after the last user signs out, then $kioskUserName signs in. If you are signed " +
+                "in at this PC, sign out when you are done.") -ForegroundColor Cyan
         }
     }
 }
@@ -749,7 +758,7 @@ function Restore-OldVersion {
         sc.exe start $serviceName | Out-Null
         if (-not (Wait-ServiceRunning $serviceName 30)) { $restored = $false }
     }
-    Resume-LockScreens
+    Resume-LockScreens -OldAgent
     if ($restored) { Write-Host "   The old version runs again" -ForegroundColor Yellow }
     return $restored
 }
@@ -790,6 +799,7 @@ $script:agentBackupReady = $false
 $script:launcherBackupReady = $false
 $script:watchTask = $null
 $script:stoppedSessions = @()
+$script:kioskBack = $false
 $signedOut = 0
 # Steps 1 and 2 stop before the old version is stopped. They may leave new, empty program folders (made with their
 # permissions) or the stricter permissions of existing ones (Windows re-test 2026-11-27 late, LOW 8: "Nothing was changed").
@@ -991,6 +1001,9 @@ foreach ($path in @($AgentPath, $LauncherPath)) {
 
 # Step 5: The agent service (LocalService), its restart actions, and its start. An existing service with the right
 # account is changed in place (a deleted service can stay "marked for deletion" and block a new one).
+# No restricted privilege list (sc.exe privs) and no service SID type: the service token has all privileges of
+# LocalService, also SeShutdownPrivilege (disabled until the agent enables it). The agent needs it to restart a kiosk PC
+# on which nobody is signed in (Windows re-test 2026-11-28 night, defect 1). A privilege list without it would stop that.
 Write-Host "[5/8] Installing and starting the agent service..." -ForegroundColor Yellow
 $binPath = "`"$exePath`""
 $existing = Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
@@ -1214,8 +1227,11 @@ if ($launcherVersion) {
 } else {
     Write-Host "Lock screen: not installed (no launcher files in the package)" -ForegroundColor Yellow
 }
-if ($signedOut -gt 0) {
-    Write-Host "$kioskUserName was signed out; the automatic sign-in starts the new lock screen." -ForegroundColor Cyan
+if ($signedOut -gt 0 -and $script:kioskBack) {
+    Write-Host "$kioskUserName was signed out and signed in again with the new lock screen." -ForegroundColor Cyan
+} elseif ($signedOut -gt 0) {
+    Write-Host ("$kioskUserName was signed out. The agent restarts this PC about 2 minutes after the last user signs out; then " +
+        "$kioskUserName signs in with the new lock screen.") -ForegroundColor Cyan
 }
 Write-Host "The PC stays locked until a session starts or staff unlock it in the admin UI." -ForegroundColor Cyan
 
@@ -1226,9 +1242,13 @@ if ($KioskMode) {
     Write-Host "  - Shell: Cms.Launcher.exe --watchdog (replaces explorer for ClubUser only; restarts the lock screen)" -ForegroundColor White
     Write-Host "  - Staff unlock: Ctrl+Shift+U + the staff PIN (set it in the admin UI, Settings)" -ForegroundColor White
     Write-Host "  - The lock screen stays locked when the agent stops (fail closed)" -ForegroundColor White
+    Write-Host "  - Windows signs $kioskUser in only at the start of the PC. When nobody is signed in for 2 minutes, the agent" -ForegroundColor White
+    Write-Host "    restarts the PC (a staff Log off: at once; at most 3 restarts in 60 minutes, then agent.log has an ERROR)" -ForegroundColor White
     if ($adminReady) {
         Write-Host "  - Admin access: Ctrl+Alt+Del > Switch user > $adminUser (the lock screen does not start for $adminUser)." -ForegroundColor White
-        Write-Host "    When you are done, sign out of ${adminUser}: $kioskUser signs in again. If the Windows sign-in screen stays, restart the PC." -ForegroundColor White
+        Write-Host "    When you are done, restart the PC (Start > Power > Restart): $kioskUser signs in at the start." -ForegroundColor White
+        Write-Host "    If you only sign out and no session of $kioskUser is left, the agent restarts the PC about 2 minutes later." -ForegroundColor White
+        Write-Host "    While $kioskUser is still signed in (disconnected), the Windows sign-in screen stays: restart the PC there." -ForegroundColor White
     } else {
         Write-Host "  - No $adminUser account: create a local administrator before you need to leave the kiosk" -ForegroundColor Yellow
     }
@@ -1243,7 +1263,9 @@ if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
     Write-Host "Agent connects to: $ServerUrl" -ForegroundColor White
 }
 Write-Host ""
-if ($isUpdate) {
+if ($isUpdate -and $signedOut -gt 0 -and -not $script:kioskBack) {
+    Write-Host "You do not need to restart the PC: the agent restarts it about 2 minutes after the last user signs out." -ForegroundColor Yellow
+} elseif ($isUpdate) {
     Write-Host "No restart is needed for this update." -ForegroundColor Yellow
 } else {
     Write-Host "Restart the PC for all changes to take effect." -ForegroundColor Yellow

@@ -441,6 +441,16 @@ function Stop-KioskSessions([string]$UserName, [string]$Sid, [int]$Seconds, [scr
     }
 }
 
+# Removes kiosk.json of the lock screen: the agent and the lock screen leave kiosk mode.
+function Remove-KioskConfig {
+    foreach ($cfg in @("C:\ClubLauncher\kiosk.json")) {
+        if (Test-Path -LiteralPath $cfg) {
+            Remove-Item -LiteralPath $cfg -Force
+            Write-Host "   Removed $cfg (the agent does not restart this PC for the kiosk sign-in any more)" -ForegroundColor Gray
+        }
+    }
+}
+
 if (-not (Test-IsAdmin)) {
     Write-Error "Please run this script as Administrator."
     exit 1
@@ -542,6 +552,9 @@ Write-Host "   Context menus restored" -ForegroundColor Gray
 
 # Step 4: Remove ClubUser account (optional - prompt first; without a console the account stays)
 Write-Host "[4/5] ClubUser account..." -ForegroundColor Yellow
+# kiosk.json goes before the sign-out of ClubUser (step 5 checks it again): on a kiosk PC on which nobody is signed in, the
+# agent restarts Windows after 2 minutes (Windows re-test 2026-11-28 night, defect 1). Without kiosk.json it does not.
+Remove-KioskConfig
 if ($existingUser) {
     $response = if (Test-InteractiveSession) { Read-Host "   Delete '$kioskUser' account and profile? (y/N)" } else { 'n' }
     if ($response -eq 'y' -or $response -eq 'Y') {
@@ -594,14 +607,8 @@ if ($existingUser) {
 # Step 5: Clean up kiosk config and startup shortcuts
 Write-Host "[5/5] Cleaning up..." -ForegroundColor Yellow
 
-# Remove kiosk.json
-$kioskConfigs = @("C:\ClubLauncher\kiosk.json")
-foreach ($cfg in $kioskConfigs) {
-    if (Test-Path $cfg) {
-        Remove-Item $cfg -Force
-        Write-Host "   Removed $cfg" -ForegroundColor Gray
-    }
-}
+# Remove kiosk.json (step 4 did it already; again in case it came back)
+Remove-KioskConfig
 
 # Remove the scheduled task that starts the watchdog of the lock screen (install-client.ps1 -KioskMode)
 if (Get-ScheduledTask -TaskName 'ClubLauncherWatchdog' -ErrorAction SilentlyContinue) {
