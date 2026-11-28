@@ -451,6 +451,68 @@ function Remove-KioskConfig {
     }
 }
 
+# The SIDs that may own the profile folder of the deleted ClubUser: the ProfileList entries of this folder, and the owner
+# of the folder when no account has that SID any more (a deleted local account). Only administrators can create folders
+# in C:\Users, so such an owner is the deleted account of that profile.
+function Get-DeletedProfileOwners([string]$Path) {
+    $owners = @()
+    $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
+    foreach ($key in @(Get-ChildItem $profileListPath -ErrorAction SilentlyContinue)) {
+        $image = (Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue).ProfileImagePath
+        if ($image -and [string]::Equals([Environment]::ExpandEnvironmentVariables($image).TrimEnd('\'), $Path.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
+            $owners += $key.PSChildName
+        }
+    }
+    try {
+        $owner = (Get-Acl -LiteralPath $Path).GetOwner([Security.Principal.SecurityIdentifier])
+        if ($owner.Value -like 'S-1-5-21-*') {
+            try { $owner.Translate([Security.Principal.NTAccount]) | Out-Null } catch { $owners += $owner.Value }
+        }
+    } catch { }
+    return ,$owners
+}
+
+# Deletes the profile folder of ClubUser (Remove-FolderSafely: every item that can go goes; the items that stay are
+# listed). The ProfileList entry goes only with the folder, so a second run still finds the SID of the deleted account.
+function Remove-KioskProfile([string]$Path, [string[]]$Owners) {
+    if (Test-Path -LiteralPath $Path) {
+        if (-not (Remove-FolderSafely $Path (Get-TrustedOwners $Owners))) {
+            Write-Host "   The profile folder $Path was not removed completely (the items that stay are listed above)." -ForegroundColor Red
+            return
+        }
+    }
+    $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
+    Get-ChildItem $profileListPath | ForEach-Object {
+        $profileImagePath = (Get-ItemProperty $_.PSPath).ProfileImagePath
+        if ($profileImagePath -and [string]::Equals([Environment]::ExpandEnvironmentVariables($profileImagePath).TrimEnd('\'), $Path.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
+            Remove-Item $_.PSPath -Recurse -Force
+        }
+    }
+    Write-Host "   Profile folder $Path removed" -ForegroundColor Gray
+}
+
+# The result of the run and its exit code: 0 only when the account and the profile folder are both gone; else 1, with
+# what stays and what to do (answer y, or restart the PC and run the script again).
+function Write-UninstallResult([bool]$AccountLeft, [bool]$ProfileLeft, [string]$ProfilePath, [string]$UserName, [bool]$KeptOnRequest) {
+    if (-not $AccountLeft -and -not $ProfileLeft) {
+        Write-Host "RESULT: OK - the account '$UserName' and its profile folder are deleted (exit code 0)." -ForegroundColor Green
+        return 0
+    }
+    $left = @()
+    if ($AccountLeft) { $left += "the account '$UserName'" }
+    if ($ProfileLeft) { $left += "the profile folder $ProfilePath" }
+    $verb = if ($left.Count -gt 1) { 'stay' } else { 'stays' }
+    Write-Host "RESULT: kiosk mode is removed, but $($left -join ' and ') $verb (exit code 1)." -ForegroundColor Red
+    if ($KeptOnRequest) {
+        Write-Host ("The answer was not y (a run without a console never deletes the account or its profile). To delete what stays, run " +
+            "this script again in an elevated PowerShell and answer y.") -ForegroundColor Red
+    } else {
+        Write-Host ("Restart the PC (the automatic sign-in is off now, so $UserName does not sign in), then run this script " +
+            "again and answer y.") -ForegroundColor Red
+    }
+    return 1
+}
+
 if (-not (Test-IsAdmin)) {
     Write-Error "Please run this script as Administrator."
     exit 1
@@ -463,6 +525,7 @@ Write-Host ""
 
 $kioskUser = "ClubUser"
 $script:accountNotDeleted = $false
+$script:keptOnRequest = $false
 
 # Step 1: Restore shell to explorer.exe
 Write-Host "[1/5] Restoring shell to explorer.exe..." -ForegroundColor Yellow
@@ -577,28 +640,26 @@ if ($existingUser) {
             $script:accountNotDeleted = $true
         } else {
             Remove-LocalUser -Name $kioskUser -ErrorAction SilentlyContinue
+            Write-Host "   User '$kioskUser' removed" -ForegroundColor Gray
 
             # Remove the profile folder. The player owned it and may have put junctions into it: they are removed as links,
             # their targets stay (Remove-Item -Recurse of Windows PowerShell 5.1 deleted the targets as administrator)
-            if (Test-Path -LiteralPath $profilePath) {
-                if (-not (Remove-FolderSafely $profilePath (Get-TrustedOwners @($sid)))) {
-                    Write-Warning "The profile folder $profilePath was not removed completely; remove the rest by hand"
-                }
-            }
-
-            # Remove profile registry entry
-            $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
-            Get-ChildItem $profileListPath | ForEach-Object {
-                $profileImagePath = (Get-ItemProperty $_.PSPath).ProfileImagePath
-                if ($profileImagePath -like "*$kioskUser*") {
-                    Remove-Item $_.PSPath -Recurse -Force
-                }
-            }
-
-            Write-Host "   User '$kioskUser' removed" -ForegroundColor Gray
+            Remove-KioskProfile $profilePath @($sid)
         }
     } else {
         Write-Host "   User '$kioskUser' kept (you can delete manually later)" -ForegroundColor Gray
+        $script:keptOnRequest = $true
+    }
+} elseif (Test-Path -LiteralPath $profilePath) {
+    # An earlier run deleted the account, but the profile folder stayed (Windows re-test 2026-11-28 night, defect 2): this
+    # run deletes the rest. Its owner is the deleted account: its SID from ProfileList, or an owner SID without an account.
+    Write-Host "   User '$kioskUser' not found (already removed), but its profile folder $profilePath is still there" -ForegroundColor Gray
+    $response = if (Test-InteractiveSession) { Read-Host "   Delete the profile folder $profilePath? (y/N)" } else { 'n' }
+    if ($response -eq 'y' -or $response -eq 'Y') {
+        Remove-KioskProfile $profilePath (Get-DeletedProfileOwners $profilePath)
+    } else {
+        Write-Host "   Profile folder $profilePath kept" -ForegroundColor Gray
+        $script:keptOnRequest = $true
     }
 } else {
     Write-Host "   User '$kioskUser' not found (already removed)" -ForegroundColor Gray
@@ -635,8 +696,8 @@ Write-Host "Task Manager: Enabled" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Restart the PC for all changes to take effect." -ForegroundColor Yellow
 Write-Host ""
-if ($script:accountNotDeleted) {
-    Write-Host "RESULT: the account '$kioskUser' and its profile are NOT deleted (see the error in step 4)." -ForegroundColor Red
-    Write-Host "Restart the PC, then run this script again and answer y." -ForegroundColor Red
-    exit 1
-}
+# The exit code (Windows re-test 2026-11-28 night, defect 3: there was none when the profile stayed), from what is really
+# left on the PC: 0 only when the account and the profile folder of ClubUser are both gone.
+exit (Write-UninstallResult -AccountLeft ([bool](Get-LocalUser -Name $kioskUser -ErrorAction SilentlyContinue)) `
+    -ProfileLeft (Test-Path -LiteralPath $profilePath) -ProfilePath $profilePath -UserName $kioskUser `
+    -KeptOnRequest ($script:keptOnRequest -and -not $script:accountNotDeleted))
