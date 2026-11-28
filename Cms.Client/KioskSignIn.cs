@@ -31,7 +31,10 @@ public enum KioskRestartReason
     NotKiosk,
     /// <summary>The list of the Windows sessions could not be read: no restart.</summary>
     SessionsUnknown,
-    /// <summary>A user is signed in (ClubUser, ClubAdmin or another account; active or disconnected).</summary>
+    /// <summary>
+    /// A user is signed in (ClubUser, ClubAdmin or another account; active or disconnected). Not counted: a disconnected
+    /// ClubUser that is the only user session on a locked PC (KioskRestartPolicy.SomebodySignedIn).
+    /// </summary>
     UserSignedIn,
     /// <summary>No user, but Windows runs less than 5 min: the automatic sign-in after the boot may still come.</summary>
     WindowsStarting,
@@ -54,6 +57,10 @@ public sealed record KioskRestartInput
 {
     /// <summary>kiosk.json next to the lock screen names the kiosk user (KioskAccount.IsKioskInstall).</summary>
     public bool KioskMode { get; init; }
+    /// <summary>The kiosk user of kiosk.json (ClubUser).</summary>
+    public string? KioskUser { get; init; }
+    /// <summary>The lock state of the agent (Cms.Client.AgentLock): false while a player session runs or staff unlocked the PC.</summary>
+    public bool Locked { get; init; } = true;
     /// <summary>All Windows sessions; null when the agent could not read them.</summary>
     public IReadOnlyList<WindowsSession>? Sessions { get; init; }
     /// <summary>The time since the start of Windows (GetTickCount64).</summary>
@@ -75,6 +82,11 @@ public sealed record KioskRestartInput
 /// when no user is signed in for 120 s and Windows runs at least 5 min (a boot before the automatic sign-in never triggers
 /// it), and at once when its own staff "Log off" ended the last session. A signed-in user (active or disconnected) stops
 /// every restart. At most 3 restarts in 60 min: a sign-in that never works must not restart the PC for ever.
+/// One exception (coordinator decision 2026-11-28, "make it work reliably"): a DISCONNECTED session of the kiosk user that
+/// is the only user session, on a LOCKED PC, counts as nobody. That is the Windows sign-in screen after "Switch user >
+/// ClubAdmin" and a sign-out of ClubAdmin, or after a player's "Switch user" on a locked PC: nobody can sign in again as
+/// ClubUser, only a restart helps. While a player session runs (unlocked) it counts as signed in: a restart would end the
+/// paid time, so staff decide (their "Log off" restarts at once).
 /// </summary>
 public static class KioskRestartPolicy
 {
@@ -92,6 +104,20 @@ public static class KioskRestartPolicy
         session.State is not (WindowsSessionState.Listen or WindowsSessionState.Down or WindowsSessionState.Reset) &&
         (session.UserName == null || session.UserName.Trim().Length > 0);
 
+    /// <summary>
+    /// True when somebody counts as signed in: a user session exists, except when the only user sessions are disconnected
+    /// sessions of the kiosk user and the PC is locked. An unknown session list counts as signed in (fail safe).
+    /// </summary>
+    public static bool SomebodySignedIn(IReadOnlyList<WindowsSession>? sessions, string? kioskUser, bool locked)
+    {
+        if (sessions == null) return true;
+        var users = sessions.Where(IsUserSession).ToList();
+        if (users.Count == 0) return false;
+        if (!locked || string.IsNullOrWhiteSpace(kioskUser)) return true;
+        return !users.All(u => u.State == WindowsSessionState.Disconnected &&
+                               string.Equals(u.UserName?.Trim(), kioskUser.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>The restarts of the last 60 min. A time more than 60 min in the future is a clock error and does not count.</summary>
     public static int RecentRestarts(IEnumerable<DateTimeOffset> history, DateTimeOffset now) =>
         history.Count(t => t > now - GuardWindow && t <= now + GuardWindow);
@@ -108,7 +134,7 @@ public static class KioskRestartPolicy
     {
         if (!input.KioskMode) return new(KioskRestartAction.Wait, KioskRestartReason.NotKiosk);
         if (input.Sessions == null) return new(KioskRestartAction.Wait, KioskRestartReason.SessionsUnknown);
-        if (input.Sessions.Any(IsUserSession)) return new(KioskRestartAction.Wait, KioskRestartReason.UserSignedIn);
+        if (SomebodySignedIn(input.Sessions, input.KioskUser, input.Locked)) return new(KioskRestartAction.Wait, KioskRestartReason.UserSignedIn);
 
         var due = input.StaffLogoffPending || (input.Uptime >= MinUptime && input.WithoutSessions >= NoUserLimit);
         if (!due)
@@ -156,10 +182,14 @@ public sealed class KioskSignInWatch
         _logoffEndedSession = false;
     }
 
-    public KioskSignInStep Next(bool kioskMode, IReadOnlyList<WindowsSession>? sessions, TimeSpan uptime,
+    /// <summary>
+    /// One check. locked: the lock state of the agent now; it is read on every check, so a session that starts during the
+    /// count (unlocked) ends the count, and the count starts again when the PC is locked.
+    /// </summary>
+    public KioskSignInStep Next(bool kioskMode, string? kioskUser, bool locked, IReadOnlyList<WindowsSession>? sessions, TimeSpan uptime,
         IReadOnlyList<DateTimeOffset>? restartHistory, DateTimeOffset now)
     {
-        bool? user = sessions == null ? null : sessions.Any(KioskRestartPolicy.IsUserSession);
+        bool? user = sessions == null ? null : KioskRestartPolicy.SomebodySignedIn(sessions, kioskUser, locked);
         // The 120 s need a known "no user" without a break: an unreadable list starts the count again
         if (!kioskMode || user != false) _noUserSince = null;
         else _noUserSince ??= uptime;
@@ -183,6 +213,8 @@ public sealed class KioskSignInWatch
         var decision = KioskRestartPolicy.Decide(new KioskRestartInput
         {
             KioskMode = kioskMode,
+            KioskUser = kioskUser,
+            Locked = locked,
             Sessions = sessions,
             Uptime = uptime,
             WithoutSessions = without,

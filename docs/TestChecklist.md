@@ -739,12 +739,25 @@ the agent log with `Get-Content C:\ProgramData\ClubAgent\logs\agent.log -Tail 30
 3. Sign out of `ClubAdmin` (Start > ClubAdmin > Sign out). Write down the time.
 - [ ] The Windows sign-in screen shows; agent.log "nobody is signed in ... restarts Windows in 120 s"; 120 s later the
       PC restarts; `ClubUser` signs in after the boot.
-4. Switch user > `ClubAdmin` again (`ClubUser` stays disconnected). Sign out of `ClubAdmin`. Wait 3 min.
-- [ ] As designed: the Windows sign-in screen stays and the PC does not restart, because the disconnected `ClubUser`
-      counts as signed in (agent.log "signed in: ClubUser (session 1, Disconnected)"). Write down whether Windows signs
-      `ClubUser` in by itself. Power icon > Restart: `ClubUser` is back.
-5. The documented route: Switch user > `ClubAdmin`, then Start > Power > Restart.
-- [ ] `ClubUser` signs in at the start with the locked screen.
+4. The documented admin route: the PC is locked, no session. Switch user > `ClubAdmin` (`ClubUser` stays
+   disconnected). Sign out of `ClubAdmin`. Write down the time.
+- [ ] The Windows sign-in screen shows. agent.log: "Kiosk PC: only the disconnected session of the kiosk user is left
+      (ClubUser (session 1, Disconnected); Switch user) and the PC is locked ... restarts Windows in 120 s"; 120 s
+      (+-4 s) later "restarting Windows now". `ClubUser` signs in after the boot with the locked screen.
+
+**28.3b A player's "Switch user" (re-test defect 1, coordinator decision of 2026-11-28)**
+1. Start a session for a player on the PC (the PC is unlocked). In the session of `ClubUser` press Ctrl+Alt+Del >
+   Switch user. Wait 5 min.
+- [ ] No restart: the paid time runs. agent.log: "Kiosk PC: signed in: ClubUser (session 1, Disconnected) (the PC is
+      unlocked: a player session may run)". The admin UI shows ⚠️ on the PC (the lock screen does not answer).
+2. End the session in the admin UI (the PC locks). Write down the time.
+- [ ] agent.log: "only the disconnected session of the kiosk user is left ... and the PC is locked ... in 120 s"; 120 s
+      later the PC restarts; `ClubUser` signs in with the locked screen.
+3. The PC is locked, no session. In the session of `ClubUser` press Ctrl+Alt+Del > Switch user. Write down the time.
+- [ ] 120 s later the PC restarts (same log lines as step 2); `ClubUser` signs in with the locked screen.
+4. As step 3, but within 60 s start a session for a player in the admin UI (the PC is unlocked); wait 3 min; then end it.
+- [ ] No restart while the session runs (agent.log "signed in ... the PC is unlocked"); after the end a new 120-s count
+      starts ("only the disconnected session ... in 120 s"), and the restart comes 120 s after the end, not earlier.
 
 **28.4 At most 3 restarts in 60 min (re-test defect 1, guard)**
 1. Break the automatic sign-in for the test. As `ClubAdmin` (elevated): `Disable-ScheduledTask ClubKioskAutoLogon`,

@@ -63,16 +63,20 @@ public static class KioskAccount
     /// True for the kiosk.json of a kiosk install: it names the kiosk user, and "KioskMode" is not false. The agent restarts
     /// only such a PC when nobody is signed in (KioskRestartPolicy). uninstall-kiosk.ps1 deletes kiosk.json.
     /// </summary>
-    public static bool IsKioskInstall(string? json)
+    public static bool IsKioskInstall(string? json) => KioskInstallUser(json) != null;
+
+    /// <summary>The kiosk user of a kiosk install (IsKioskInstall), or null when kiosk.json is not one.</summary>
+    public static string? KioskInstallUser(string? json)
     {
-        if (KioskUser(json) == null) return false;
+        var user = KioskUser(json);
+        if (user == null) return null;
         using var doc = JsonDocument.Parse(json!);
         foreach (var property in doc.RootElement.EnumerateObject())
         {
             if (string.Equals(property.Name, "KioskMode", StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.False)
-                return false;
+                return null;
         }
-        return true;
+        return user;
     }
 
     /// <summary>

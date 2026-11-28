@@ -1246,9 +1246,8 @@ if ($KioskMode) {
     Write-Host "    restarts the PC (a staff Log off: at once; at most 3 restarts in 60 minutes, then agent.log has an ERROR)" -ForegroundColor White
     if ($adminReady) {
         Write-Host "  - Admin access: Ctrl+Alt+Del > Switch user > $adminUser (the lock screen does not start for $adminUser)." -ForegroundColor White
-        Write-Host "    When you are done, restart the PC (Start > Power > Restart): $kioskUser signs in at the start." -ForegroundColor White
-        Write-Host "    If you only sign out and no session of $kioskUser is left, the agent restarts the PC about 2 minutes later." -ForegroundColor White
-        Write-Host "    While $kioskUser is still signed in (disconnected), the Windows sign-in screen stays: restart the PC there." -ForegroundColor White
+        Write-Host "    When you are done, sign out of ${adminUser}: about 2 minutes later the agent restarts the PC and $kioskUser signs in." -ForegroundColor White
+        Write-Host "    (During a running player session the agent does not restart: staff end the session or use Log off.)" -ForegroundColor White
     } else {
         Write-Host "  - No $adminUser account: create a local administrator before you need to leave the kiosk" -ForegroundColor Yellow
     }

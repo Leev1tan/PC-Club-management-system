@@ -256,7 +256,13 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
     sign-in never causes a restart);
   - at once after a staff "Log off", when the session of `ClubUser` has ended;
   - never while a user is signed in: `ClubUser`, `ClubAdmin` or another account, active or disconnected (after
-    "Switch user"); the count of 120 s starts when the last user signs out;
+    "Switch user"). One exception: when the only user session left is a disconnected session of `ClubUser` (after
+    "Switch user > ClubAdmin" and a sign-out of `ClubAdmin`, or a player's "Switch user") and the PC is locked, that
+    counts as nobody: the PC shows the Windows sign-in screen, and nobody can sign in as `ClubUser`. While a player
+    session runs (the PC is unlocked) it counts as signed in: a restart would end the paid time; the PC map shows ⚠️
+    (the lock screen does not answer), and staff decide (end the session, or "Log off": the PC restarts at once).
+    The count of 120 s starts when the last user signs out or when the PC is locked, and starts again when a session
+    starts during the count;
   - at most 3 times in 60 minutes. Then it stops, writes the ERROR "Kiosk sign-in fails" to `agent.log` and the
     Application event log, and the PC map of the admin UI shows ⚠️ 🔑 on the PC. Check the automatic sign-in
     (`AutoAdminLogon`, `DefaultUserName`, the task `ClubKioskAutoLogon`), then restart the PC. The record of the
@@ -288,15 +294,15 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
   1. Press Ctrl+Alt+Del on the PC, select **Switch user**, then sign in as `ClubAdmin`. The session of `ClubUser`
      stays (disconnected), with its lock screen. `ClubAdmin` gets `explorer.exe`, Task Manager and no lock screen.
      While `ClubAdmin` is signed in, the agent never restarts the PC.
-  2. When you are done, restart the PC (Start > Power > Restart). `ClubUser` signs in at the start.
-  3. If you sign out of `ClubAdmin` instead: when no session of `ClubUser` is left (for example after an update or a
-     staff "Log off"), the agent restarts the PC about 2 minutes later. When the disconnected session of `ClubUser`
-     is still there, `ClubUser` counts as signed in and the Windows sign-in screen stays: select the power icon >
-     **Restart**.
+  2. When you are done, sign out of `ClubAdmin` (Start > `ClubAdmin` > Sign out). The PC shows the Windows sign-in
+     screen; about 2 minutes later the agent restarts the PC (the PC is locked and only the disconnected session of
+     `ClubUser` is left), and `ClubUser` signs in at the start with the lock screen.
 
   A player can also select "Switch user" (Ctrl+Alt+Del cannot be blocked). Then the PC shows the Windows sign-in
-  screen and nobody can sign in as `ClubUser` (nobody knows its password): restart the PC, or sign in as `ClubAdmin`
-  and sign out. From another PC, an RMM tool or the guest agent runs as SYSTEM and needs no sign-in.
+  screen and nobody can sign in as `ClubUser` (nobody knows its password). On a locked PC the agent restarts it about
+  2 minutes later. During a running session it does not (the paid time would end): end the session in the admin UI
+  (the PC locks, and the restart follows 2 minutes later), or send "Log off" (the PC restarts at once). From another
+  PC, an RMM tool or the guest agent runs as SYSTEM and needs no sign-in.
   When `ClubAdmin` does not exist, the installer asks for its password in a console. For a run without a console,
   give the password as a SecureString, for example from PowerShell:
 
@@ -376,8 +382,8 @@ on each PC (only administrators can change the folder; the installer keeps the s
 - A staff unlock of a PC without a session unlocks it; after `Restart-Service ClubAgent` the PC is locked again.
 - Kiosk mode: `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword` finds
   no value; ClubUser signs in automatically after a restart; ClubAdmin (Ctrl+Alt+Del > Switch user) gets
-  `explorer.exe` without the lock screen and can open Task Manager; after ClubAdmin restarts the PC, ClubUser signs
-  in automatically again; after a staff "Log off" the PC restarts and ClubUser signs in again.
+  `explorer.exe` without the lock screen and can open Task Manager; about 2 minutes after ClubAdmin signs out the PC
+  restarts and ClubUser signs in automatically again; after a staff "Log off" the PC restarts and ClubUser signs in.
 - Ctrl+Shift+U on a locked PC asks for the staff PIN; the correct PIN unlocks it.
 - Stopping the ClubAgent service (as admin) keeps the PC locked after 15 s; the staff PIN still unlocks it.
 - Unlocking a PC without a session appears in the audit log as `device.unlock_without_session`.

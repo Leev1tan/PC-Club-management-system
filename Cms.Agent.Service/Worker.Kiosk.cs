@@ -107,19 +107,28 @@ public partial class Worker
 
     private static TimeSpan WindowsUptime() => TimeSpan.FromMilliseconds(GetTickCount64());
 
-    /// <summary>kiosk.json next to the lock screen of this install names the kiosk user. An unreadable file: not a kiosk PC (no restart).</summary>
-    private bool IsKioskPc()
+    /// <summary>
+    /// The kiosk user of kiosk.json next to the lock screen of this install, or null when this is not a kiosk PC. An
+    /// unreadable file: not a kiosk PC (no restart).
+    /// </summary>
+    private string? KioskUserOfThisPc()
     {
         try
         {
             var path = KioskAccount.ConfigPathFor(_config["AccountPool:LauncherPath"] ?? DefaultLauncherPath);
-            return File.Exists(path) && KioskAccount.IsKioskInstall(File.ReadAllText(path));
+            return File.Exists(path) ? KioskAccount.KioskInstallUser(File.ReadAllText(path)) : null;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "kiosk.json cannot be read: no kiosk restarts");
-            return false;
+            return null;
         }
+    }
+
+    /// <summary>The lock state of the agent now (AgentLock): false while a player session runs or staff unlocked the PC.</summary>
+    private bool AgentLocked()
+    {
+        lock (_gate) return _lock.Evaluate(DateTimeOffset.UtcNow).Locked;
     }
 
     /// <summary>All Windows sessions, or null when the list cannot be read (then the agent never restarts).</summary>
@@ -178,17 +187,21 @@ public partial class Worker
 
     private void CheckKioskSignIn()
     {
-        var kiosk = IsKioskPc();
+        var kioskUser = KioskUserOfThisPc();
+        var kiosk = kioskUser != null;
         var sessions = kiosk ? ReadWindowsSessions() : null;
-        var noUser = sessions != null && !sessions.Any(KioskRestartPolicy.IsUserSession);
+        // Read on every check: a session that starts during the count (unlocked) ends the count
+        var locked = AgentLocked();
+        var noUser = sessions != null && !KioskRestartPolicy.SomebodySignedIn(sessions, kioskUser, locked);
         var history = kiosk && noUser ? ReadKioskRestarts() : Array.Empty<DateTimeOffset>();
         var uptime = WindowsUptime();
         var now = DateTimeOffset.UtcNow;
         KioskSignInStep step;
-        lock (_kioskGate) step = _kioskWatch.Next(kiosk, sessions, uptime, history, now);
+        lock (_kioskGate) step = _kioskWatch.Next(kiosk, kioskUser, locked, sessions, uptime, history, now);
         _kioskSignInFailed = step.Decision.Action == KioskRestartAction.Blocked;
         if (step.Changed) LogKioskDecision(step, sessions, history, now);
-        if (step.Decision.Action == KioskRestartAction.RestartNow) RestartForKioskSignIn(step.Decision, history ?? Array.Empty<DateTimeOffset>(), uptime, now);
+        if (step.Decision.Action == KioskRestartAction.RestartNow)
+            RestartForKioskSignIn(step.Decision, kioskUser, history ?? Array.Empty<DateTimeOffset>(), uptime, now);
     }
 
     /// <summary>One log line for each change of the decision (the count starts, a user signed in, a restart, the guard).</summary>
@@ -206,7 +219,8 @@ public partial class Worker
                     _kioskSessionError);
                 break;
             case KioskRestartReason.UserSignedIn:
-                _logger.LogInformation("Kiosk PC: signed in: {Users}. The agent does not restart the PC", Users());
+                _logger.LogInformation("Kiosk PC: signed in: {Users} ({Lock}). The agent does not restart the PC", Users(),
+                    AgentLocked() ? "the PC is locked" : "the PC is unlocked: a player session may run");
                 break;
             case KioskRestartReason.WindowsStarting:
                 _logger.LogInformation("Kiosk PC: nobody is signed in yet; Windows started {Minutes:0.0} min ago. If nobody signs in, the agent " +
@@ -214,8 +228,13 @@ public partial class Worker
                     WindowsUptime().TotalMinutes, KioskRestartPolicy.MinUptime.TotalMinutes, KioskRestartPolicy.NoUserLimit.TotalSeconds);
                 break;
             case KioskRestartReason.Counting:
-                _logger.LogInformation("Kiosk PC: nobody is signed in (the Windows sign-in screen). The agent restarts Windows in {Limit} s " +
-                                       "if nobody signs in; then ClubUser signs in automatically", KioskRestartPolicy.NoUserLimit.TotalSeconds);
+                if (sessions != null && sessions.Any(KioskRestartPolicy.IsUserSession))
+                    _logger.LogInformation("Kiosk PC: only the disconnected session of the kiosk user is left ({Users}; Switch user) and the PC " +
+                                           "is locked: the Windows sign-in screen. The agent restarts Windows in {Limit} s if nobody signs in; " +
+                                           "then ClubUser signs in automatically", Users(), KioskRestartPolicy.NoUserLimit.TotalSeconds);
+                else
+                    _logger.LogInformation("Kiosk PC: nobody is signed in (the Windows sign-in screen). The agent restarts Windows in {Limit} s " +
+                                           "if nobody signs in; then ClubUser signs in automatically", KioskRestartPolicy.NoUserLimit.TotalSeconds);
                 break;
             case KioskRestartReason.HistoryUnknown:
                 _logger.LogWarning("Kiosk PC: a restart is due, but the record of the earlier restarts cannot be read: no restart");
@@ -236,11 +255,11 @@ public partial class Worker
     /// Restarts Windows for the sign-in of ClubUser. The restart goes into the record of the guard first: without the record
     /// there is no restart (else a sign-in that never works could restart the PC for ever).
     /// </summary>
-    private void RestartForKioskSignIn(KioskRestartDecision decision, IReadOnlyList<DateTimeOffset> history, TimeSpan uptime, DateTimeOffset now)
+    private void RestartForKioskSignIn(KioskRestartDecision decision, string? kioskUser, IReadOnlyList<DateTimeOffset> history, TimeSpan uptime, DateTimeOffset now)
     {
-        // The last look: somebody may have signed in during this check
+        // The last look: somebody may have signed in, or a session may have started (unlocked), during this check
         var sessions = ReadWindowsSessions();
-        if (sessions == null || sessions.Any(KioskRestartPolicy.IsUserSession)) return;
+        if (KioskRestartPolicy.SomebodySignedIn(sessions, kioskUser, AgentLocked())) return;
 
         lock (_kioskGate) _kioskWatch.RestartRequested(uptime);
         try
@@ -303,7 +322,7 @@ public partial class Worker
     /// <summary>The staff "Log off" on a kiosk PC: after the session is gone the agent restarts at once (KioskSignInWatch).</summary>
     private bool NoteKioskStaffLogoff()
     {
-        if (!IsKioskPc()) return false;
+        if (KioskUserOfThisPc() == null) return false;
         lock (_kioskGate) _kioskWatch.StaffLogoff(WindowsUptime());
         return true;
     }

@@ -24,14 +24,15 @@ installer. Nobody sees it: the installer never prints it and never writes it to 
 it for the automatic sign-in as an LSA secret, not in the registry. To reset it, run Install.cmd again
 with the same options.
 
-Admin access on a kiosk PC: Ctrl+Alt+Del > Switch user > ClubAdmin. When you are done, restart the PC
-(Start > Power > Restart): ClubUser signs in at the start.
+Admin access on a kiosk PC: Ctrl+Alt+Del > Switch user > ClubAdmin. When you are done, sign out of
+ClubAdmin: about 2 minutes later the agent restarts the PC, and ClubUser signs in.
 
 Sign-in of ClubUser: Windows signs ClubUser in only at the start of the PC, not after a sign-out. When
 nobody is signed in on a kiosk PC for 2 minutes (after a staff Log off: at once), the agent restarts the
-PC, and ClubUser signs in. It never restarts while a user is signed in (also a disconnected ClubUser
-after Switch user: then restart the PC yourself), and at most 3 times in 60 minutes; then agent.log has
-the ERROR "Kiosk sign-in fails" and the admin UI shows a warning on the PC.
+PC, and ClubUser signs in. A disconnected ClubUser (after Switch user) alone on a locked PC counts as
+nobody. It never restarts while another user is signed in or while a player session runs (staff end the
+session or use Log off), and at most 3 times in 60 minutes; then agent.log has the ERROR "Kiosk sign-in
+fails" and the admin UI shows a warning on the PC.
 
 Recovery account ClubAdmin: when it does not exist, the installer asks for its password. A run without
 a console (as SYSTEM: RMM tools, Intune) asks nothing and creates no ClubAdmin; give the password from
@@ -52,10 +53,11 @@ Remove the kiosk shell: uninstall-kiosk.ps1 (exit code 0 only when ClubUser and 
 both gone; exit code 1 says what stays). Guide: docs/ClubDeployment.md in the source repository.
 
 Доступ адміністратора на ПК у режимі кіоску: Ctrl+Alt+Del > Змінити користувача > ClubAdmin. Коли
-закінчите, перезапустіть ПК (Пуск > Живлення > Перезапустити): ClubUser увійде під час запуску.
+закінчите, вийдіть із ClubAdmin: приблизно через 2 хвилини агент перезапустить ПК, і ClubUser увійде.
 Windows входить як ClubUser лише під час запуску ПК, не після виходу. Якщо на ПК у режимі кіоску ніхто
 не ввійшов 2 хвилини (після команди персоналу «Вийти» - одразу), агент перезапускає ПК, і ClubUser
-входить. Агент не перезапускає ПК, поки хтось увійшов, і не частіше 3 разів за 60 хвилин.
+входить. Відключений сеанс ClubUser (після «Змінити користувача») на заблокованому ПК не рахується. Агент
+не перезапускає ПК, поки ввійшов інший користувач або йде сесія гравця, і не частіше 3 разів за 60 хвилин.
 Українською: розпакуйте цей архів і архів launcher в одну папку та запустіть від імені адміністратора
 Install.cmd -ServerUrl "http://<сервер>:5081" -EnrollmentToken "<токен>" -KioskMode.
 Пароль облікового запису ClubUser випадковий і новий після кожного запуску інсталятора; щоб скинути

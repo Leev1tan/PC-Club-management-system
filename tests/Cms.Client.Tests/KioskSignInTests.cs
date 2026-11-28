@@ -27,6 +27,7 @@ public sealed class KioskRestartPolicyTests
     private static KioskRestartInput NoUser(TimeSpan uptime, TimeSpan withoutSessions, IReadOnlyList<DateTimeOffset>? history = null) => new()
     {
         KioskMode = true,
+        KioskUser = "ClubUser",
         Sessions = new[] { Services, SignInScreen, RdpListener },
         Uptime = uptime,
         WithoutSessions = withoutSessions,
@@ -72,14 +73,62 @@ public sealed class KioskRestartPolicyTests
     public static IEnumerable<object[]> SignedIn() => new[]
     {
         new object[] { new[] { Services, ClubUser } },                                        // the normal kiosk
-        new object[] { new[] { Services, ClubUserDisconnected, SignInScreen } },              // Switch user: ClubUser stays
         new object[] { new[] { Services, ClubUserDisconnected, ClubAdmin } },                 // the admin route
+        new object[] { new[] { Services, ClubUserDisconnected, new WindowsSession(3, "ClubAdmin", State.Disconnected), SignInScreen } },
         new object[] { new[] { Services, ClubAdmin } },                                       // only ClubAdmin
         new object[] { new[] { Services, new WindowsSession(3, "ClubAdmin", State.Disconnected), SignInScreen } },
         new object[] { new[] { Services, new WindowsSession(4, "tech", State.Active) } },     // an RDP user
         new object[] { new[] { Services, new WindowsSession(2, null, State.Connected) } },    // user not readable: fail safe
         new object[] { new[] { Services, new WindowsSession(2, "ClubUser", State.Connected) } } // a sign-in in progress
     };
+
+    // Coordinator decision 2026-11-28: the admin route (Switch user > ClubAdmin, sign out) and a player's Switch user on a
+    // locked PC leave only the disconnected session of ClubUser. On a locked PC that counts as nobody signed in.
+    [Fact]
+    public void A_disconnected_ClubUser_alone_on_a_locked_PC_counts_as_nobody()
+    {
+        var switchUser = new[] { Services, ClubUserDisconnected, SignInScreen };
+        var input = NoUser(TimeSpan.FromMinutes(30), TimeSpan.FromSeconds(119)) with { Sessions = switchUser, Locked = true };
+        Assert.False(KioskRestartPolicy.SomebodySignedIn(switchUser, "ClubUser", locked: true));
+        Assert.Equal(new KioskRestartDecision(Wait, Counting), Decide(input));
+        Assert.Equal(new KioskRestartDecision(RestartNow, NoUserSignedIn), Decide(input with { WithoutSessions = TimeSpan.FromSeconds(120) }));
+        Assert.Equal(new KioskRestartDecision(Wait, WindowsStarting), Decide(input with { Uptime = TimeSpan.FromMinutes(2) }));
+    }
+
+    [Fact]
+    public void A_disconnected_ClubUser_during_a_running_session_is_signed_in()
+    {
+        // The player's paid time runs (the agent unlocked the PC): a restart would end it; staff decide (Log off)
+        var switchUser = new[] { Services, ClubUserDisconnected, SignInScreen };
+        var input = NoUser(TimeSpan.FromHours(2), TimeSpan.FromHours(1)) with { Sessions = switchUser, Locked = false };
+        Assert.True(KioskRestartPolicy.SomebodySignedIn(switchUser, "ClubUser", locked: false));
+        Assert.Equal(new KioskRestartDecision(Wait, UserSignedIn), Decide(input));
+    }
+
+    [Fact]
+    public void A_disconnected_ClubUser_next_to_another_user_is_signed_in()
+    {
+        var withAdmin = new[] { Services, ClubUserDisconnected, ClubAdmin };
+        var withAdminDisconnected = new[] { Services, ClubUserDisconnected, new WindowsSession(3, "ClubAdmin", State.Disconnected), SignInScreen };
+        var twoClubUsers = new[] { Services, ClubUserDisconnected, new WindowsSession(4, "ClubUser", State.Active) };
+        foreach (var sessions in new[] { withAdmin, withAdminDisconnected, twoClubUsers })
+            Assert.Equal(new KioskRestartDecision(Wait, UserSignedIn),
+                Decide(NoUser(TimeSpan.FromHours(2), TimeSpan.FromHours(1)) with { Sessions = sessions, Locked = true }));
+    }
+
+    [Fact]
+    public void Only_the_kiosk_user_of_kiosk_json_counts_as_nobody_when_disconnected()
+    {
+        var other = new[] { Services, new WindowsSession(1, "ClubAdmin", State.Disconnected), SignInScreen };
+        var unreadable = new[] { Services, new WindowsSession(1, null, State.Disconnected), SignInScreen };
+        var lowerCase = new[] { Services, new WindowsSession(1, "clubuser", State.Disconnected), SignInScreen };
+        Assert.True(KioskRestartPolicy.SomebodySignedIn(other, "ClubUser", locked: true));
+        Assert.True(KioskRestartPolicy.SomebodySignedIn(unreadable, "ClubUser", locked: true));
+        Assert.False(KioskRestartPolicy.SomebodySignedIn(lowerCase, "ClubUser", locked: true));   // Windows names: no case
+        Assert.True(KioskRestartPolicy.SomebodySignedIn(lowerCase, null, locked: true));
+        Assert.True(KioskRestartPolicy.SomebodySignedIn(null, "ClubUser", locked: true));          // unknown list: fail safe
+        Assert.False(KioskRestartPolicy.SomebodySignedIn(new[] { Services, SignInScreen }, "ClubUser", locked: false));
+    }
 
     [Fact]
     public void Session_0_listeners_ended_sessions_and_the_sign_in_screen_are_no_user()
@@ -164,6 +213,7 @@ public sealed class KioskSignInWatchTests
     private static readonly WindowsSession[] ClubUser = { Services, new(1, "ClubUser", State.Active) };
     private static readonly WindowsSession[] ClubAdminOnly = { Services, new(3, "ClubAdmin", State.Active) };
     private static readonly WindowsSession[] ClubAdminAndClubUser = { Services, new(1, "ClubUser", State.Disconnected), new(3, "ClubAdmin", State.Active) };
+    private static readonly WindowsSession[] ClubUserDisconnectedOnly = { Services, new(1, "ClubUser", State.Disconnected), SignInScreen };
     private static readonly DateTimeOffset[] NoRestarts = Array.Empty<DateTimeOffset>();
 
     private sealed class Pc
@@ -171,6 +221,7 @@ public sealed class KioskSignInWatchTests
         public readonly KioskSignInWatch Watch = new();
         public TimeSpan Uptime = TimeSpan.FromMinutes(30);
         public bool Kiosk = true;
+        public bool Locked = true;
         public IReadOnlyList<DateTimeOffset>? History = NoRestarts;
         public DateTimeOffset BootUtc = Start;
         public DateTimeOffset Now => BootUtc + Uptime;
@@ -178,7 +229,7 @@ public sealed class KioskSignInWatchTests
         public KioskSignInStep Tick(IReadOnlyList<WindowsSession>? sessions, double seconds = 2)
         {
             Uptime += TimeSpan.FromSeconds(seconds);
-            return Watch.Next(Kiosk, sessions, Uptime, History, Now);
+            return Watch.Next(Kiosk, Kiosk ? "ClubUser" : null, Locked, sessions, Uptime, History, Now);
         }
 
         /// <summary>Ticks every 2 s for the given seconds; the last step.</summary>
@@ -226,6 +277,55 @@ public sealed class KioskSignInWatchTests
         Assert.Equal(UserSignedIn, pc.For(600, ClubAdminAndClubUser).Decision.Reason);
         Assert.Equal(Counting, pc.For(120, NoUser).Decision.Reason);   // 118 s without a user
         Assert.Equal(new KioskRestartDecision(RestartNow, NoUserSignedIn), pc.Tick(NoUser).Decision);
+    }
+
+    [Fact]
+    public void The_admin_route_comes_back_120_s_after_ClubAdmin_signs_out()
+    {
+        var pc = new Pc();
+        pc.Tick(ClubUser);
+        Assert.Equal(UserSignedIn, pc.For(600, ClubAdminAndClubUser).Decision.Reason);     // Switch user > ClubAdmin
+        var signOut = pc.Tick(ClubUserDisconnectedOnly);                                     // ClubAdmin signs out
+        Assert.Equal(new KioskRestartDecision(Wait, Counting), signOut.Decision);
+        Assert.True(signOut.Changed);
+        Assert.Equal(Counting, pc.For(116, ClubUserDisconnectedOnly).Decision.Reason);
+        Assert.Equal(new KioskRestartDecision(RestartNow, NoUserSignedIn), pc.For(4, ClubUserDisconnectedOnly).Decision);
+    }
+
+    [Fact]
+    public void A_player_Switch_user_on_a_locked_PC_restarts_after_120_s()
+    {
+        var pc = new Pc();
+        pc.Tick(ClubUser);
+        Assert.Equal(Counting, pc.For(120, ClubUserDisconnectedOnly).Decision.Reason);       // 118 s without a user
+        Assert.Equal(new KioskRestartDecision(RestartNow, NoUserSignedIn), pc.Tick(ClubUserDisconnectedOnly).Decision);
+    }
+
+    [Fact]
+    public void A_player_Switch_user_during_a_running_session_never_restarts_until_the_PC_locks()
+    {
+        var pc = new Pc { Locked = false };
+        pc.Tick(ClubUser);
+        Assert.Equal(new KioskRestartDecision(Wait, UserSignedIn), pc.For(3600, ClubUserDisconnectedOnly).Decision);
+        pc.Locked = true;                                                                    // the session ends: locked
+        var locked = pc.Tick(ClubUserDisconnectedOnly);
+        Assert.Equal(new KioskRestartDecision(Wait, Counting), locked.Decision);
+        Assert.True(locked.Changed);
+        Assert.Equal(Counting, pc.For(116, ClubUserDisconnectedOnly).Decision.Reason);
+        Assert.Equal(RestartNow, pc.For(4, ClubUserDisconnectedOnly).Decision.Action);
+    }
+
+    [Fact]
+    public void A_session_that_starts_during_the_count_resets_it()
+    {
+        var pc = new Pc();
+        Assert.Equal(Counting, pc.For(100, ClubUserDisconnectedOnly).Decision.Reason);
+        pc.Locked = false;                                                                   // staff start a session
+        Assert.Equal(UserSignedIn, pc.Tick(ClubUserDisconnectedOnly).Decision.Reason);
+        pc.Locked = true;
+        Assert.Equal(Counting, pc.For(100, ClubUserDisconnectedOnly).Decision.Reason);       // 100 s, not 200 s
+        Assert.Equal(Counting, pc.For(18, ClubUserDisconnectedOnly).Decision.Reason);
+        Assert.Equal(RestartNow, pc.For(4, ClubUserDisconnectedOnly).Decision.Action);
     }
 
     [Fact]
