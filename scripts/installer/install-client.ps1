@@ -455,37 +455,65 @@ function Get-FolderAdvice([string]$Path, [string]$Problem) {
 
 # The attributes that a delete needs, or $null when nothing must change. Windows refuses to delete a read-only file or a
 # read-only folder ("Access to the path ... is denied"), and every user profile has read-only folders (Desktop, Documents,
-# Downloads, AppData\Local\Microsoft\Windows\WinX\Group1 ...): ReadOnly and System are removed. A reparse point is never
-# changed: the change could apply to the target of the link.
+# Downloads, AppData\Local\Microsoft\Windows\WinX\Group1 ...): only ReadOnly is removed. Hidden and System do not block a
+# delete, and Windows refuses to change the attributes of some files of a profile: SFAP\cache0.bin (Hidden, System) of
+# AppData\Local\Microsoft\Windows may be deleted by Administrators, not changed (Windows re-test 2026-11-28 night,
+# defect 2). A reparse point is never changed: the change could apply to the target of the link.
 function Get-DeletableAttributes([IO.FileAttributes]$Attributes) {
     if (($Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $null }
-    $blocking = [int]([IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::System)
-    if (([int]$Attributes -band $blocking) -eq 0) { return $null }
-    $rest = [int]$Attributes -band (-bnot $blocking)
+    $readOnly = [int][IO.FileAttributes]::ReadOnly
+    if (([int]$Attributes -band $readOnly) -eq 0) { return $null }
+    $rest = [int]$Attributes -band (-bnot $readOnly)
     if ($rest -eq 0) { return [IO.FileAttributes]::Normal }
     return [IO.FileAttributes]$rest
 }
 
+# Changes the attributes of one folder or file (one call, so that the installer self-check can model a refusal).
+function Set-ItemAttributes([string]$Path, [IO.FileAttributes]$Attributes) {
+    [IO.File]::SetAttributes($Path, $Attributes)
+}
+
+# The short reason of a failed .NET call ("Access to the path ... is denied."), without "Exception calling ...".
+function Get-ErrorReason($ErrorRecord) {
+    $e = $ErrorRecord.Exception
+    while ($e.InnerException) { $e = $e.InnerException }
+    return $e.Message
+}
+
 # Deletes a folder and its content without entering a reparse point: a junction or a link inside is removed as a link.
-# The ReadOnly and System attributes of the folders and files are removed first (Get-DeletableAttributes), never those
-# of a link.
-function Remove-TreeNoFollow([string]$Path) {
-    $own = Get-DeletableAttributes ([IO.File]::GetAttributes($Path))
-    if ($null -ne $own) { [IO.File]::SetAttributes($Path, $own) }
-    foreach ($entry in [IO.Directory]::GetFileSystemEntries($Path)) {
-        $attributes = [IO.File]::GetAttributes($entry)
-        $isFolder = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
-        if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            if ($isFolder) { [IO.Directory]::Delete($entry, $false) } else { [IO.File]::Delete($entry) }
-        } elseif ($isFolder) {
-            Remove-TreeNoFollow $entry
-        } else {
-            $deletable = Get-DeletableAttributes $attributes
-            if ($null -ne $deletable) { [IO.File]::SetAttributes($entry, $deletable) }
-            [IO.File]::Delete($entry)
+# The ReadOnly attribute of the folders and files is removed first (Get-DeletableAttributes), never that of a link. When
+# Windows refuses that change, the delete is tried anyway. An item that cannot be deleted does not stop the walk: it is
+# added to $Failed ("<path>: <reason>"), and only the folders that contain it stay. Without $Failed the function throws at
+# the end when an item stays.
+function Remove-TreeNoFollow([string]$Path, $Failed = $null) {
+    $throwAtEnd = $null -eq $Failed
+    if ($throwAtEnd) { $Failed = New-Object 'System.Collections.Generic.List[string]' }
+    $before = $Failed.Count
+    try {
+        $own = Get-DeletableAttributes ([IO.File]::GetAttributes($Path))
+        if ($null -ne $own) { try { Set-ItemAttributes $Path $own } catch { } }
+        foreach ($entry in [IO.Directory]::GetFileSystemEntries($Path)) {
+            try {
+                $attributes = [IO.File]::GetAttributes($entry)
+                $isFolder = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+                if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    if ($isFolder) { [IO.Directory]::Delete($entry, $false) } else { [IO.File]::Delete($entry) }
+                } elseif ($isFolder) {
+                    Remove-TreeNoFollow $entry $Failed
+                } else {
+                    $deletable = Get-DeletableAttributes $attributes
+                    if ($null -ne $deletable) { try { Set-ItemAttributes $entry $deletable } catch { } }
+                    [IO.File]::Delete($entry)
+                }
+            } catch {
+                $Failed.Add("${entry}: $(Get-ErrorReason $_)")
+            }
         }
+        if ($Failed.Count -eq $before) { [IO.Directory]::Delete($Path, $false) }
+    } catch {
+        $Failed.Add("${Path}: $(Get-ErrorReason $_)")
     }
-    [IO.Directory]::Delete($Path, $false)
+    if ($throwAtEnd -and $Failed.Count -gt 0) { throw "$($Failed.Count) item(s) could not be deleted, the first: $($Failed[0])" }
 }
 
 # The first account that may change the content of a folder (write, add, delete, change the permissions or the owner)
@@ -523,13 +551,18 @@ function Remove-FolderSafely([string]$Path, [string[]]$TrustedOwners) {
         Write-Warning "Not removed: $Path (the account $writer may change it). Check it and remove it by hand."
         return $false
     }
+    # Every item that can be deleted is deleted; the items that stay are listed once at the end
+    $failed = New-Object 'System.Collections.Generic.List[string]'
     try {
-        Remove-TreeNoFollow $Path
-        return $true
+        Remove-TreeNoFollow $Path $failed
     } catch {
-        Write-Warning "Could not remove ${Path}: $($_.Exception.Message)"
-        return $false
+        $failed.Add("${Path}: $(Get-ErrorReason $_)")
     }
+    if ($failed.Count -eq 0) { return $true }
+    Write-Warning "Could not remove ${Path}: $($failed.Count) item(s) stay:"
+    foreach ($item in @($failed | Select-Object -First 10)) { Write-Warning "  $item" }
+    if ($failed.Count -gt 10) { Write-Warning "  ... and $($failed.Count - 10) more" }
+    return $false
 }
 
 # A protected DACL (no inherited entries) from icacls-style grants "*<SID>:(OI)(CI)F", "M" or "RX".
