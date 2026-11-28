@@ -222,7 +222,7 @@ The server also sends `lock` when a PC registers with the enrollment token or st
 | `unlock` | Unlock the PC. No payload: for a session (its end time applies). `{"reason":"staff"}`: staff unlock of a PC without a session (set by the server) |
 | `restart` | Reboot in 5 seconds (`shutdown /r /t 5`; Owner, Manager, Tech) |
 | `shutdown` | Shut down in 5 seconds (`shutdown /s /t 5`; Owner, Manager, Tech; only through `/power`) |
-| `logoff` | Log off the player's Windows session. The agent is a service in session 0 (LocalService) and cannot do it; it puts a request into `state.json` for one minute, and the lock screen (in the player's session) logs the session off once (`ExitWindowsEx`, forced; `Cms.Client.LogoffTrigger`: only a fresh request made after this lock screen started) |
+| `logoff` | Log off the player's Windows session. The agent is a service in session 0 (LocalService) and cannot do it; it puts a request into `state.json` for one minute, and the lock screen (in the player's session) logs the session off once (`ExitWindowsEx`, forced; `Cms.Client.LogoffTrigger`: only a fresh request made after this lock screen started). On a kiosk PC the agent then restarts Windows when the session has ended: Windows 11 signs ClubUser in only at the start (`Cms.Client.KioskRestartPolicy`; the agent also restarts a kiosk PC after 120 s without a signed-in user, at most 3 times in 60 min) |
 | `message` | Log message (UI popup planned) |
 | `session_set` | Set the session end time; `{"endUtc": null}` = no end (open-ended or paused session). It does not unlock |
 
@@ -240,7 +240,8 @@ The server also sends `lock` when a PC registers with the enrollment token or st
 │   └── event-*.json     # note of an emergency PIN unlock (launcher); the agent sends it, then deletes it
 └── private\             # SYSTEM, Administrators, agent only
     ├── device.json            # device id + key
-    └── enrollment-token.txt   # from the installer; deleted after the first registration
+    ├── enrollment-token.txt   # from the installer; deleted after the first registration
+    └── kiosk-restarts.json    # kiosk PC: the times of the agent's sign-in restarts (at most 3 in 60 min)
 ```
 
 ---

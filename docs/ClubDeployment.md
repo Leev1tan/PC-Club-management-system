@@ -77,9 +77,10 @@ self-contained (no .NET needed on the PCs) and not code-signed.
    SYSTEM and Administrators can open), then stops the agent and the lock screen (also its watchdog), copies
    and starts the agent. The installers never use, change or delete a folder that is a junction or a symbolic
    link or that a player owns; then they stop with a message and change nothing. If the copy or the start fails, it
-   restores the old version, starts it again and ends with exit code 1. On success it signs out ClubUser,
-   and the automatic sign-in starts the new lock screen. The last line says `RESULT: OK` or
-   `RESULT: FAILED`. The installer keeps the `Teardown` and `AccountPool` settings of
+   restores the old version, starts it again and ends with exit code 1. On success it signs out ClubUser.
+   Windows 11 does not sign ClubUser in again after a sign-out: on a kiosk PC the agent restarts the PC about
+   2 minutes after the last user signs out, and ClubUser signs in with the new lock screen (see Kiosk mode). The
+   installer never restarts the PC itself. The last line says `RESULT: OK` or `RESULT: FAILED`. The installer keeps the `Teardown` and `AccountPool` settings of
    `C:\ClubAgent\appsettings.json`, and on a registered PC it does not store the enrollment token.
 
 Option B (Docker) does not use these files; CI publishes the images to `ghcr.io` for the same tags.
@@ -247,9 +248,26 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
 ### Kiosk mode (`-KioskMode`)
 
 - The players use the Windows account `ClubUser`. It signs in automatically, and the lock screen is its shell.
-- The automatic sign-in (`AutoAdminLogon`) works at the start of the PC and after a sign-out of `ClubUser` (the
-  staff "Log off", an update). The installer does not set `ForceAutoLogon` and removes it when an older version set
-  it: that value also signed `ClubUser` in again on "Switch user", so `ClubAdmin` could never sign in at the screen.
+- Windows signs `ClubUser` in automatically (`AutoAdminLogon`) only at the start of the PC, about 1 minute after the
+  boot. After a sign-out (the staff "Log off", an update, a sign-out of `ClubAdmin`) Windows 11 shows the Windows
+  sign-in screen and does not sign `ClubUser` in again (measured on Windows 11, Windows re-test of 2026-11-28). So the
+  agent restarts a kiosk PC (`kiosk.json` names `ClubUser`) on which nobody is signed in:
+  - when nobody is signed in for 120 s and Windows runs 5 minutes or more (a start of the PC before the automatic
+    sign-in never causes a restart);
+  - at once after a staff "Log off", when the session of `ClubUser` has ended;
+  - never while a user is signed in: `ClubUser`, `ClubAdmin` or another account, active or disconnected (after
+    "Switch user"); the count of 120 s starts when the last user signs out;
+  - at most 3 times in 60 minutes. Then it stops, writes the ERROR "Kiosk sign-in fails" to `agent.log` and the
+    Application event log, and the PC map of the admin UI shows ⚠️ 🔑 on the PC. Check the automatic sign-in
+    (`AutoAdminLogon`, `DefaultUserName`, the task `ClubKioskAutoLogon`), then restart the PC. The record of the
+    restarts is `C:\ProgramData\ClubAgent\private\kiosk-restarts.json` (SYSTEM, Administrators and the agent only);
+    delete it to allow restarts again before the hour is over.
+
+  `agent.log` has one line for each change: "nobody is signed in ... restarts Windows in 120 s", "signed in: ...",
+  "restarting Windows now ...". A PC without kiosk mode is never restarted. The agent (LocalService) enables its
+  `SeShutdownPrivilege` for the restart; the installer gives the service no restricted privilege list.
+- The installer does not set `ForceAutoLogon` and removes it when an older version set it: that value also signed
+  `ClubUser` in again on "Switch user", so `ClubAdmin` could never sign in at the screen.
   Windows writes the last user of the screen into `DefaultUserName`. The scheduled task `ClubKioskAutoLogon`
   (SYSTEM: at the start, at every sign-in and every 5 minutes; only `reg.exe` with fixed values) writes the values of
   `ClubUser` again, so `ClubUser` signs in at the next start also after `ClubAdmin` was there.
@@ -269,9 +287,12 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
 - `ClubAdmin` is the recovery account of the staff (Administrators). To work on a kiosk PC:
   1. Press Ctrl+Alt+Del on the PC, select **Switch user**, then sign in as `ClubAdmin`. The session of `ClubUser`
      stays (disconnected), with its lock screen. `ClubAdmin` gets `explorer.exe`, Task Manager and no lock screen.
-  2. When you are done, sign out of `ClubAdmin` (Start > `ClubAdmin` > Sign out). Windows signs `ClubUser` in
-     again and its session comes back.
-  3. If the Windows sign-in screen stays, select the power icon > **Restart**: `ClubUser` signs in at the start.
+     While `ClubAdmin` is signed in, the agent never restarts the PC.
+  2. When you are done, restart the PC (Start > Power > Restart). `ClubUser` signs in at the start.
+  3. If you sign out of `ClubAdmin` instead: when no session of `ClubUser` is left (for example after an update or a
+     staff "Log off"), the agent restarts the PC about 2 minutes later. When the disconnected session of `ClubUser`
+     is still there, `ClubUser` counts as signed in and the Windows sign-in screen stays: select the power icon >
+     **Restart**.
 
   A player can also select "Switch user" (Ctrl+Alt+Del cannot be blocked). Then the PC shows the Windows sign-in
   screen and nobody can sign in as `ClubUser` (nobody knows its password): restart the PC, or sign in as `ClubAdmin`
@@ -299,8 +320,13 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
   and the task `ClubKioskAutoLogon`, and the scheduled task `ClubLauncherWatchdog`. When you answer `y`, it signs
   `ClubUser` out of every session (also a disconnected one after "Switch user") and waits up to 60 s until Windows
   has released the profile; then it deletes the account and `C:\Users\ClubUser` (also the read-only folders of the
-  profile; a junction inside is removed as a link, its target stays). If `ClubUser` does not go, the account and
-  the profile stay, and the script ends with exit code 1: restart the PC and run it again.
+  profile and the Windows files whose attributes an administrator may not change, for example
+  `AppData\Local\Microsoft\Windows\SFAP\cache0.bin`; a junction inside is removed as a link, its target stays). An
+  item that cannot be deleted does not stop the delete: the script lists the items that stay. It removes
+  `kiosk.json` before it signs `ClubUser` out, so the agent does not restart the PC during the uninstall.
+  Exit code 0 only when the account and the profile folder are both gone. Otherwise exit code 1, and the last lines
+  say what stays and what to do: restart the PC and run the script again (a second run also deletes a profile
+  folder that an earlier run left), or, when the answer was not `y`, run it again and answer `y`.
 
 ## Session teardown
 
@@ -350,8 +376,8 @@ on each PC (only administrators can change the folder; the installer keeps the s
 - A staff unlock of a PC without a session unlocks it; after `Restart-Service ClubAgent` the PC is locked again.
 - Kiosk mode: `reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword` finds
   no value; ClubUser signs in automatically after a restart; ClubAdmin (Ctrl+Alt+Del > Switch user) gets
-  `explorer.exe` without the lock screen and can open Task Manager; after ClubAdmin signs out and the PC restarts,
-  ClubUser signs in automatically again.
+  `explorer.exe` without the lock screen and can open Task Manager; after ClubAdmin restarts the PC, ClubUser signs
+  in automatically again; after a staff "Log off" the PC restarts and ClubUser signs in again.
 - Ctrl+Shift+U on a locked PC asks for the staff PIN; the correct PIN unlocks it.
 - Stopping the ClubAgent service (as admin) keeps the PC locked after 15 s; the staff PIN still unlocks it.
 - Unlocking a PC without a session appears in the audit log as `device.unlock_without_session`.

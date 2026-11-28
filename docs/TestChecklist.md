@@ -696,6 +696,104 @@ club PC first (25.4 with `-KioskMode`): the update ends with "RESULT: OK" and sh
 - [ ] agent.log has "Reported the teardown at the end of a staff unlock without a session at ... (N program(s)
       closed)" for the first lock and "Reported the teardown of the ended session at ..." for the session.
 
+### Test 28: Fixes of the Windows Re-test of 2026-11-28 Night (v0.9.2)
+Bench as in Test 27 (kiosk mode, the agent as LocalService, `ClubAdmin` exists). Version: the release of the tag `v0.9.2`
+shows `0.9.2.0`; a dry-run build shows `0.0.0.0`. Update the server first (25.4). The client update is step 28.1. Read
+the agent log with `Get-Content C:\ProgramData\ClubAgent\logs\agent.log -Tail 30` (UTC times) and the sessions with
+`query user`. The agent checks the sessions every 2 s.
+
+**28.1 An update without the sign-in of ClubUser: restart about 2 min later (re-test defect 1, repro B)**
+1. The PC is locked, `ClubUser` is signed in, nobody else is signed in, Windows runs 5 min or more. Run the client
+   update as SYSTEM (25.4 with `-KioskMode`). Write down the time of the end.
+- [ ] Exit code 0 and "RESULT: OK". No "WARNING: ClubUser did not sign in again within 45 s". The text says
+      "ClubUser did not sign in again: Windows signs ClubUser in only at the start of the PC. The agent restarts this
+      PC about 2 minutes after the last user signs out", and the end says "You do not need to restart the PC".
+- [ ] agent.log: "Kiosk PC: nobody is signed in (the Windows sign-in screen). The agent restarts Windows in 120 s";
+      120 s (+-4 s) later "Kiosk PC: restarting Windows now: nobody was signed in for 120 s ... (restart 1 of at most
+      3 in 60 min)". The PC restarts. Event Viewer > System, event 1074: `Cms.Agent.Service.exe`, restart, reason
+      "Application: Maintenance (Planned)".
+- [ ] About 1 min after the boot `ClubUser` signs in and the locked screen is back; the admin UI shows the PC online
+      and locked, without a warning sign.
+- [ ] `Get-Content C:\ProgramData\ClubAgent\private\kiosk-restarts.json` has 1 time; `icacls
+      C:\ProgramData\ClubAgent\private` lists only SYSTEM, Administrators and LOCAL SERVICE.
+- [ ] `sc.exe qprivs ClubAgent` lists no privileges (no restricted list: the service has all privileges of
+      LocalService).
+
+**28.2 Staff "Log off": restart at once, ClubUser back (re-test defect 1, repro A)**
+1. The PC is locked, `ClubUser` is signed in, nobody else. Admin UI > PC map > the PC > 🚪 Log off. Write down the
+   time.
+- [ ] Within 10 s the session of `ClubUser` ends and the PC restarts. agent.log: "Log off: handed to the lock screen
+      of the player's session; this kiosk PC restarts when the session has ended", then "Kiosk PC: restarting Windows
+      now: the staff Log off ended the session ... (restart N of at most 3 in 60 min)".
+- [ ] The command result in the admin UI ends with "then the kiosk PC restarts and ClubUser signs in".
+- [ ] About 1 min after the boot `ClubUser` signs in with the locked screen.
+2. Regression: on a PC without kiosk mode (if the bench has one) the staff Log off signs the player out and the PC does
+   not restart (agent.log has no line "Kiosk PC").
+
+**28.3 ClubAdmin signed in: no restart; ClubAdmin signs out: restart after 120 s (re-test defect 1, repro C)**
+1. On the locked PC press Ctrl+Alt+Del > Switch user, sign in as `ClubAdmin`. Wait 5 min.
+- [ ] No restart. agent.log: "Kiosk PC: signed in: ClubUser (session 1, Disconnected), ClubAdmin (session N,
+      Active). The agent does not restart the PC".
+2. In an elevated PowerShell of `ClubAdmin`: `logoff <session id of ClubUser>` (from `query user`). Wait 3 min.
+- [ ] No restart. `query user` lists only `ClubAdmin`.
+3. Sign out of `ClubAdmin` (Start > ClubAdmin > Sign out). Write down the time.
+- [ ] The Windows sign-in screen shows; agent.log "nobody is signed in ... restarts Windows in 120 s"; 120 s later the
+      PC restarts; `ClubUser` signs in after the boot.
+4. Switch user > `ClubAdmin` again (`ClubUser` stays disconnected). Sign out of `ClubAdmin`. Wait 3 min.
+- [ ] As designed: the Windows sign-in screen stays and the PC does not restart, because the disconnected `ClubUser`
+      counts as signed in (agent.log "signed in: ClubUser (session 1, Disconnected)"). Write down whether Windows signs
+      `ClubUser` in by itself. Power icon > Restart: `ClubUser` is back.
+5. The documented route: Switch user > `ClubAdmin`, then Start > Power > Restart.
+- [ ] `ClubUser` signs in at the start with the locked screen.
+
+**28.4 At most 3 restarts in 60 min (re-test defect 1, guard)**
+1. Break the automatic sign-in for the test. As `ClubAdmin` (elevated): `Disable-ScheduledTask ClubKioskAutoLogon`,
+   `reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 0 /f`, and
+   `Remove-Item C:\ProgramData\ClubAgent\private\kiosk-restarts.json`. Then restart the PC.
+- [ ] Nobody signs in. Each boot: agent.log "nobody is signed in yet; Windows started 0.x min ago", then at 5 min of
+      Windows "restarting Windows now: nobody was signed in for 120 s (restart 1 of at most 3 in 60 min)", and the
+      same with "restart 2" and "restart 3" (each about 5 min after its boot).
+- [ ] After the 3rd restart, at 5 min of Windows: the ERROR "Kiosk sign-in fails: nobody is signed in on this kiosk
+      PC, and the agent restarted Windows 3 times in 60 min already. It does not restart Windows again before <time>";
+      the Application event log has the same error (source `Cms.Agent.Service`). No 4th restart in the next 10 min.
+- [ ] The admin UI PC map shows ⚠️ 🔑 on the PC; its hint says "ClubUser does not sign in to Windows: 3 restarts in an
+      hour did not help".
+2. Repair: sign in as `ClubAdmin` on the sign-in screen (agent.log "signed in: ClubAdmin ..."; the warning is gone),
+   then `Enable-ScheduledTask ClubKioskAutoLogon`, `Start-ScheduledTask ClubKioskAutoLogon`, and restart the PC.
+- [ ] `ClubUser` signs in at the start; no warning sign on the PC map.
+
+**28.5 Uninstall with SFAP\cache0.bin: the profile is gone, exit code 0 (re-test defects 2 and 3)**
+1. As 27.2 step 1 (Switch user > `ClubAdmin`, `ClubUser` disconnected, the junction to `C:\Users\Public\victim`). Check
+   the file: `(Get-Item -Force C:\Users\ClubUser\AppData\Local\Microsoft\Windows\SFAP\cache0.bin).Attributes` shows
+   Hidden, System.
+2. Run `uninstall-kiosk.ps1` in an elevated PowerShell of `ClubAdmin` and answer `y`.
+- [ ] Step 4 shows "Removed C:\ClubLauncher\kiosk.json (the agent does not restart this PC ...)" before "Signed out the
+      session <id> of ClubUser", then "User 'ClubUser' removed" and "Profile folder C:\Users\ClubUser removed". No
+      "Could not remove". The last line is "RESULT: OK - the account 'ClubUser' and its profile folder are deleted
+      (exit code 0)"; `$LASTEXITCODE` is 0.
+- [ ] `Test-Path C:\Users\ClubUser` is False; `C:\Users\Public\victim\keep.txt` is still there. The PC does not restart
+      during and after the uninstall (agent.log: no "restarting Windows").
+3. A profile that stays (exit code 1). Install the kiosk again (25.4 with `-KioskMode`), restart, Switch user >
+   `ClubAdmin`. In a second elevated PowerShell hold a file of the profile open:
+   `$h = [IO.File]::Open('C:\Users\ClubUser\hold.txt', 'OpenOrCreate', 'ReadWrite', 'None')`. Run `uninstall-kiosk.ps1`
+   in the first one and answer `y`.
+- [ ] "Could not remove C:\Users\ClubUser: 1 item(s) stay:" lists `C:\Users\ClubUser\hold.txt`; every other item is
+      gone. The end says "RESULT: kiosk mode is removed, but the profile folder C:\Users\ClubUser stays (exit code 1)"
+      and "Restart the PC ..., then run this script again and answer y"; `$LASTEXITCODE` is 1.
+4. `$h.Close()`, then run `uninstall-kiosk.ps1` again and answer `y`.
+- [ ] "User 'ClubUser' not found (already removed), but its profile folder C:\Users\ClubUser is still there"; after `y`:
+      "Profile folder C:\Users\ClubUser removed", exit code 0.
+5. Install the kiosk again, then run `uninstall-kiosk.ps1` and answer `n`.
+- [ ] The end says "... the account 'ClubUser' and the profile folder C:\Users\ClubUser stay (exit code 1)" and "run
+      this script again in an elevated PowerShell and answer y"; `$LASTEXITCODE` is 1.
+6. Install the kiosk again for the next tests.
+
+**28.6 Regression**
+1. Restart the PC by hand.
+- [ ] `ClubUser` signs in within about 1 min; agent.log "nobody is signed in yet; Windows started ..." then "signed
+      in: ClubUser (session 1, Active)"; no restart by the agent.
+2. Test 18 (staff Restart and Shutdown, Wake-on-LAN), 27.4 (staff lock and unlock), a player session (start, end).
+
 ## Known Issues / Debug
 - If device doesn't appear: check `C:\ProgramData\ClubAgent\agent_heartbeat.txt` timestamp updates and
   `C:\ProgramData\ClubAgent\logs\agent.log`

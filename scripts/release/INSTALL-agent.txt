@@ -24,8 +24,14 @@ installer. Nobody sees it: the installer never prints it and never writes it to 
 it for the automatic sign-in as an LSA secret, not in the registry. To reset it, run Install.cmd again
 with the same options.
 
-Admin access on a kiosk PC: Ctrl+Alt+Del > Switch user > ClubAdmin. When you are done, sign out of
-ClubAdmin: ClubUser signs in again. If the Windows sign-in screen stays, restart the PC.
+Admin access on a kiosk PC: Ctrl+Alt+Del > Switch user > ClubAdmin. When you are done, restart the PC
+(Start > Power > Restart): ClubUser signs in at the start.
+
+Sign-in of ClubUser: Windows signs ClubUser in only at the start of the PC, not after a sign-out. When
+nobody is signed in on a kiosk PC for 2 minutes (after a staff Log off: at once), the agent restarts the
+PC, and ClubUser signs in. It never restarts while a user is signed in (also a disconnected ClubUser
+after Switch user: then restart the PC yourself), and at most 3 times in 60 minutes; then agent.log has
+the ERROR "Kiosk sign-in fails" and the admin UI shows a warning on the PC.
 
 Recovery account ClubAdmin: when it does not exist, the installer asks for its password. A run without
 a console (as SYSTEM: RMM tools, Intune) asks nothing and creates no ClubAdmin; give the password from
@@ -38,19 +44,24 @@ a new private folder (ccms-update-<random> in the temp folder; only SYSTEM and A
 it); a failure there changes nothing. A program or data folder that is a junction, a symbolic link or a
 folder of a player stops the install ("cannot be used"): check it and remove it by hand. Then it stops the agent and the lock screen, copies the files and starts the agent.
 If the copy or the start fails, it restores the old version, starts it again and ends with exit code 1
-("UPDATE FAILED ... The old version is restored and runs again"). On success it signs out ClubUser; the
-automatic sign-in starts the new lock screen ("RESULT: OK"). No restart of the PC is needed.
+("UPDATE FAILED ... The old version is restored and runs again"). On success it signs out ClubUser
+("RESULT: OK"). On a kiosk PC the agent then restarts the PC about 2 minutes after the last user signs
+out, and ClubUser signs in with the new lock screen. You do not need to restart the PC yourself.
 The agent log is C:\ProgramData\ClubAgent\logs\agent.log (Administrators only).
-Remove the kiosk shell: uninstall-kiosk.ps1. Guide: docs/ClubDeployment.md in the source repository.
+Remove the kiosk shell: uninstall-kiosk.ps1 (exit code 0 only when ClubUser and its profile folder are
+both gone; exit code 1 says what stays). Guide: docs/ClubDeployment.md in the source repository.
 
 Доступ адміністратора на ПК у режимі кіоску: Ctrl+Alt+Del > Змінити користувача > ClubAdmin. Коли
-закінчите, вийдіть із ClubAdmin: ClubUser увійде знову. Якщо залишився екран входу Windows,
-перезапустіть ПК.
+закінчите, перезапустіть ПК (Пуск > Живлення > Перезапустити): ClubUser увійде під час запуску.
+Windows входить як ClubUser лише під час запуску ПК, не після виходу. Якщо на ПК у режимі кіоску ніхто
+не ввійшов 2 хвилини (після команди персоналу «Вийти» - одразу), агент перезапускає ПК, і ClubUser
+входить. Агент не перезапускає ПК, поки хтось увійшов, і не частіше 3 разів за 60 хвилин.
 Українською: розпакуйте цей архів і архів launcher в одну папку та запустіть від імені адміністратора
 Install.cmd -ServerUrl "http://<сервер>:5081" -EnrollmentToken "<токен>" -KioskMode.
 Пароль облікового запису ClubUser випадковий і новий після кожного запуску інсталятора; щоб скинути
 його, запустіть Install.cmd ще раз з тими самими параметрами.
 Оновлення: запустіть Install.cmd нової версії з тими самими параметрами, коли на ПК немає сесії. Якщо
-копіювання або запуск не вдалися, інсталятор повертає стару версію і завершується з кодом 1.
+копіювання або запуск не вдалися, інсталятор повертає стару версію і завершується з кодом 1. Після
+оновлення агент перезапускає ПК приблизно через 2 хвилини після виходу останнього користувача.
 
 License: AGPL-3.0-or-later (LICENSE). Author and contact: NOTICE.md.
