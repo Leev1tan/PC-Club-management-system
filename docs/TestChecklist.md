@@ -748,8 +748,9 @@ the agent log with `Get-Content C:\ProgramData\ClubAgent\logs\agent.log -Tail 30
 **28.3b A player's "Switch user" (re-test defect 1, coordinator decision of 2026-11-28)**
 1. Start a session for a player on the PC (the PC is unlocked). In the session of `ClubUser` press Ctrl+Alt+Del >
    Switch user. Wait 5 min.
-- [ ] No restart: the paid time runs. agent.log: "Kiosk PC: signed in: ClubUser (session 1, Disconnected) (the PC is
-      unlocked: a player session may run)". The admin UI shows ⚠️ on the PC (the lock screen does not answer).
+- [ ] No restart: the paid time runs. agent.log has no new kiosk line: the decision ("signed in") does not change, and
+      the agent logs only a change (Windows re-test 2026-11-28 morning). The admin UI shows ⚠️ on the PC (the lock
+      screen does not answer).
 2. End the session in the admin UI (the PC locks). Write down the time.
 - [ ] agent.log: "only the disconnected session of the kiosk user is left ... and the PC is locked ... in 120 s"; 120 s
       later the PC restarts; `ClubUser` signs in with the locked screen.

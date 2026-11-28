@@ -272,6 +272,9 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
   `agent.log` has one line for each change: "nobody is signed in ... restarts Windows in 120 s", "signed in: ...",
   "restarting Windows now ...". A PC without kiosk mode is never restarted. The agent (LocalService) enables its
   `SeShutdownPrivilege` for the restart; the installer gives the service no restricted privilege list.
+  Known (Windows re-test 2026-11-28 morning, 1 of 2 runs): after a staff "Log off" about 1.5 minutes after a start of
+  the PC, the agent asked for the restart at once, but Windows went down only 4 minutes later. No event shows why. The
+  other run went down in 11 s. If a PC stays at the sign-in screen longer than 5 minutes, restart it.
 - The installer does not set `ForceAutoLogon` and removes it when an older version set it: that value also signed
   `ClubUser` in again on "Switch user", so `ClubAdmin` could never sign in at the screen.
   Windows writes the last user of the screen into `DefaultUserName`. The scheduled task `ClubKioskAutoLogon`
@@ -294,6 +297,9 @@ SYSTEM, Administrators and LOCAL SERVICE; `Get-Content C:\ProgramData\ClubAgent\
   1. Press Ctrl+Alt+Del on the PC, select **Switch user**, then sign in as `ClubAdmin`. The session of `ClubUser`
      stays (disconnected), with its lock screen. `ClubAdmin` gets `explorer.exe`, Task Manager and no lock screen.
      While `ClubAdmin` is signed in, the agent never restarts the PC.
+     WARNING: Sign in within 120 s after "Switch user". On a locked PC that runs 5 minutes or more, the 120-s count
+     starts at the sign-in screen (only the disconnected `ClubUser` is left). If the PC restarts, wait until
+     `ClubUser` is back and do step 1 again.
   2. When you are done, sign out of `ClubAdmin` (Start > `ClubAdmin` > Sign out). The PC shows the Windows sign-in
      screen; about 2 minutes later the agent restarts the PC (the PC is locked and only the disconnected session of
      `ClubUser` is left), and `ClubUser` signs in at the start with the lock screen.
